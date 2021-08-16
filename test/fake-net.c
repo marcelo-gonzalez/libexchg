@@ -144,10 +144,10 @@ void exchg_test_add_events(struct exchg_net_context *ctx,
 	}
 }
 
-void exchg_test_add_book_events(struct exchg_net_context *ctx,
-				int n, struct fake_book_update_str *msgs) {
+void exchg_test_add_l2_events(struct exchg_net_context *ctx,
+			      int n, struct exchg_test_str_l2_updates *msgs) {
 	for (int i = 0; i < n; i++) {
-		struct fake_book_update_str *o = &msgs[i];
+		struct exchg_test_str_l2_updates *o = &msgs[i];
 		struct test_event *event = xzalloc(sizeof(*event));
 		struct exchg_test_event *e = &event->event;
 
@@ -157,7 +157,7 @@ void exchg_test_add_book_events(struct exchg_net_context *ctx,
 		e->data.book.pair = o->pair;
 
 		for (int j = 0; j < FAKE_BOOK_UPDATE_SIZE; j++) {
-			struct fake_book_update_str_single *s = &o->bids[j];
+			struct exchg_test_str_l2_update *s = &o->bids[j];
 			if (!s->price)
 				break;
 			e->data.book.num_bids++;
@@ -165,7 +165,7 @@ void exchg_test_add_book_events(struct exchg_net_context *ctx,
 			decimal_from_str(&e->data.book.bids[j].size, s->size);
 		}
 		for (int j = 0; j < FAKE_BOOK_UPDATE_SIZE; j++) {
-			struct fake_book_update_str_single *s = &o->asks[j];
+			struct exchg_test_str_l2_update *s = &o->asks[j];
 			if (!s->price)
 				break;
 			e->data.book.num_asks++;

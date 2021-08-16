@@ -127,7 +127,7 @@ static size_t ws_read(struct websocket *ws, char **dst,
 		return 0;
 
 	struct coinbase_websocket *cb = ws->priv;
-	struct fake_book_update *b = &msg->data.book;
+	struct exchg_test_l2_updates *b = &msg->data.book;
 	if (b->num_bids < 1 && b->num_asks < 1)
 		return 0;
 	const char *id = coinbase_exchg_pair_to_str(b->pair);

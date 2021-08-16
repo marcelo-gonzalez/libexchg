@@ -31,10 +31,10 @@ struct private_ws {
 };
 
 static size_t kraken_write_orders(char *buf, struct kraken_websocket *k,
-				  struct fake_book_update *up, enum exchg_side side) {
+				  struct exchg_test_l2_updates *up, enum exchg_side side) {
 	struct kraken_channel *chan = &k->channels[up->pair];
 	char *c = buf;
-	struct fake_book_update_single *orders;
+	struct exchg_test_l2_update *orders;
 	const char *key;
 	int n;
 
@@ -192,7 +192,7 @@ static size_t proto_read(char *buf, struct kraken_proto *p) {
 
 static size_t kraken_ws_read(struct websocket *ws, char **dst,
 			     struct exchg_test_event *msg) {
-	struct fake_book_update *up = &msg->data.book;
+	struct exchg_test_l2_updates *up = &msg->data.book;
 	struct kraken_websocket *k = ws->priv;
 	char *buf = xzalloc(1<<10);
 

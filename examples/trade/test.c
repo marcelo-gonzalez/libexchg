@@ -11,7 +11,7 @@
 
 #include "trader.h"
 
-static struct fake_book_update_str events[] = {
+static struct exchg_test_str_l2_updates events[] = {
 	{.pair = EXCHG_PAIR_BTCUSD,
 	 .bids = {{"30000", "1"}, {"29500", ".1"}, {"29400", ".2"}, {"29100", "2"}},
 	 .asks = {{"31000", "3.3"}}},
@@ -91,7 +91,7 @@ int main(void) {
 				return 1;
 			}
 
-			exchg_test_add_book_events(net_ctx, 3, events);
+			exchg_test_add_l2_events(net_ctx, 3, events);
 
 			decimal_t *balances = exchg_test_balances(net_ctx, cl->id);
 			decimal_from_str(&balances[EXCHG_CCY_USD], "40000");

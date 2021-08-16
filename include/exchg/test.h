@@ -37,7 +37,7 @@ enum exchg_test_event_type {
 
 #define FAKE_BOOK_UPDATE_SIZE 100
 
-struct fake_book_update_single {
+struct exchg_test_l2_update {
 	decimal_t price;
 	decimal_t size;
 };
@@ -46,10 +46,10 @@ struct exchg_test_event {
 	enum exchg_id id;
 	enum exchg_test_event_type type;
 	union {
-		struct fake_book_update {
+		struct exchg_test_l2_updates {
 			enum exchg_pair pair;
-			struct fake_book_update_single bids[FAKE_BOOK_UPDATE_SIZE];
-			struct fake_book_update_single asks[FAKE_BOOK_UPDATE_SIZE];
+			struct exchg_test_l2_update bids[FAKE_BOOK_UPDATE_SIZE];
+			struct exchg_test_l2_update asks[FAKE_BOOK_UPDATE_SIZE];
 			int num_bids;
 			int num_asks;
 		} book;
@@ -85,21 +85,21 @@ void exchg_test_set_callback(struct exchg_net_context *ctx,
 			     exchg_test_callback_t cb,
 			     void *private);
 
-struct fake_book_update_str_single {
+struct exchg_test_str_l2_update {
 	const char *price;
 	const char *size;
 };
 
-struct fake_book_update_str {
+struct exchg_test_str_l2_updates {
 	enum exchg_id id;
 	enum exchg_pair pair;
 	// both null terminated
-	struct fake_book_update_str_single bids[10];
-	struct fake_book_update_str_single asks[10];
+	struct exchg_test_str_l2_update bids[10];
+	struct exchg_test_str_l2_update asks[10];
 };
 
-void exchg_test_add_book_events(struct exchg_net_context *ctx,
-				int n, struct fake_book_update_str *msgs);
+void exchg_test_add_l2_events(struct exchg_net_context *ctx,
+			      int n, struct exchg_test_str_l2_updates *msgs);
 
 // returns a modifiable array of length EXCHG_NUM_CCYS
 decimal_t *exchg_test_balances(struct exchg_net_context *ctx, enum exchg_id id);

@@ -22,9 +22,9 @@ struct gemini_websocket {
 };
 
 static size_t gemini_write_orders(char *buf, struct gemini_websocket *g,
-				  struct fake_book_update *up, enum exchg_side side) {
+				  struct exchg_test_l2_updates *up, enum exchg_side side) {
 	char *c = buf;
-	struct fake_book_update_single *orders;
+	struct exchg_test_l2_update *orders;
 	int n;
 
 	if (side == EXCHG_SIDE_BUY) {

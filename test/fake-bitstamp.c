@@ -21,10 +21,10 @@ struct bitstamp_websocket {
 	} channels[EXCHG_NUM_PAIRS];
 };
 
-static size_t write_orders_side(char *buf, struct fake_book_update *update,
+static size_t write_orders_side(char *buf, struct exchg_test_l2_updates *update,
 				bool is_bids) {
 	char *c = buf;
-	struct fake_book_update_single *orders;
+	struct exchg_test_l2_update *orders;
 	int n;
 
 	if (is_bids) {
@@ -50,7 +50,7 @@ static size_t write_orders_side(char *buf, struct fake_book_update *update,
 	return c-buf;
 }
 
-static size_t write_orders(char *buf, struct fake_book_update *update,
+static size_t write_orders(char *buf, struct exchg_test_l2_updates *update,
 			   bool is_diff) {
 	char *c = buf;
 	c += sprintf(c, "{ \"data\": {\"timestamp\": \"123\", "
@@ -77,7 +77,7 @@ static size_t proto_read(char *buf, struct bitstamp_proto *bp) {
 	size_t ret = 0;
 
 	if (bp->type == NONSENSE_DIFF) {
-		struct fake_book_update u = {
+		struct exchg_test_l2_updates u = {
 			.pair = bp->pair,
 			.num_bids = 1,
 			.bids = {{
@@ -111,7 +111,7 @@ static size_t bitstamp_ws_read(struct websocket *ws, char **dst, struct exchg_te
 		return proto_read(buf, (struct bitstamp_proto *)
 				  msg->data.protocol_private);
 
-	struct fake_book_update *u = &msg->data.book;
+	struct exchg_test_l2_updates *u = &msg->data.book;
 	struct bitstamp_channel *c = &b->channels[u->pair];
 	return write_orders(buf, u, c->diff_subbed &&
 			    (!c->full_subbed || c->full_unsubbed));
