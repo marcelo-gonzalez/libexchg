@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (C) 2021 Marcelo Diop-Gonzalez
+
 #ifndef EXCHG_DECIMAL_H
 #define EXCHG_DECIMAL_H
 

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (C) 2021 Marcelo Diop-Gonzalez
+
 #ifndef EXCHG_EXCHG_CCY_H
 #define EXCHG_EXCHG_CCY_H
 

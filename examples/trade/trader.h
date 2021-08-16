@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (C) 2021 Marcelo Diop-Gonzalez
+
 #ifndef EXAMPLES_TRADER_H
 #define EXAMPLES_TRADER_H
 

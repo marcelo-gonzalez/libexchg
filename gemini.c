@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (C) 2021 Marcelo Diop-Gonzalez
+
 #define _GNU_SOURCE
 
 #include <ctype.h>

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (C) 2021 Marcelo Diop-Gonzalez
+
 #ifndef BITSTAMP_H
 #define BITSTAMP_H
 

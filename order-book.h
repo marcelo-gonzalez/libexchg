@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (C) 2021 Marcelo Diop-Gonzalez
+
 #ifndef ORDER_BOOK_H
 #define ORDER_BOOK_H
 

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (C) 2021 Marcelo Diop-Gonzalez
+
 #include <glib.h>
 #include <glib/gi18n.h>
 #include <openssl/evp.h>

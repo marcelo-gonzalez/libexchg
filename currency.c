@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (C) 2021 Marcelo Diop-Gonzalez
+
 #include <ctype.h>
 #include <errno.h>
 #include <stdarg.h>

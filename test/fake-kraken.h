@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (C) 2021 Marcelo Diop-Gonzalez
+
 #ifndef KRAKEN_TEST_H
 #define KRAKEN_TEST_H
 

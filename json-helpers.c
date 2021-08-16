@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (C) 2021 Marcelo Diop-Gonzalez
+
 #include <jsmn/jsmn.h>
 
 int json_skip(int num_tokens, jsmntok_t *tokens, int idx) {
