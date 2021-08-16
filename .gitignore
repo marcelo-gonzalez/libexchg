@@ -1,0 +1,11 @@
+*.o
+libexchg.a
+libexchg-test.a
+libexchg.so
+libexchg-test.so
+examples/print-book/print-book
+examples/trade/trade
+examples/trade/test
+decimal-test
+ob-test
+json-test
