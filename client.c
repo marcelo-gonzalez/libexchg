@@ -858,7 +858,8 @@ struct exchg_context *exchg_new(struct exchg_callbacks *callbacks,
 	memset(ctx, 0, sizeof(*ctx));
 	if (callbacks)
 		memcpy(&ctx->callbacks, callbacks, sizeof(ctx->callbacks));
-	memcpy(&ctx->opts, opts, sizeof(*opts));
+	if (opts)
+		memcpy(&ctx->opts, opts, sizeof(*opts));
 	ctx->user = user;
 	ctx->net_context = net_new(&net_callbacks);
 	if (!ctx->net_context) {

@@ -16,7 +16,7 @@
 // NOTE!! the json_get* type functions call strtol,strtoll,etc on a
 // presumably non null-terminated string. So this is only safe if the
 // input has already been parsed AND the result is not a single JSON
-// primitive token (i.e. the whole input string is just "123"), since
+// primitive token (e.g. the whole input string is just "123"), since
 // in that case should be impossible for strtol not to terminate by
 // the end of the token
 
