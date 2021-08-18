@@ -386,10 +386,12 @@ static int level2_sub(struct exchg_client *cl) {
 		return 0;
 	// Coinbase doesn't like the last comma
 	*(c-2) = 0;
-	return conn_printf(cb->ws, "{ \"type\": \"subscribe\", "
-			   "\"product_ids\": [%s], "
-			   "\"channels\": [\"level2\"] }",
-			   product_ids);
+	if (conn_printf(cb->ws, "{ \"type\": \"subscribe\", "
+			"\"product_ids\": [%s], "
+			"\"channels\": [\"level2\"] }",
+			product_ids) < 0)
+		return -1;
+	return 0;
 }
 
 static bool level2_sub_work(struct exchg_client *cl, void *p) {

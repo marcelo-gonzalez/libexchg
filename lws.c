@@ -69,7 +69,7 @@ int ws_vprintf(struct websocket *ws, const char *fmt, va_list ap) {
 		fprintf(stderr, "lws_write error\n");
 		return -1;
 	}
-	return 0;
+	return len;
 }
 
 void ws_close(struct websocket *ws) {

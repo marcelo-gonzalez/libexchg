@@ -35,11 +35,13 @@ static int kraken_subscribe(struct kraken_client *kkn, enum exchg_pair pair) {
 	struct kraken_pair_info *pi = &kkn->pair_info[pair];
 
 	pi->subbed = true;
-	return conn_printf(kkn->conn, "{ \"event\": \"subscribe\", "
-			   "\"pair\": [\"%s\"], "
-			   "\"subscription\": {\"name\": \"book\", "
-			   "\"depth\": 1000}}",
-			   pi->wsname);
+	if (conn_printf(kkn->conn, "{ \"event\": \"subscribe\", "
+			"\"pair\": [\"%s\"], "
+			"\"subscription\": {\"name\": \"book\", "
+			"\"depth\": 1000}}",
+			pi->wsname) < 0)
+		return -1;
+	return 0;
 }
 
 static bool wsname_match(const char *json, jsmntok_t *tok, const char *str) {
@@ -1205,10 +1207,12 @@ bad:
 }
 
 static int priv_sub(struct kraken_client *kkn) {
-	return conn_printf(kkn->private_ws, "{ \"event\": "
-			   "\"subscribe\", \"subscription\":"
-			   " {\"name\": \"openOrders\", "
-			   "\"token\": \"%s\"}}", kkn->ws_token);
+	if (conn_printf(kkn->private_ws, "{ \"event\": "
+			"\"subscribe\", \"subscription\":"
+			" {\"name\": \"openOrders\", "
+			"\"token\": \"%s\"}}", kkn->ws_token) < 0)
+		return -1;
+	return 0;
 }
 
 static bool priv_sub_work(struct exchg_client *cl, void *p) {
@@ -1313,18 +1317,20 @@ static int private_ws_add_order(struct exchg_client *cl,
 		     pi->price_decimals);
 	decimal_to_str(px, &info->order.price);
 
-	return conn_printf(kkn->private_ws, "{\"event\": \"addOrder\", "
-			   "\"token\": \"%s\", \"reqid\": %"PRId64", "
-			   "\"userref\": \"%"PRId64"\", "
-			   "\"ordertype\": \"limit\", "
-			   "\"type\": \"%s\", "
-			   "\"pair\": \"%s\", "
-			   "\"price\": \"%s\", "
-			   "\"volume\": \"%s\"%s}",
-			   kkn->ws_token, info->id, info->id,
-			   info->order.side == EXCHG_SIDE_BUY ?
-			   "buy" : "sell", kpi->wsname, px, sz,
-			   timeinforce);
+	if (conn_printf(kkn->private_ws, "{\"event\": \"addOrder\", "
+			"\"token\": \"%s\", \"reqid\": %"PRId64", "
+			"\"userref\": \"%"PRId64"\", "
+			"\"ordertype\": \"limit\", "
+			"\"type\": \"%s\", "
+			"\"pair\": \"%s\", "
+			"\"price\": \"%s\", "
+			"\"volume\": \"%s\"%s}",
+			kkn->ws_token, info->id, info->id,
+			info->order.side == EXCHG_SIDE_BUY ?
+			"buy" : "sell", kpi->wsname, px, sz,
+			timeinforce) < 0)
+		return -1;
+	return 0;
 }
 
 static bool place_order_work(struct exchg_client *cl, void *p) {

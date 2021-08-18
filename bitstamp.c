@@ -36,17 +36,21 @@ struct bitstamp_client {
 static int bitstamp_subscribe_event(struct conn *conn,
 				    enum exchg_pair pair,
 				    const char *event) {
-	return conn_printf(conn, "{ \"event\": \"bts:subscribe\","
-			   "\"data\": { \"channel\": \"%s_%s\"} }",
-			   event, exchg_pair_to_str(pair));
+	if (conn_printf(conn, "{ \"event\": \"bts:subscribe\","
+			"\"data\": { \"channel\": \"%s_%s\"} }",
+			event, exchg_pair_to_str(pair)) < 0)
+		return -1;
+	return 0;
 }
 
 static int bitstamp_unsubscribe_event(struct conn *conn,
 				      enum exchg_pair pair,
 				      const char *event) {
-	return conn_printf(conn, "{ \"event\": \"bts:unsubscribe\","
-			   "\"data\": { \"channel\": \"%s_%s\"} }",
-			   event, exchg_pair_to_str(pair));
+	if (conn_printf(conn, "{ \"event\": \"bts:unsubscribe\","
+			"\"data\": { \"channel\": \"%s_%s\"} }",
+			event, exchg_pair_to_str(pair)) < 0)
+		return -1;
+	return 0;
 }
 
 enum event_type {

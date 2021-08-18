@@ -448,7 +448,7 @@ int ws_vprintf(struct websocket *ws, const char *fmt, va_list ap) {
 		return -1;
 	}
 	ws->write(ws, buf, len);
-	return 0;
+	return len;
 }
 
 void ws_close(struct websocket *ws) {
