@@ -24,39 +24,49 @@
 	     (var) = (tmp))
 #endif
 
-int http_vsprintf(struct http_req *req, const char *fmt, va_list ap) {
-	if (!req->body) {
-		req->body = malloc(50);
-		if (!req->body) {
-			fprintf(stderr, "%s: OOM\n", __func__);
-			return -1;
-		}
-		req->body_size = 50;
+static int buf_alloc(struct buf *buf, size_t size) {
+	buf->buf = malloc(size);
+	if (!buf->buf) {
+		fprintf(stderr, "%s: OOM\n", __func__);
+		return -1;
 	}
+	buf->size = size;
+	buf->len = 0;
+	return 0;
+}
+
+static int buf_vsprintf(struct buf *buf, const char *fmt, va_list ap) {
 	int len;
 	va_list a;
 
 	va_copy(a, ap);
-	while ((len = vsnprintf(&req->body[req->body_len],
-				req->body_size - req->body_len, fmt, ap)) >=
-	       req->body_size - req->body_len) {
-		int sz = req->body_len + len + 1;
-		char *b = realloc(req->body, sz);
+	while ((len = vsnprintf(&buf->buf[buf->len],
+				buf->size - buf->len, fmt, ap)) >=
+	       buf->size - buf->len) {
+		int sz = buf->len + len + 1;
+		char *b = realloc(buf->buf, sz);
 		if (!b) {
 			fprintf(stderr, "%s: OOM\n", __func__);
 			return -1;
 		}
-		req->body = b;
-		req->body_size = sz;
+		buf->buf = b;
+		buf->size = sz;
 		va_copy(ap, a);
 		va_copy(a, ap);
 	}
-	req->body_len += len;
+	buf->len += len;
 	return len;
 }
 
+int http_vsprintf(struct http_req *req, const char *fmt, va_list ap) {
+	if (!req->body.buf && buf_alloc(&req->body, 200))
+		return -1;
+
+	return buf_vsprintf(&req->body, fmt, ap);
+}
+
 char *http_body(struct http_req *req) {
-	return req->body;
+	return req->body.buf;
 }
 
 static int ws_matches(struct websocket *ws, struct exchg_test_event *ev) {
@@ -352,7 +362,7 @@ int http_add_header(struct http_req *req, const unsigned char *name,
 }
 
 void fake_http_req_free(struct http_req *req) {
-	free(req->body);
+	free(req->body.buf);
 	free(req);
 }
 

@@ -13,14 +13,18 @@
 #include "exchg/exchg.h"
 #include "exchg/test.h"
 
+struct buf {
+	char *buf;
+	size_t len;
+	size_t size;
+};
+
 struct http_req {
 	int status;
 	enum exchg_id id;
 	void *user;
 	struct exchg_net_context *ctx;
-	char *body;
-	size_t body_len;
-	size_t body_size;
+	struct buf body;
 	size_t (*read)(struct http_req *req, struct exchg_test_event *ev, char **dst);
 	// TODO: just make it an int field
 	void (*fill_event)(struct http_req *req, struct exchg_test_event *ev);
