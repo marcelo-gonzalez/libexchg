@@ -50,8 +50,6 @@ void http_close(struct http_req *req);
 
 struct websocket;
 
-#define CONN_WRITE_BUF_LEN (1 << 10)
-// MUST NOT exceed CONN_WRITE_BUF_LEN
 extern int ws_vprintf(struct websocket *, const char *fmt, va_list ap);
 
 void ws_close(struct websocket *ws);

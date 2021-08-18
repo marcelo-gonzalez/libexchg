@@ -61,15 +61,40 @@ static int buf_vsprintf(struct buf *buf, const char *fmt, va_list ap) {
 }
 
 int ws_vprintf(struct websocket *ws, const char *fmt, va_list ap) {
-	char buf[CONN_WRITE_BUF_LEN + LWS_PRE];
-	int len = vsprintf(buf + LWS_PRE, fmt, ap);
+	va_list a;
+	char buf[1024 + LWS_PRE];
+	va_copy(a, ap);
 
-	if (lws_write(ws->wsi, (unsigned char *)buf + LWS_PRE,
-		      len, LWS_WRITE_TEXT) < len) {
-		fprintf(stderr, "lws_write error\n");
-		return -1;
+	int len = vsnprintf(buf + LWS_PRE, 1024, fmt, ap);
+	if (len < 1024) {
+		if (lws_write(ws->wsi, (unsigned char *)buf+LWS_PRE,
+			      len, LWS_WRITE_TEXT) < len) {
+			// TODO: exchg_log() should be accessible here without including exchg.h
+			fprintf(stderr, "lws_write() error writing %d bytes:\n%s\n", len, buf);
+			return -1;
+		} else {
+			return len;
+		}
+	} else {
+		struct buf b;
+
+		if (buf_alloc(&b, len+1))
+			return -1;
+		len = buf_vsprintf(&b, fmt, a);
+		if (len < 0) {
+			free(b.buf);
+			return len;
+		}
+		if (lws_write(ws->wsi, (unsigned char *)buf_start(&b),
+			      len, LWS_WRITE_TEXT) < len) {
+			fprintf(stderr, "lws_write() error writing %d bytes:\n%s\n",
+				len, buf_start(&b));
+			free(b.buf);
+			return -1;
+		}
+		free(b.buf);
+		return len;
 	}
-	return len;
 }
 
 void ws_close(struct websocket *ws) {

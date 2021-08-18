@@ -441,14 +441,28 @@ void http_close(struct http_req *http) {
 }
 
 int ws_vprintf(struct websocket *ws, const char *fmt, va_list ap) {
-	char buf[1000];
+	va_list a;
+	va_copy(a, ap);
+	char buf[1024];
 	size_t len = vsnprintf(buf, sizeof(buf), fmt, ap);
-	if (len >= sizeof(buf)) {
-		fprintf(stderr, "%s: buff too smol\n", __func__);
-		return -1;
+
+	if (len < sizeof(buf)) {
+		ws->write(ws, buf, len);
+		return len;
+	} else {
+		struct buf b;
+
+		if (buf_alloc(&b, len+1))
+			return -1;
+		len = buf_vsprintf(&b, fmt, a);
+		if (len < 0) {
+			free(b.buf);
+			return len;
+		}
+		ws->write(ws, b.buf, len);
+		free(b.buf);
+		return len;
 	}
-	ws->write(ws, buf, len);
-	return len;
 }
 
 void ws_close(struct websocket *ws) {
