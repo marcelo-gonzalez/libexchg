@@ -19,10 +19,6 @@
 #include "net-backend.h"
 #include "order-book.h"
 
-#define EXCH_DOWN (1U << 0)
-#define EXCH_MAY_TRADE (1U << 1)
-// TODO #define EXCH_SHUTTING_DOWN (1U << 2)
-
 struct work {
 	struct exchg_client *cl;
 	bool (*f)(struct exchg_client *, void *);
@@ -59,7 +55,6 @@ struct exchg_client {
 	enum exchg_id id;
 	const char *name;
 	struct exchg_context *ctx;
-	int state;
 	int (*get_pair_info)(struct exchg_client *cl);
 	int (*l2_subscribe)(struct exchg_client *cl, enum exchg_pair pair);
 	int (*get_balances)(struct exchg_client *cl, void *request_private);
@@ -137,12 +132,13 @@ static inline void order_err_update(struct exchg_client *cl, struct order_info *
 
 struct exchg_context {
 	struct exchg_options opts;
-	int exchanges_online;
 	struct exchg_callbacks callbacks;
 	void *user;
 	struct exchg_client *clients[EXCHG_ALL_EXCHANGES];
 	struct order_book *books[EXCHG_NUM_PAIRS];
 	struct exchg_net_context *net_context;
+	bool running;
+	bool online;
 };
 
 static inline void exchg_l2_update(struct exchg_client *cl,
@@ -196,11 +192,6 @@ struct exchg_client *alloc_exchg_client(struct exchg_context *ctx,
 // complete in progress stuff first
 // otherwise you can get a user after free in http_get callback
 void free_exchg_client(struct exchg_client *cl);
-
-static inline void exchg_set_up(struct exchg_client *cl) {
-	cl->state &= ~EXCH_DOWN;
-	cl->ctx->exchanges_online = 1;
-}
 
 struct exchg_websocket_ops {
 	int (*on_conn_established)(struct exchg_client *, struct conn *);

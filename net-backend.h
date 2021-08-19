@@ -35,7 +35,9 @@ struct net_callbacks {
 };
 
 extern struct exchg_net_context *net_new(struct net_callbacks *c);
-extern int net_service(struct exchg_net_context *);
+extern void net_service(struct exchg_net_context *);
+extern void net_run(struct exchg_net_context *);
+extern void net_stop(struct exchg_net_context *);
 extern void net_destroy(struct exchg_net_context *);
 
 int http_add_header(struct http_req *req, const unsigned char *name,

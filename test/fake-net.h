@@ -48,6 +48,7 @@ struct http_req {
 			   const unsigned char *val, size_t len);
 	void (*destroy)(struct http_req *req);
 	void *priv;
+	LIST_ENTRY(http_req) list;
 };
 
 struct websocket {
@@ -143,7 +144,9 @@ static inline void *test_order_private(struct test_order *o) {
 struct exchg_net_context {
 	struct net_callbacks *callbacks;
 	LIST_HEAD(ws_list, websocket) ws_list;
+	LIST_HEAD(http_list, http_req) http_list;
 	TAILQ_HEAD(events, test_event) events;
+	bool running;
 	struct {
 		decimal_t balances[EXCHG_NUM_CCYS];
 		LIST_HEAD(order_list, test_order) order_list;

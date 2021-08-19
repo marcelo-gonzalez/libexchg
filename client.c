@@ -121,9 +121,6 @@ void conn_close(struct conn *conn) {
 }
 
 void exchg_teardown(struct exchg_client *cl) {
-	if (cl->state & EXCH_DOWN)
-		return;
-
 	// TODO: add a callback and call it here,
 	// send order cancels, etc. Set a bit and
 	// look at that bit in the main callback
@@ -133,26 +130,25 @@ void exchg_teardown(struct exchg_client *cl) {
 }
 
 static void conn_offline(struct conn *conn) {
-	struct exchg_client *client = conn->cl;
-	struct exchg_context *ctx = client->ctx;
+	struct exchg_context *ctx = conn->cl->ctx;
 
 	LIST_REMOVE(conn, list);
 	conn_free(conn);
-	if (!LIST_EMPTY(&client->conn_list))
-		return;
 
 	// TODO: in future when we might reconnect in 30 seconds,
 	// modify this logic
-	client->state |= EXCH_DOWN;
-	ctx->exchanges_online = 0;
-	for (int i = 0; i < EXCHG_ALL_EXCHANGES; i++) {
-		struct exchg_client *cl = ctx->clients[i];
-		if (!cl)
-			continue;
-		if (!(cl->state & EXCH_DOWN)) {
-			ctx->exchanges_online = 1;
+	ctx->online = false;
+	for (enum exchg_id id = 0; id < EXCHG_ALL_EXCHANGES; id++) {
+		struct exchg_client *cl = ctx->clients[id];
+
+		if (cl && !LIST_EMPTY(&cl->conn_list)) {
+			ctx->online = true;
 			return;
 		}
+	}
+	if (ctx->running) {
+		net_stop(ctx->net_context);
+		ctx->running = false;
 	}
 }
 
@@ -427,7 +423,6 @@ static int conn_init(struct conn *conn, struct exchg_client *cl,
 		memcpy(&conn->http, http, sizeof(*http));
 	}
 	LIST_INSERT_HEAD(&cl->conn_list, conn, list);
-	exchg_set_up(cl);
 	conn->cl = cl;
 	conn->type = type;
 	if (type == CONN_TYPE_HTTP) {
@@ -483,6 +478,7 @@ static struct conn *exchg_http_dial(const char *host, const char *path,
 		http_close(req);
 		return NULL;
 	}
+	cl->ctx->online = true;
 	return conn;
 }
 
@@ -526,6 +522,7 @@ struct conn *exchg_websocket_connect(struct exchg_client *cl,
 		ws_close(ws);
 		return NULL;
 	}
+	cl->ctx->online = true;
 	return conn;
 }
 
@@ -759,7 +756,6 @@ struct exchg_client *alloc_exchg_client(struct exchg_context *ctx,
 	}
 	ret->id = id;
 	ret->ctx = ctx;
-	ret->state = EXCH_DOWN;
 	// TODO: only really need this many for the first update. Should shrink the buffers after that.
 	ret->l2_update_size = l2_update_size;
 	ret->update.exchange_id = id;
@@ -1019,8 +1015,20 @@ void exchg_free(struct exchg_context *ctx) {
 	free(ctx);
 }
 
-int exchg_service(struct exchg_context *ctx) {
-	return ctx->exchanges_online && net_service(ctx->net_context) >= 0;
+bool exchg_service(struct exchg_context *ctx) {
+	if (unlikely(!ctx->online))
+		return false;
+	net_service(ctx->net_context);
+	return true;
+}
+
+void exchg_run(struct exchg_context *ctx) {
+	if (ctx->running) {
+		exchg_log("%s called recursively. This is an error.\n", __func__);
+		return;
+	}
+	ctx->running = true;
+	net_run(ctx->net_context);
 }
 
 void exchg_shutdown(struct exchg_context *ctx) {
@@ -1033,9 +1041,12 @@ void exchg_shutdown(struct exchg_context *ctx) {
 	}
 }
 
-void exchg_blocking_shutdown(struct exchg_context *ctx){
+void exchg_blocking_shutdown(struct exchg_context *ctx) {
+	if (!ctx->online)
+		return;
+
 	exchg_shutdown(ctx);
-	while (exchg_service(ctx)) {};
+	exchg_run(ctx);
 }
 
 struct exchg_client *exchg_client(struct exchg_context *ctx,

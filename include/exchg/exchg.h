@@ -37,9 +37,20 @@ void exchg_free(struct exchg_context *ctx);
 
 struct exchg_client *exchg_alloc_client(struct exchg_context *ctx, enum exchg_id id);
 
-int exchg_service(struct exchg_context *ctx);
+// Run one iteration of the event loop, possibly calling one of the
+// context's exchg_callbacks. Returns true if there are still events
+// expected in the future (i.e. another call to exchg_service is warranted)
+bool exchg_service(struct exchg_context *ctx);
+// Run until there are no connections left to service
+void exchg_run(struct exchg_context *ctx);
 
+// close open connections. If inside exchg_run(), then that function
+// will return after all connections have finally been closed and
+// there's nothing left to do. Otherwise call exchg_run() or
+// exchg_service() in a loop until it returns false.
 void exchg_shutdown(struct exchg_context *ctx);
+// shorthand for exchg_shutdown(); exchg_run();
+// must not be called inside exchg_run() or exchg_service()
 void exchg_blocking_shutdown(struct exchg_context *ctx);
 
 enum exchg_side {

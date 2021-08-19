@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (C) 2021 Marcelo Diop-Gonzalez
 
+#include <glib.h>
 #include <libwebsockets.h>
 #include <stdbool.h>
 
@@ -277,6 +278,7 @@ struct lws_protocols protocols[] = {
 };
 
 struct exchg_net_context {
+	GMainLoop *loop;
 	struct lws_context *ctx;
 };
 
@@ -359,12 +361,21 @@ struct websocket *ws_dial(struct exchg_net_context *ctx, const char *host,
 	return ws;
 }
 
-int net_service(struct exchg_net_context *ctx) {
-	return lws_service(ctx->ctx, 0);
+void net_service(struct exchg_net_context *ctx) {
+	g_main_context_iteration(NULL, TRUE);
+}
+
+void net_run(struct exchg_net_context *ctx) {
+	g_main_loop_run(ctx->loop);
+}
+
+void net_stop(struct exchg_net_context *ctx) {
+	g_main_loop_quit(ctx->loop);
 }
 
 void net_destroy(struct exchg_net_context *ctx) {
 	lws_context_destroy(ctx->ctx);
+	g_main_loop_unref(ctx->loop);
 	free(ctx);
 }
 
@@ -374,15 +385,20 @@ struct exchg_net_context *net_new(struct net_callbacks *c) {
 		fprintf(stderr, "OOM: %s\n", __func__);
 		return NULL;
 	}
+	ret->loop = g_main_loop_new(NULL, false);
+
 	struct lws_context_creation_info info = {
-		.options = LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT,
+		.options = LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT |
+		LWS_SERVER_OPTION_GLIB,
 		.port = CONTEXT_PORT_NO_LISTEN,
 		.protocols = protocols,
+		.foreign_loops = (void **)&ret->loop,
 		.user = c,
 	};
 	lws_set_log_level(LLL_WARN | LLL_ERR, NULL);
 	ret->ctx = lws_create_context(&info);
 	if (!ret->ctx) {
+		g_main_loop_unref(ret->loop);
 		free(ret);
 		fprintf(stderr, "lws_create_context failed\n");
 		return NULL;

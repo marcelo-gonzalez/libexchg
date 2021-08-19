@@ -815,8 +815,6 @@ static int gemini_balances_recv(struct exchg_client *cl, struct conn *conn, int 
 
 	struct http_data *data = conn_private(conn);
 	exchg_on_balances(cl, balances, *(void**)http_data_private(data));
-	// TODO: make this a separate BALANCES_OK
-	cl->state |= EXCH_MAY_TRADE;
 	return 0;
 }
 

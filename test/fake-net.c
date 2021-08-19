@@ -17,15 +17,14 @@
 #include "fake-kraken.h"
 #include "fake-coinbase.h"
 
-static int buf_init(struct buf *buf, size_t size) {
+static void buf_init(struct buf *buf, size_t size) {
 	buf->buf = malloc(size);
 	if (!buf->buf) {
 		fprintf(stderr, "%s: OOM\n", __func__);
-		return -1;
+		exit(1);
 	}
 	buf->size = size;
 	buf->len = 0;
-	return 0;
 }
 
 static int buf_vsprintf(struct buf *buf, const char *fmt, va_list ap) {
@@ -79,8 +78,8 @@ void buf_xcpy(struct buf *buf, void *src, size_t len) {
 }
 
 int http_vsprintf(struct http_req *req, const char *fmt, va_list ap) {
-	if (!req->body.buf && buf_init(&req->body, 200))
-		return -1;
+	if (!req->body.buf)
+		buf_init(&req->body, 200);
 
 	return buf_vsprintf(&req->body, fmt, ap);
 }
@@ -163,6 +162,13 @@ static void set_matching_ws(struct exchg_net_context *ctx,
 	LIST_FOREACH(ws, &ctx->ws_list, list) {
 		if (ws_matches(ws, &ev->event)) {
 			ev->conn.ws = ws;
+
+			struct test_event *e;
+			TAILQ_FOREACH(e, &ctx->events, list) {
+				if (ws_matches(ws, &e->event)) {
+					e->conn.ws = ws;
+				}
+			}
 			break;
 		}
 	}
@@ -326,6 +332,7 @@ struct exchg_net_context *net_new(struct net_callbacks *c) {
 	struct exchg_net_context *ctx = xzalloc(sizeof(*ctx));
 	TAILQ_INIT(&ctx->events);
 	LIST_INIT(&ctx->ws_list);
+	LIST_INIT(&ctx->http_list);
 	ctx->callbacks = c;
 	return ctx;
 }
@@ -407,7 +414,7 @@ bool on_order_canceled(struct exchg_net_context *ctx, enum exchg_id id,
 	return event.data.order_canceled.succeed;
 }
 
-int net_service(struct exchg_net_context *ctx) {
+static bool service(struct exchg_net_context *ctx) {
 	int ret;
 	struct buf buf;
 	struct test_event *ev, *e, *tmp;
@@ -424,12 +431,12 @@ int net_service(struct exchg_net_context *ctx) {
 	if (ctx->callback)
 		ctx->callback(ctx, event, ctx->cb_private);
 
-	ev = TAILQ_FIRST(&ctx->events);
-	if (!ev) {
-		fprintf(stderr, "%s called with no events left to process\n",
-			__func__);
-		return -1;
+	if (TAILQ_EMPTY(&ctx->events)) {
+		exchg_log("test: no events left to service\n");
+		return false;
 	}
+
+	ev = TAILQ_FIRST(&ctx->events);
 	event = &ev->event;
 
 	switch (ev->conn_type) {
@@ -440,8 +447,8 @@ int net_service(struct exchg_net_context *ctx) {
 			wsock = ev->conn.ws;
 		}
 		if (!wsock) {
-			fprintf(stderr, "event with no matching websocket:\n"
-				"%s %d\n", exchg_id_to_name(event->id), event->type);
+			exchg_log("test: event with no matching websocket:\n"
+				  "%s %d\n", exchg_id_to_name(event->id), event->type);
 			break;
 		}
 		switch (event->type) {
@@ -460,12 +467,12 @@ int net_service(struct exchg_net_context *ctx) {
 					free_event(ctx, e);
 				}
 			}
+			LIST_REMOVE(wsock, list);
 			ws->on_closed(wsock->user);
 			wsock->destroy(wsock);
 			break;
 		default:
-			if (buf_init(&buf, 1<<10))
-				return -1;
+			buf_init(&buf, 1<<10);
 			wsock->read(wsock, &buf, event);
 			ws->recv(wsock->user, buf.buf, buf.len);
 			free(buf.buf);
@@ -492,12 +499,12 @@ int net_service(struct exchg_net_context *ctx) {
 					free_event(ctx, e);
 				}
 			}
+			LIST_REMOVE(http_req, list);
 			http->on_closed(http_req->user);
 			http_req->destroy(http_req);
 			break;
 		default:
-			if (buf_init(&buf, 1<<10))
-				return -1;
+			buf_init(&buf, 1<<10);
 			http_req->read(http_req, event, &buf);
 			http->recv(http_req->user, buf.buf, buf.len);
 			free(buf.buf);
@@ -508,15 +515,45 @@ int net_service(struct exchg_net_context *ctx) {
 		break;
 	}
 	free_event(ctx, ev);
-	return 0;
+	return true;
+}
+
+void net_service(struct exchg_net_context *ctx) {
+	service(ctx);
+}
+
+void net_run(struct exchg_net_context *ctx) {
+	ctx->running = true;
+	while (ctx->running && service(ctx)) {}
+
+	if (!TAILQ_EMPTY(&ctx->events)) {
+		struct test_event *e;
+		exchg_log("test: net_stop() called with events left!:\n");
+		TAILQ_FOREACH(e, &ctx->events, list) {
+			exchg_test_event_print(&e->event);
+		}
+	}
+}
+
+void net_stop(struct exchg_net_context *ctx) {
+	ctx->running = false;
 }
 
 void net_destroy(struct exchg_net_context *ctx) {
-	struct test_event *e, *tmp;
-	TAILQ_FOREACH_SAFE(e, &ctx->events, list, tmp) {
+	struct test_event *e, *etmp;
+	struct http_req *h, *htmp;
+	struct websocket *w, *wtmp;
+	struct test_order *o, *otmp;
+
+	TAILQ_FOREACH_SAFE(e, &ctx->events, list, etmp) {
 		free_event(ctx, e);
 	}
-	struct test_order *o, *otmp;
+	LIST_FOREACH_SAFE(w, &ctx->ws_list, list, wtmp) {
+		w->destroy(w);
+	}
+	LIST_FOREACH_SAFE(h, &ctx->http_list, list, htmp) {
+		h->destroy(h);
+	}
 	for (enum exchg_id id = 0; id < EXCHG_ALL_EXCHANGES; id++) {
 		LIST_FOREACH_SAFE(o, &ctx->servers[id].order_list, list, otmp) {
 			LIST_REMOVE(o, list);
@@ -571,6 +608,7 @@ struct http_req *fake_http_req_alloc(struct exchg_net_context *ctx, enum exchg_i
 	req->user = private;
 	req->ctx = ctx;
 	req->read_event = read_ev;
+	LIST_INSERT_HEAD(&ctx->http_list, req, list);
 	return req;
 }
 
@@ -637,8 +675,7 @@ int ws_vprintf(struct websocket *ws, const char *fmt, va_list ap) {
 	} else {
 		struct buf b;
 
-		if (buf_init(&b, len+1))
-			return -1;
+		buf_init(&b, len+1);
 		len = buf_vsprintf(&b, fmt, a);
 		if (len < 0) {
 			free(b.buf);

@@ -309,22 +309,16 @@ int trade_run(struct trade_state *s, struct exchg_client *cl) {
 	struct exchg_context *ctx = exchg_ctx(cl);
 
 	if (exchg_private_ws_connect(ctx, exchg_id(cl)))
-		goto err;
+		return -1;
 
 	if (exchg_l2_subscribe(ctx, exchg_id(cl), s->order.pair))
-		goto err;
+		return -1;
 
 	if (exchg_get_balances(cl, NULL))
-		goto err;
+		return -1;
 
-	while (exchg_service(ctx)) {}
+	exchg_run(ctx);
 
-	exchg_blocking_shutdown(ctx);
 	return s->error;
-
-err:
-	exchg_blocking_shutdown(ctx);
-	return 1;
-
 }
 
