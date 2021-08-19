@@ -17,10 +17,10 @@
 #include "order-book.h"
 #include "time-helpers.h"
 
-#include "bitstamp.h"
-#include "coinbase.h"
-#include "gemini.h"
-#include "kraken.h"
+#include "exchanges/bitstamp.h"
+#include "exchanges/coinbase.h"
+#include "exchanges/gemini.h"
+#include "exchanges/kraken.h"
 
 // TODO split into two structs, http vs websocket
 struct conn {

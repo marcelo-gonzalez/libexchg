@@ -24,14 +24,14 @@ JSMN_DEFINE := -D JSMN_STATIC -U JSMN_HEADER
 
 obj = decimal.o auth.o currency.o client.o
 obj += json-helpers.o order-book.o
-exchange-obj = bitstamp.o coinbase.o gemini.o kraken.o
+exchange-obj = exchanges/bitstamp.o exchanges/coinbase.o exchanges/gemini.o exchanges/kraken.o
 
 public-hdrs = include/exchg/exchanges.h include/exchg/exchg.h include/exchg/currency.h
 public-hdrs += include/exchg/decimal.h include/exchg/orders.h
 
 hdrs = $(public-hdrs) auth.h client.h json-helpers.h
 hdrs += compiler.h net-backend.h order-book.h time-helpers.h
-hdrs += bitstamp.h coinbase.h kraken.h gemini.h
+hdrs += exchanges/bitstamp.h exchanges/coinbase.h exchanges/kraken.h exchanges/gemini.h
 
 test-obj = test/fake-net.o test/fake-gemini.o test/fake-kraken.o test/fake-bitstamp.o test/fake-coinbase.o
 test-obj += test/json/kraken/pair-info.o
@@ -100,10 +100,10 @@ ob-test: order-book.o order-book-test.o decimal.o
 decimal.o: include/exchg/decimal.h
 decimal-test.o: include/exchg/decimal.h
 auth.o: auth.h
-bitstamp.o: $(hdrs)
-gemini.o: $(hdrs)
-kraken.o: $(hdrs)
-coinbase.o: $(hdrs)
+exchanges/bitstamp.o: $(hdrs)
+exchanges/gemini.o: $(hdrs)
+exchanges/kraken.o: $(hdrs)
+exchanges/coinbase.o: $(hdrs)
 
 client.o: $(hdrs) client.c
 	$(CC) $(CFLAGS) $(JSMN_DEFINE) -c -o $@ client.c
