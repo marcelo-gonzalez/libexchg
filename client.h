@@ -153,8 +153,6 @@ struct exchg_client *alloc_exchg_client(struct exchg_context *ctx,
 // otherwise you can get a user after free in http_get callback
 void free_exchg_client(struct exchg_client *cl);
 
-void exchg_teardown(struct exchg_client *cl);
-
 static inline void exchg_set_up(struct exchg_client *cl) {
 	cl->state &= ~EXCH_DOWN;
 	cl->ctx->exchanges_online = 1;
@@ -179,7 +177,6 @@ struct conn *exchg_websocket_connect(struct exchg_client *cl,
 				     const char *host, const char *path,
 				     const struct exchg_websocket_ops *ops);
 
-// MUST NOT exceed CONN_WRITE_BUF_LEN
 int conn_printf(struct conn *conn, const char *fmt, ...)
 	__attribute__((format (printf, 2, 3)));
 
