@@ -132,4 +132,4 @@ clean:
 	@find test/ -name "*.o" -delete
 	@find examples/ -name "*.o" -delete
 	@rm -f libexchg.a libexchg-test.a libexchg.so libexchg-test.so *.o \
-	$(examples) $(tests)
+	exchanges/*.o $(examples) $(tests)
