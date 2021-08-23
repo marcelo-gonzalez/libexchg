@@ -104,6 +104,13 @@ static void time_since(struct timespec *dst, const struct timespec *ts) {
 	dst->tv_sec = now.tv_sec - ts->tv_sec - carry;
 }
 
+static bool book_ready(struct exchg_context *ctx, struct trade_state *state) {
+	if (state->order.side == EXCHG_SIDE_BUY)
+		return exchg_num_asks(ctx, state->order.pair) > 0;
+	else
+		return exchg_num_bids(ctx, state->order.pair) > 0;
+}
+
 static void on_l2_update(struct exchg_client *cl,
 			 enum exchg_pair pair,
 			 struct exchg_l2_update *update,
@@ -112,8 +119,11 @@ static void on_l2_update(struct exchg_client *cl,
 
 	// TODO: or ->stop. maybe cant assume you wont be called back after
 	// exchg_shutdown()
-	if (!state->sent && state->balances_recvd)
+	if (!state->sent && state->balances_recvd) {
+		if (!book_ready(exchg_ctx(cl), state))
+			return;
 		make_trades(cl, state);
+	}
 
 	if (!state->verbose)
 		return;
@@ -207,7 +217,7 @@ static void on_balances(struct exchg_client *cl,
 	if (!state->sent) {
 		state->start_base = balances[base];
 		state->start_counter = balances[counter];
-		if (exchg_num_asks(ctx, state->order.pair) > 0) {
+		if (book_ready(ctx, state)) {
 			make_trades(cl, state);
 		}
 	} else {
