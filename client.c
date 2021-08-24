@@ -689,6 +689,8 @@ void free_exchg_client(struct exchg_client *cl) {
 		free(w);
 	}
 	free(cl->apikey_public);
+	OPENSSL_cleanse(cl->password, cl->password_len);
+	free(cl->password);
 	free(cl->update.bids);
 	free(cl->update.asks);
 	free(cl);
@@ -921,6 +923,20 @@ const char *exchg_id_to_name(enum exchg_id id) {
 	default:
 		return "<Invalid Exchange>";
 	}
+}
+
+int exchg_set_password(struct exchg_client *cl,
+		       size_t len, const char *password) {
+	OPENSSL_cleanse(cl->password, cl->password_len);
+	free(cl->password);
+	cl->password = malloc(len);
+	if (!cl->password) {
+		exchg_log("%s: OOM\n", __func__);
+		return -1;
+	}
+	memcpy(cl->password, password, len);
+	cl->password_len = len;
+	return 0;
 }
 
 int exchg_set_keypair(struct exchg_client *cl,

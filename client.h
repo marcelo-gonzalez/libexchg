@@ -60,6 +60,8 @@ struct exchg_client {
 	HMAC_CTX *hmac_ctx;
 	unsigned char *apikey_public;
 	size_t apikey_public_len;
+	char *password;
+	size_t password_len;
 	GHashTable *orders;
 	bool getting_info;
 	int get_info_error;

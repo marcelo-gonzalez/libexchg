@@ -114,6 +114,10 @@ int exchg_set_keypair(struct exchg_client *cl,
 		      size_t public_len, const unsigned char *public_key,
 		      size_t private_len, const unsigned char *private_key);
 
+// Required on some exchanges, e.g. Coinbase Pro
+int exchg_set_password(struct exchg_client *cl,
+		       size_t len, const char *password);
+
 // Fetch info on available trading pairs. Called automatically by other functions that require it
 int exchg_get_pair_info(struct exchg_client *cl);
 
