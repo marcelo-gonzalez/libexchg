@@ -46,11 +46,54 @@ static struct http_req *products_dial(struct exchg_net_context *ctx,
 	return req;
 }
 
+static void accounts_fill_event(struct http_req *req, struct exchg_test_event *ev) {
+	ev->type = EXCHG_EVENT_BALANCES;
+}
+
+static size_t accounts_read(struct http_req *req, struct exchg_test_event *ev,
+			    char **dst) {
+	char *buf = xzalloc(1<<15);
+	char *b = buf;
+	b += sprintf(b, "[");
+	for (enum exchg_currency c = 0; c < EXCHG_NUM_CCYS; c++) {
+		char s[30];
+		decimal_t *balance = &req->ctx->balances[EXCHG_COINBASE][c];
+		decimal_to_str(s, balance);
+		b += sprintf(b, "{\"id\": \"234-abc-def%d\", \"currency\": \"%s\", "
+			     "\"balance\": \"%s\", \"hold\": \"0.00\", \"available\": \"%s\", "
+			     "\"profile_id\": \"234-abc-zyx%d\", \"trading_enabled\": true}, ",
+			     c, exchg_ccy_to_upper(c), s, s, c);
+	}
+	b += sprintf(b, "]");
+	*dst = buf;
+	return b-buf;
+}
+
+static struct http_req *accounts_dial(struct exchg_net_context *ctx,
+				      const char *path, const char *method,
+				      void *private) {
+	if (strcmp(method, "GET")) {
+		fprintf(stderr, "Coinbase bad method for %s: %s\n", path, method);
+		return NULL;
+	}
+
+	struct http_req *req = fake_http_req_alloc(ctx, private);
+	req->fill_event = accounts_fill_event;
+	req->read = accounts_read;
+	req->write = no_http_write;
+	// TODO: check auth stuff
+	req->add_header = no_http_add_header;
+	req->destroy = fake_http_req_free;
+	return req;
+}
+
 struct http_req *coinbase_http_dial(struct exchg_net_context *ctx,
 				    const char *path,
 				    const char *method, void *private) {
 	if (!strcmp(path, "/products"))
 		return products_dial(ctx, path, method, private);
+	else if (!strcmp(path, "/accounts"))
+		return accounts_dial(ctx, path, method, private);
 	else {
 		exchg_log("Coinbase bad HTTP path: %s\n", path);
 		return NULL;

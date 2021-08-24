@@ -946,7 +946,7 @@ static int kraken_new_keypair(struct exchg_client *cl,
 	if (len < 0)
 		return len;
 	if (!HMAC_Init_ex(cl->hmac_ctx, k, len, EVP_sha512(), NULL)) {
-		exchg_log("HMAC_Init_ex() failure\n");
+		exchg_log("%s HMAC_Init_ex() failure\n", __func__);
 		free(k);
 		return -1;
 	}

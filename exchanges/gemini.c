@@ -743,7 +743,7 @@ static void gemini_destroy(struct exchg_client *cli) {
 static int gemini_new_keypair(struct exchg_client *cl,
 			      const unsigned char *key, size_t len) {
 	if (!HMAC_Init_ex(cl->hmac_ctx, key, len, EVP_sha384(), NULL)) {
-		exchg_log("HMAC_Init_ex() failure\n");
+		exchg_log("%s HMAC_Init_ex() failure\n", __func__);
 		return -1;
 	}
 	return 0;

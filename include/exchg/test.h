@@ -21,6 +21,7 @@ extern "C" {
 
 #define exchg_test_coinbase_public "coinbase-public-asdfasdf"
 #define exchg_test_coinbase_private "coinbase-super-secret-asdfasdf"
+#define exchg_test_coinbase_password "coinbase-password-asdfasdf"
 
 enum exchg_test_event_type {
 	EXCHG_EVENT_HTTP_PREP,

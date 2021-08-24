@@ -983,7 +983,7 @@ static int bitstamp_new_keypair(struct exchg_client *cl,
 	struct bitstamp_client *bts = cl->priv;
 
 	if (!HMAC_Init_ex(cl->hmac_ctx, key, len, EVP_sha256(), NULL)) {
-		exchg_log("HMAC_Init_ex() failure\n");
+		exchg_log("%s HMAC_Init_ex() failure\n", __func__);
 		return -1;
 	}
 

@@ -7,6 +7,12 @@
 #include <time.h>
 #include <stdint.h>
 
+static inline int64_t current_seconds(void) {
+	struct timespec now;
+	clock_gettime(CLOCK_REALTIME, &now);
+	return now.tv_sec;
+}
+
 static inline int64_t current_millis(void) {
 	struct timespec now;
 	clock_gettime(CLOCK_REALTIME, &now);

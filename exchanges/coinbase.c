@@ -5,12 +5,13 @@
 #include <stdio.h>
 #include <time.h>
 
-#include "exchg/decimal.h"
 #include "auth.h"
-#include "compiler.h"
 #include "client.h"
-#include "json-helpers.h"
 #include "coinbase.h"
+#include "compiler.h"
+#include "exchg/decimal.h"
+#include "json-helpers.h"
+#include "time-helpers.h"
 
 struct coinbase_client {
 	struct coinbase_pair_info {
@@ -499,6 +500,7 @@ static int parse_info(struct exchg_client *cl, struct conn *conn,
 			if (!non_obj_warned) {
 				exchg_log("%s%s gave non-object array member (idx %d):\n",
 					  conn_host(conn), conn_path(conn), i);
+				json_fprintln(stderr, json, &toks[0]);
 				non_obj_warned = true;
 			}
 			obj_idx = json_skip(num_toks, toks, obj_idx);
@@ -658,7 +660,7 @@ bad:
 	return -1;
 }
 
-static int parse_info_add_headers(struct exchg_client *cl, struct conn *conn) {
+static int add_user_agent(struct exchg_client *cl, struct conn *conn) {
 	// libwebsockets sets User-agent and coinbase complains
 	if (conn_add_header(conn, (unsigned char *)"User-Agent:",
 			    (unsigned char *)"lws", 3))
@@ -668,7 +670,7 @@ static int parse_info_add_headers(struct exchg_client *cl, struct conn *conn) {
 
 static struct exchg_http_ops get_info_ops = {
 	.recv = parse_info,
-	.add_headers = parse_info_add_headers,
+	.add_headers = add_user_agent,
 	.on_closed = exchg_parse_info_on_closed,
 };
 
@@ -678,8 +680,143 @@ static int coinbase_get_pair_info(struct exchg_client *cl) {
 	return 0;
 }
 
+struct http_data {
+	char timestamp[30];
+	int timestamp_len;
+	char hmac[HMAC_SHA256_B64_LEN];
+	int hmac_len;
+	void *request_private;
+};
+
+static int balances_add_headers(struct exchg_client *cl, struct conn *conn) {
+	if (add_user_agent(cl, conn))
+		return 1;
+
+	struct http_data *data = conn_private(conn);
+	if (conn_add_header(conn, (unsigned char *)"CB-ACCESS-KEY:",
+			    cl->apikey_public, cl->apikey_public_len))
+		return 1;
+	if (conn_add_header(conn, (unsigned char *)"CB-ACCESS-SIGN:",
+			    (unsigned char *)data->hmac, data->hmac_len))
+		return 1;
+	if (conn_add_header(conn, (unsigned char *)"CB-ACCESS-PASSPHRASE:",
+			    (unsigned char *)cl->password, cl->password_len))
+		return 1;
+	if (conn_add_header(conn, (unsigned char *)"CB-ACCESS-TIMESTAMP:",
+			    (unsigned char *)data->timestamp, data->timestamp_len))
+		return 1;
+	return 0;
+}
+
+static int balances_recv(struct exchg_client *cl, struct conn *conn,
+			 int status, const char *json,
+			 int num_toks, jsmntok_t *toks) {
+	const char *problem = "";
+	jsmntok_t *bad_tok = &toks[0];
+
+	if (toks[0].type != JSMN_ARRAY) {
+		problem = "didn't receive a JSON array\n";
+		goto bad;
+	}
+
+	decimal_t balances[EXCHG_NUM_CCYS];
+	int obj_idx = 1;
+	bool non_obj_warned = false;
+
+	memset(balances, 0, sizeof(balances));
+
+	for (int i = 0; i < toks[0].size; i++) {
+		bad_tok = &toks[obj_idx];
+		if (toks[obj_idx].type != JSMN_OBJECT) {
+			if (!non_obj_warned) {
+				exchg_log("%s%s gave non-object array member (idx %d):\n",
+					  conn_host(conn), conn_path(conn), i);
+				json_fprintln(stderr, json, &toks[0]);
+				non_obj_warned = true;
+			}
+			obj_idx = json_skip(num_toks, toks, obj_idx);
+			continue;
+		}
+
+		int key_idx = obj_idx + 1;
+		enum exchg_currency ccy = -1;
+		decimal_t available;
+		bool got_available = false;
+
+		for (int j = 0; j < toks[obj_idx].size; j++) {
+			jsmntok_t *key = &toks[key_idx];
+			jsmntok_t *value = &toks[key_idx+1];
+
+			if (json_streq(json, key, "currency")) {
+				if (json_get_currency(&ccy, json, value))
+					goto skip;
+			} else if (json_streq(json, key, "available")) {
+				if (json_get_decimal(&available, json, value)) {
+					problem = "bad \"available\" field";
+					goto bad;
+				}
+				got_available = true;
+			}
+			key_idx = json_skip(num_toks, toks, key_idx + 1);
+		}
+		if (ccy == -1) {
+			exchg_log("%s%s sent account info with no currency:\n",
+				  conn_host(conn), conn_path(conn));
+			json_fprintln(stderr, json, bad_tok);
+			goto skip;
+		}
+		if (!got_available) {
+			problem = "no \"available\" field";
+			goto bad;
+		}
+		balances[ccy] = available;
+		obj_idx = key_idx;
+		continue;
+
+	skip:
+		obj_idx = json_skip(num_toks, toks, obj_idx);
+	}
+
+	struct http_data *h = conn_private(conn);
+	exchg_on_balances(cl, balances, h->request_private);
+	return 0;
+
+bad:
+	exchg_log("Received bad data from %s%s %s:\n",
+		  conn_host(conn), conn_path(conn), problem);
+	json_fprintln(stderr, json, bad_tok);
+	return -1;
+}
+
+static struct exchg_http_ops get_balances_ops = {
+	.recv = balances_recv,
+	.add_headers = balances_add_headers,
+	.conn_data_size = sizeof(struct http_data),
+};
+
 static int coinbase_get_balances(struct exchg_client *cl, void *req_private) {
-	printf("%s not is implement\n", __func__);
+	struct conn *conn = exchg_http_get("api.pro.coinbase.com", "/accounts", &get_balances_ops, cl);
+	if (!conn)
+		return -1;
+	struct http_data *data = conn_private(conn);
+	int64_t time = current_seconds();
+	data->timestamp_len = sprintf(data->timestamp, "%"PRId64, time);
+	data->request_private = req_private;
+
+	unsigned char to_auth[1024];
+	unsigned char *auth_end = to_auth;
+
+	memcpy(auth_end, data->timestamp, data->timestamp_len);
+	auth_end += data->timestamp_len;
+	auth_end = memcpy(auth_end, "GET", 3);
+	auth_end += 3;
+	auth_end = memcpy(auth_end, "/accounts", strlen("/accounts"));
+	auth_end += strlen("/accounts");
+	data->hmac_len = hmac_b64(cl->hmac_ctx, to_auth, auth_end - to_auth, data->hmac);
+	if (data->hmac_len < 0) {
+		conn_close(conn);
+		return -1;
+	}
 	return 0;
 }
 
@@ -691,7 +828,16 @@ static int64_t coinbase_place_order(struct exchg_client *cl, struct exchg_order 
 
 static int coinbase_new_keypair(struct exchg_client *cl,
 				const unsigned char *key, size_t len) {
-	printf("%s not is implement\n", __func__);
+	unsigned char *k;
+	len = base64_decode(key, len, &k);
+	if (len < 0)
+		return len;
+	if (!HMAC_Init_ex(cl->hmac_ctx, k, len, EVP_sha256(), NULL)) {
+		exchg_log("%s HMAC_Init_ex() failure\n", __func__);
+		free(k);
+		return -1;
+	}
+	free(k);
 	return 0;
 }
 
