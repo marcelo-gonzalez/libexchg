@@ -22,7 +22,7 @@ enum hex_type {
 #define HMAC_SHA384_HEX_LEN (96+1)
 #define HMAC_SHA256_HEX_LEN (64+1)
 
-#define HMAC_TEXT_LEN_MAX HMAC_SHA512_B64_LEN
+#define HMAC_TEXT_LEN_MAX HMAC_SHA384_HEX_LEN
 
 int hmac_hex(HMAC_CTX *ctx,
 	     const unsigned char *msg, size_t len,
