@@ -10,6 +10,8 @@
 
 #include "auth.h"
 
+// TODO: why is base64 stuff in auth.c?
+
 static int __base64_encode(char *dst, const unsigned char *in, int len) {
 	int state = 0, save = 0;
 	int outlen = g_base64_encode_step(in, len, FALSE, dst, &state, &save);
@@ -26,6 +28,24 @@ int base64_encode(const unsigned char *in, int len, char **dst) {
 	}
 	*dst = buf;
 	return  __base64_encode(buf, in, len);
+}
+
+int base64_decode(const unsigned char *in, int len, unsigned char **decoded) {
+	unsigned char *c = malloc((len / 4) * 3 + 3);
+	if (!c) {
+		fprintf(stderr, "%s: OOM\n", __func__);
+		return -1;
+	}
+	int state = 0;
+	unsigned int save = 0;
+	len = g_base64_decode_step((char *)in, len, c, &state, &save);
+	if (len == 0) {
+		free(c);
+		fprintf(stderr, "base64_decode failure\n");
+		return -1;
+	}
+	*decoded = c;
+	return len;
 }
 
 static int write_hex(char *dst, const unsigned char *p, size_t len,

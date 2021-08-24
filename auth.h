@@ -10,6 +10,7 @@
 #define BASE64_LEN(len) ((len / 3 + 1) * 4 + 4)
 
 int base64_encode(const unsigned char *in, int len, char **encoded);
+int base64_decode(const unsigned char *in, int len, unsigned char **decoded);
 
 enum hex_type {
 	HEX_UPPER,

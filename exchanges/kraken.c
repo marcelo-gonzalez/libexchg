@@ -941,19 +941,10 @@ static int kraken_new_keypair(struct exchg_client *cl,
 	free(kc->ws_token);
 	kc->ws_token = NULL;
 
-	unsigned char *k = malloc((len / 4) * 3 + 3);
-	if (!k) {
-		exchg_log("%s: OOM\n", __func__);
-		return -1;
-	}
-	int state = 0;
-	unsigned int save = 0;
-	len = g_base64_decode_step((char *)key, len, k, &state, &save);
-	if (len == 0) {
-		free(k);
-		exchg_log("Kraken could not base64 decode private apikey\n");
-		return -1;
-	}
+	unsigned char *k;
+	len = base64_decode(key, len, &k);
+	if (len < 0)
+		return len;
 	if (!HMAC_Init_ex(cl->hmac_ctx, k, len, EVP_sha512(), NULL)) {
 		exchg_log("HMAC_Init_ex() failure\n");
 		free(k);
