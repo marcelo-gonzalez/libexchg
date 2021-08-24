@@ -17,7 +17,7 @@ enum hex_type {
 	HEX_LOWER,
 };
 
-#define HMAC_SHA512_B64_LEN BASE64_LEN(128)
+#define HMAC_SHA512_B64_LEN BASE64_LEN(64)
 #define HMAC_SHA384_HEX_LEN (96+1)
 #define HMAC_SHA256_HEX_LEN (64+1)
 
