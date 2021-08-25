@@ -314,6 +314,7 @@ static void http_on_error(void *p, const char *err) {
 	conn->established = false;
 	if (conn->http.ops->on_error)
 		conn->http.ops->on_error(conn->cl, conn, err);
+	conn_offline(conn);
 }
 
 static void http_on_established(void *p, int status) {
