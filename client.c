@@ -420,6 +420,8 @@ static struct conn *alloc_conn(struct exchg_client *cl,
 	conn->tokens = malloc(sizeof(jsmntok_t) * 500);
 	if (!conn->tokens) {
 		exchg_log("%s: OOM\n", __func__);
+		free(conn->host);
+		free(conn->path);
 		free(conn);
 		return NULL;
 	}
