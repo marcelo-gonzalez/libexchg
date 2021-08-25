@@ -113,6 +113,8 @@ static int websocket_callback(struct lws *wsi, enum lws_callback_reasons reason,
 		lwsl_err("Websocket Connection Error: %s%s: %s\n",
 			 ws->host, ws->path, in ? (char *)in : "(null)");
 		ops->on_error(ws->user);
+		free(ws->path);
+		free(ws);
 		break;
 	case LWS_CALLBACK_CLIENT_ESTABLISHED:
 		ops->on_established(ws->user);
@@ -192,6 +194,8 @@ static int http_callback(struct lws *wsi, enum lws_callback_reasons reason,
 		lwsl_err("HTTP CONNECTION ERROR: %s%s: %s\n",
 			 req->host, req->path, in ? (char *)in : "(null)");
 		http->on_error(req->user, (char *)in);
+		free(req->body.buf);
+		free(req);
 		break;
 	case LWS_CALLBACK_ESTABLISHED_CLIENT_HTTP:
 		req->status = lws_http_client_http_response(wsi);
