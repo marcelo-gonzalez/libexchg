@@ -40,11 +40,11 @@ struct conn {
 	int buf_pos;
 	struct exchg_client *cl;
 	union {
-		struct {
+		struct conn_ws {
 			struct websocket *conn;
 			const struct exchg_websocket_ops *ops;
 		} ws;
-		struct {
+		struct conn_http {
 			struct http_req *req;
 			const struct exchg_http_ops *ops;
 			bool print_data;
@@ -391,62 +391,66 @@ enum conn_type conn_type(struct conn *c) {
 	return c->type;
 }
 
-static struct conn *alloc_conn(struct exchg_client *cl,
-			       size_t private_size,
-			       const char *host, const char *path,
-			       enum conn_type type) {
-	struct conn *conn = malloc(sizeof(struct conn) +
-				   private_size);
-	if (!conn) {
-		exchg_log("%s: OOM\n", __func__);
-		return NULL;
+static int conn_init(struct conn *conn, struct exchg_client *cl,
+		     const char *host, const char *path,
+		     enum conn_type type, struct conn_http *http, struct conn_ws *ws) {
+	if (type == CONN_TYPE_WS) {
+		memset(conn, 0, sizeof(struct conn) + ws->ops->conn_data_size);
+		memcpy(&conn->ws, ws, sizeof(*ws));
+	} else {
+		memset(conn, 0, sizeof(struct conn) + http->ops->conn_data_size);
+		memcpy(&conn->http, http, sizeof(*http));
 	}
-	memset(conn, 0, sizeof(struct conn) + private_size);
+	LIST_INSERT_HEAD(&cl->conn_list, conn, list);
+	exchg_set_up(cl);
+	conn->cl = cl;
 	conn->type = type;
 	conn->host = strdup(host);
 	if (!conn->host) {
-		free(conn);
 		exchg_log("%s: OOM\n", __func__);
-		return NULL;
+		return -1;
 	}
 	conn->path = strdup(path);
 	if (!conn->path) {
-		free(conn->host);
-		free(conn);
 		exchg_log("%s: OOM\n", __func__);
-		return NULL;
+		return -1;
 	}
 	jsmn_init(&conn->parser);
 	conn->num_tokens = 500;
 	conn->tokens = malloc(sizeof(jsmntok_t) * 500);
 	if (!conn->tokens) {
 		exchg_log("%s: OOM\n", __func__);
-		free(conn->host);
-		free(conn->path);
-		free(conn);
-		return NULL;
+		return -1;
 	}
-	conn->cl = cl;
-	return conn;
+	return 0;
 }
 
 static struct conn *exchg_http_dial(const char *host, const char *path,
 				    const struct exchg_http_ops *ops,
 				    struct exchg_client *cl, const char *method) {
-	struct conn *conn = alloc_conn(cl, ops->conn_data_size,
-				       host, path, CONN_TYPE_HTTP);
-	if (!conn)
-		return NULL;
-
-	conn->http.ops = ops;
-	conn->http.req = http_dial(cl->ctx->net_context, host,
-				   path, method, conn);
-	if (!conn->http.req) {
-		conn_free(conn);
+	struct conn *conn = malloc(sizeof(*conn) + ops->conn_data_size);
+	if (!conn) {
+		exchg_log("%s: OOM\n", __func__);
 		return NULL;
 	}
-	exchg_set_up(cl);
-	LIST_INSERT_HEAD(&cl->conn_list, conn, list);
+	struct http_req *req = http_dial(cl->ctx->net_context, host,
+					 path, method, conn);
+	if (!req) {
+		free(conn);
+		return NULL;
+	}
+	struct conn_http h = {
+		.ops = ops,
+		.req = req,
+	};
+	if (conn_init(conn, cl, host, path, CONN_TYPE_HTTP, &h, NULL)) {
+		// important to note that here, conn was at least
+		// partially initialized by conn_init even though it
+		// failed, so the eventual call to conn_free() will
+		// not give nonsense. same goes for exchg_websocket_connect()
+		http_close(req);
+		return NULL;
+	}
 	return conn;
 }
 
@@ -465,18 +469,25 @@ struct conn *exchg_http_post(const char *host, const char *path,
 struct conn *exchg_websocket_connect(struct exchg_client *cl,
 				     const char *host, const char *path,
 				     const struct exchg_websocket_ops *ops) {
-	struct conn *conn = alloc_conn(cl, ops->conn_data_size,
-				       host, path, CONN_TYPE_WS);
-	if (!conn)
-		return NULL;
-	conn->ws.ops = ops;
-	conn->ws.conn = ws_dial(cl->ctx->net_context, host, path, conn);
-	if (!conn->ws.conn) {
-		conn_free(conn);
+	struct conn *conn = malloc(sizeof(*conn) + ops->conn_data_size);
+	if (!conn) {
+		exchg_log("%s: OOM\n", __func__);
 		return NULL;
 	}
-	LIST_INSERT_HEAD(&cl->conn_list, conn, list);
-	exchg_set_up(cl);
+	struct websocket *ws = ws_dial(cl->ctx->net_context, host, path, conn);
+	if (!ws) {
+		free(conn);
+		return NULL;
+	}
+
+	struct conn_ws w = {
+		.ops = ops,
+		.conn = ws,
+	};
+	if (conn_init(conn, cl, host, path, CONN_TYPE_WS, NULL, &w)) {
+		ws_close(ws);
+		return NULL;
+	}
 	return conn;
 }
 
