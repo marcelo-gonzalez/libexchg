@@ -226,10 +226,6 @@ static size_t bitstamp_pair_info_read(struct http_req *req, struct exchg_test_ev
 	return size;
 }
 
-static void pair_info_fill_event(struct http_req *req, struct exchg_test_event *ev) {
-	ev->type = EXCHG_EVENT_PAIRS_DATA;
-}
-
 static struct http_req *asset_pairs_dial(struct exchg_net_context *ctx,
 					 const char *path, const char *method,
 					 void *private) {
@@ -238,8 +234,8 @@ static struct http_req *asset_pairs_dial(struct exchg_net_context *ctx,
 		return NULL;
 	}
 
-	struct http_req *req = fake_http_req_alloc(ctx, private);
-	req->fill_event = pair_info_fill_event;
+	struct http_req *req = fake_http_req_alloc(ctx, EXCHG_BITSTAMP,
+						   EXCHG_EVENT_PAIRS_DATA, private);
 	req->read = bitstamp_pair_info_read;
 	req->write = no_http_write;
 	req->add_header = no_http_add_header;
@@ -265,10 +261,6 @@ static size_t bitstamp_balance_read(struct http_req *req, struct exchg_test_even
 	return p-buf;
 }
 
-static void balance_fill_event(struct http_req *req, struct exchg_test_event *ev) {
-	ev->type = EXCHG_EVENT_BALANCES;
-}
-
 static struct http_req *balance_dial(struct exchg_net_context *ctx,
 				     const char *path, const char *method,
 				     void *private) {
@@ -277,8 +269,8 @@ static struct http_req *balance_dial(struct exchg_net_context *ctx,
 		return NULL;
 	}
 
-	struct http_req *req = fake_http_req_alloc(ctx, private);
-	req->fill_event = balance_fill_event;
+	struct http_req *req = fake_http_req_alloc(ctx, EXCHG_BITSTAMP,
+						   EXCHG_EVENT_BALANCES, private);
 	req->read = bitstamp_balance_read;
 	req->write = no_http_write;
 	// TODO:

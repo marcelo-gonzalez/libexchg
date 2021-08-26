@@ -566,10 +566,6 @@ static size_t kraken_pair_info_read(struct http_req *req, struct exchg_test_even
 	return size;
 }
 
-static void pair_info_fill_event(struct http_req *req, struct exchg_test_event *ev) {
-	ev->type = EXCHG_EVENT_PAIRS_DATA;
-}
-
 static struct http_req *asset_pairs_dial(struct exchg_net_context *ctx,
 					 const char *path, const char *method,
 					 void *private) {
@@ -578,8 +574,8 @@ static struct http_req *asset_pairs_dial(struct exchg_net_context *ctx,
 		return NULL;
 	}
 
-	struct http_req *req = fake_http_req_alloc(ctx, private);
-	req->fill_event = pair_info_fill_event;
+	struct http_req *req = fake_http_req_alloc(ctx, EXCHG_KRAKEN,
+						   EXCHG_EVENT_PAIRS_DATA, private);
 	req->read = kraken_pair_info_read;
 	req->write = no_http_write;
 	req->add_header = no_http_add_header;
@@ -619,10 +615,6 @@ static void balances_free(struct http_req *req) {
 	fake_http_req_free(req);
 }
 
-static void balances_fill_event(struct http_req *req, struct exchg_test_event *ev) {
-	ev->type = EXCHG_EVENT_BALANCES;
-}
-
 static struct http_req *balances_dial(struct exchg_net_context *ctx,
 				      const char *path, const char *method,
 				      void *private) {
@@ -631,8 +623,8 @@ static struct http_req *balances_dial(struct exchg_net_context *ctx,
 		return NULL;
 	}
 
-	struct http_req *req = fake_http_req_alloc(ctx, private);
-	req->fill_event = balances_fill_event;
+	struct http_req *req = fake_http_req_alloc(ctx, EXCHG_KRAKEN,
+						   EXCHG_EVENT_BALANCES, private);
 	req->read = balances_read;
 	req->write = balances_write;
 	req->add_header = balances_add_header;
@@ -665,15 +657,11 @@ static size_t token_read(struct http_req *req, struct exchg_test_event *ev,
 		       "token\":\"" FAKE_WS_TOKEN "\",\"expires\":900}}");
 }
 
-static void token_fill_event(struct http_req *req, struct exchg_test_event *ev) {
-	ev->type = EXCHG_EVENT_HTTP_PROTOCOL;
-}
-
 static struct http_req *token_dial(struct exchg_net_context *ctx,
 				   const char *path, const char *method,
 				   void *private) {
-	struct http_req *req = fake_http_req_alloc(ctx, private);
-	req->fill_event = token_fill_event;
+	struct http_req *req = fake_http_req_alloc(ctx, EXCHG_KRAKEN,
+						   EXCHG_EVENT_HTTP_PROTOCOL, private);
 	req->read = token_read;
 	req->write = no_http_write;
 	req->add_header = no_http_add_header;

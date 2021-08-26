@@ -24,10 +24,9 @@ struct http_req {
 	enum exchg_id id;
 	void *user;
 	struct exchg_net_context *ctx;
+	struct exchg_test_event *read_event;
 	struct buf body;
 	size_t (*read)(struct http_req *req, struct exchg_test_event *ev, char **dst);
-	// TODO: just make it an int field
-	void (*fill_event)(struct http_req *req, struct exchg_test_event *ev);
 	void (*write)(struct http_req *req);
 	void (*add_header)(struct http_req *req, const unsigned char *name,
 			   const unsigned char *val, size_t len);
@@ -111,7 +110,8 @@ struct exchg_net_context {
 };
 
 struct websocket *fake_websocket_alloc(struct exchg_net_context *ctx, void *user);
-struct http_req *fake_http_req_alloc(struct exchg_net_context *ctx, void *private);
+struct http_req *fake_http_req_alloc(struct exchg_net_context *ctx, enum exchg_id exchange,
+				     enum exchg_test_event_type type, void *private);
 void fake_http_req_free(struct http_req *);
 
 #endif

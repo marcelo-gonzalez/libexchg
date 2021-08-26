@@ -25,10 +25,6 @@ static size_t products_read(struct http_req *req, struct exchg_test_event *ev,
 	return size;
 }
 
-static void products_fill_event(struct http_req *req, struct exchg_test_event *ev) {
-	ev->type = EXCHG_EVENT_PAIRS_DATA;
-}
-
 static struct http_req *products_dial(struct exchg_net_context *ctx,
 				      const char *path, const char *method,
 				      void *private) {
@@ -37,17 +33,13 @@ static struct http_req *products_dial(struct exchg_net_context *ctx,
 		return NULL;
 	}
 
-	struct http_req *req = fake_http_req_alloc(ctx, private);
-	req->fill_event = products_fill_event;
+	struct http_req *req = fake_http_req_alloc(ctx, EXCHG_COINBASE,
+						   EXCHG_EVENT_PAIRS_DATA, private);
 	req->read = products_read;
 	req->write = no_http_write;
 	req->add_header = no_http_add_header;
 	req->destroy = fake_http_req_free;
 	return req;
-}
-
-static void accounts_fill_event(struct http_req *req, struct exchg_test_event *ev) {
-	ev->type = EXCHG_EVENT_BALANCES;
 }
 
 static size_t accounts_read(struct http_req *req, struct exchg_test_event *ev,
@@ -77,8 +69,8 @@ static struct http_req *accounts_dial(struct exchg_net_context *ctx,
 		return NULL;
 	}
 
-	struct http_req *req = fake_http_req_alloc(ctx, private);
-	req->fill_event = accounts_fill_event;
+	struct http_req *req = fake_http_req_alloc(ctx, EXCHG_COINBASE,
+						   EXCHG_EVENT_BALANCES, private);
 	req->read = accounts_read;
 	req->write = no_http_write;
 	// TODO: check auth stuff

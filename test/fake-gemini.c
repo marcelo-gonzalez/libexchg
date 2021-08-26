@@ -179,10 +179,6 @@ static void balances_free(struct http_req *req) {
 	fake_http_req_free(req);
 }
 
-static void balances_fill_event(struct http_req *req, struct exchg_test_event *ev) {
-	ev->type = EXCHG_EVENT_BALANCES;
-}
-
 static struct http_req *balances_dial(struct exchg_net_context *ctx,
 				      const char *path, const char *method,
 				      void *private) {
@@ -191,8 +187,8 @@ static struct http_req *balances_dial(struct exchg_net_context *ctx,
 		return NULL;
 	}
 
-	struct http_req *req = fake_http_req_alloc(ctx, private);
-	req->fill_event = balances_fill_event;
+	struct http_req *req = fake_http_req_alloc(ctx, EXCHG_GEMINI,
+						   EXCHG_EVENT_BALANCES, private);
 	req->read = balances_read;
 	req->add_header = balances_add_header;
 	req->write = no_http_write;
@@ -209,8 +205,6 @@ static struct http_req *balances_dial(struct exchg_net_context *ctx,
 
 struct http_place_order {
 	struct auth_check *auth;
-	// TODO: maybe but the struct exchg_test_event * in struct http_req
-	struct fake_ack ack;
 	jsmn_parser parser;
 	jsmntok_t toks[200];
 };
@@ -256,6 +250,7 @@ static size_t place_order_read(struct http_req *req, struct exchg_test_event *ev
 static void place_order_add_header(struct http_req *req, const unsigned char *name,
 				   const unsigned char *val, size_t len) {
 	struct http_place_order *o = req->priv;
+	struct fake_ack *ack = &req->read_event->data.ack;
 
 	auth_add_header(o->auth, name, val, len);
 	if (strcmp((char *)name, "X-GEMINI-PAYLOAD:"))
@@ -274,8 +269,8 @@ static void place_order_add_header(struct http_req *req, const unsigned char *na
 		goto bad;
 	}
 
-	o->ack.finished = true;
-	o->ack.id = -1;
+	ack->finished = true;
+	ack->id = -1;
 	bool got_price = false;
 	bool got_size = false;
 	bool got_pair = false;
@@ -287,27 +282,27 @@ static void place_order_add_header(struct http_req *req, const unsigned char *na
 		jsmntok_t *val = key + 1;
 
 		if (json_streq(json, key, "client_order_id")) {
-			if (json_get_int64(&o->ack.id, json, val)) {
+			if (json_get_int64(&ack->id, json, val)) {
 				sprintf(problem, "bad order id");
 				goto bad;
 			}
 			key_idx += 2;
 		} else if (json_streq(json, key, "symbol")) {
-			if (json_get_pair(&o->ack.pair, json, val)) {
+			if (json_get_pair(&ack->pair, json, val)) {
 				sprintf(problem, "bad currency");
 				goto bad;
 			}
 			got_pair = true;
 			key_idx += 2;
 		} else if (json_streq(json, key, "amount")) {
-			if (json_get_decimal(&o->ack.size, json, val)) {
+			if (json_get_decimal(&ack->size, json, val)) {
 				sprintf(problem, "bad amount");
 				goto bad;
 			}
 			got_size = true;
 			key_idx += 2;
 		} else if (json_streq(json, key, "price")) {
-			if (json_get_decimal(&o->ack.price, json, val)) {
+			if (json_get_decimal(&ack->price, json, val)) {
 				sprintf(problem, "bad price");
 				goto bad;
 			}
@@ -315,9 +310,9 @@ static void place_order_add_header(struct http_req *req, const unsigned char *na
 			key_idx += 2;
 		} else if (json_streq(json, key, "side")) {
 			if (json_streq(json, val, "buy")) {
-				o->ack.side = EXCHG_SIDE_BUY;
+				ack->side = EXCHG_SIDE_BUY;
 			} else if (json_streq(json, val, "sell")) {
-				o->ack.side = EXCHG_SIDE_SELL;
+				ack->side = EXCHG_SIDE_SELL;
 			} else {
 				sprintf(problem, "bad side");
 				goto bad;
@@ -328,7 +323,7 @@ static void place_order_add_header(struct http_req *req, const unsigned char *na
 			key_idx = json_skip(n, o->toks, key_idx+1);
 		}
 	}
-	if (o->ack.id == -1) {
+	if (ack->id == -1) {
 		sprintf(problem, "no client_order_id given");
 		goto bad;
 	}
@@ -363,12 +358,6 @@ static void place_order_free(struct http_req *req) {
 	fake_http_req_free(req);
 }
 
-static void place_order_fill_event(struct http_req *req, struct exchg_test_event *ev) {
-	struct http_place_order *o = req->priv;
-	ev->type = EXCHG_EVENT_ORDER_ACK;
-	ev->data.ack = o->ack;
-}
-
 static struct http_req *place_order_dial(struct exchg_net_context *ctx,
 					 const char *path, const char *method,
 					 void *private) {
@@ -377,9 +366,9 @@ static struct http_req *place_order_dial(struct exchg_net_context *ctx,
 		return NULL;
 	}
 
-	struct http_req *req = fake_http_req_alloc(ctx, private);
+	struct http_req *req = fake_http_req_alloc(ctx, EXCHG_GEMINI,
+						   EXCHG_EVENT_ORDER_ACK, private);
 	req->read = place_order_read;
-	req->fill_event = place_order_fill_event;
 	req->add_header = place_order_add_header;
 	req->write = no_http_write;
 	req->destroy = place_order_free;

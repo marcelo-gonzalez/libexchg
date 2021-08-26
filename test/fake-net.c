@@ -265,8 +265,6 @@ int net_service(struct exchg_net_context *ctx) {
 		if (!wsock) {
 			fprintf(stderr, "event with no matching websocket:\n"
 				"%s %d\n", exchg_id_to_name(event->id), event->type);
-			TAILQ_REMOVE(&ctx->events, ev, list);
-			free(ev);
 			break;
 		}
 		switch (event->type) {
@@ -295,8 +293,6 @@ int net_service(struct exchg_net_context *ctx) {
 			free(buf);
 			break;
 		}
-		TAILQ_REMOVE(&ctx->events, ev, list);
-		free(ev);
 		break;
 	case CONN_TYPE_HTTP:
 		http_req = ev->conn.http;
@@ -309,7 +305,6 @@ int net_service(struct exchg_net_context *ctx) {
 			if (!ret)
 				http->on_established(http_req->user,
 						     http_req->status);
-			http_req->fill_event(http_req, event);
 			// callback to fill in here
 			break;
 		case EXCHG_EVENT_HTTP_CLOSE:
@@ -322,20 +317,19 @@ int net_service(struct exchg_net_context *ctx) {
 			}
 			http->on_closed(http_req->user);
 			http_req->destroy(http_req);
-			TAILQ_REMOVE(&ctx->events, ev, list);
-			free(ev);
 			break;
 		default:
 			len = http_req->read(http_req, event, &buf);
 			http->recv(http_req->user, buf, len);
 			free(buf);
-			TAILQ_REMOVE(&ctx->events, ev, list);
-			free(ev);
 			http_close(http_req);
+			http_req->read_event = NULL;
 			break;
 		}
 		break;
 	}
+	TAILQ_REMOVE(&ctx->events, ev, list);
+	free(ev);
 	return 0;
 }
 
@@ -366,13 +360,31 @@ void fake_http_req_free(struct http_req *req) {
 	free(req);
 }
 
-struct http_req *fake_http_req_alloc(struct exchg_net_context *ctx,
-				     void *private) {
+struct http_req *fake_http_req_alloc(struct exchg_net_context *ctx, enum exchg_id exchange,
+				     enum exchg_test_event_type type, void *private) {
 	struct http_req *req = xzalloc(sizeof(*req));
+	struct test_event *prep_event = xzalloc(sizeof(*prep_event));
+	struct test_event *read_event = xzalloc(sizeof(*read_event));
+	struct exchg_test_event *prep_ev = &prep_event->event;;
+	struct exchg_test_event *read_ev = &read_event->event;;
 
+	read_event->conn_type = CONN_TYPE_HTTP;
+	read_event->conn.http = req;
+	read_ev->id = exchange;
+	read_ev->type = type;
+	TAILQ_INSERT_HEAD(&ctx->events, read_event, list);
+
+	prep_event->conn_type = CONN_TYPE_HTTP;
+	prep_event->conn.http = req;
+	prep_ev->id = exchange;
+	prep_ev->type = EXCHG_EVENT_HTTP_PREP;
+	TAILQ_INSERT_HEAD(&ctx->events, prep_event, list);
+
+	req->id = exchange;
 	req->status = 200;
 	req->user = private;
 	req->ctx = ctx;
+	req->read_event = read_ev;
 	return req;
 }
 
@@ -380,22 +392,15 @@ struct http_req *http_dial(struct exchg_net_context *ctx,
 			   const char *host, const char *path,
 			   const char *method, void *private) {
 	struct http_req *http;
-	enum exchg_id exchange;
-	struct test_event *event;
-	struct exchg_test_event *ev;
 
 	if (!strcmp(host, "api.gemini.com")) {
-		exchange = EXCHG_GEMINI;
 		http = gemini_http_dial(ctx, path, method, private);
 	} else if (!strcmp(host, "api.kraken.com")) {
-		exchange = EXCHG_KRAKEN;
 		http = kraken_http_dial(ctx, path, method, private);
 	} else if (!strcmp(host, "bitstamp.net") ||
 		   !strcmp(host, "www.bitstamp.net")) {
-		exchange = EXCHG_BITSTAMP;
 		http = bitstamp_http_dial(ctx, path, method, private);
 	} else if (!strcmp(host, "api.pro.coinbase.com")) {
-		exchange = EXCHG_COINBASE;
 		http = coinbase_http_dial(ctx, path, method, private);
 	} else {
 		fprintf(stderr,
@@ -406,14 +411,6 @@ struct http_req *http_dial(struct exchg_net_context *ctx,
 	if (!http)
 		return NULL;
 
-	http->id = exchange;
-	event = xzalloc(sizeof(*event));
-	event->conn_type = CONN_TYPE_HTTP;
-	event->conn.http = http;
-	ev = &event->event;
-	ev->id = exchange;
-	ev->type = EXCHG_EVENT_HTTP_PREP;
-	TAILQ_INSERT_HEAD(&ctx->events, event, list);
 	return http;
 }
 
