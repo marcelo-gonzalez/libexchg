@@ -416,12 +416,12 @@ static int conn_init(struct conn *conn, struct exchg_client *cl,
 		return -1;
 	}
 	jsmn_init(&conn->parser);
-	conn->num_tokens = 500;
 	conn->tokens = malloc(sizeof(jsmntok_t) * 500);
 	if (!conn->tokens) {
 		exchg_log("%s: OOM\n", __func__);
 		return -1;
 	}
+	conn->num_tokens = 500;
 	return 0;
 }
 
