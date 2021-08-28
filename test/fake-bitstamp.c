@@ -77,19 +77,17 @@ static size_t proto_read(char *buf, struct bitstamp_proto *bp) {
 	size_t ret = 0;
 
 	if (bp->type == NONSENSE_DIFF) {
+		decimal_t dummy_value = {.places = 0, .value = 1};
 		struct exchg_test_l2_updates u = {
 			.pair = bp->pair,
-			.num_bids = 1,
-			.bids = {{
-					{.places = 0, .value = 1},
-					{.places = 0, .value = 1},
-				}},
-			.asks = {{
-					{.places = 0, .value = 1},
-					{.places = 0, .value = 1},
-				}},
 		};
+		exchg_test_l2_queue_order(&u, true,
+					  &dummy_value, &dummy_value);
+		exchg_test_l2_queue_order(&u, false,
+					  &dummy_value, &dummy_value);
 		ret = write_orders(buf, &u, true);
+		free(u.bids);
+		free(u.asks);
 	} else if (bp->type == UNSUB_SUCCEEDED) {
 		ret = sprintf(buf, "{ \"event\": \""
 			      "bts:unsubscription_succeeded\","

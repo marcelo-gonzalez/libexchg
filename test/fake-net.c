@@ -154,6 +154,40 @@ void exchg_test_add_events(struct exchg_net_context *ctx,
 	}
 }
 
+int exchg_test_l2_queue_order(struct exchg_test_l2_updates *u,
+			      bool is_bid, decimal_t *price, decimal_t *size) {
+	if (is_bid) {
+		if (u->num_bids >= u->bid_cap) {
+			int new_cap = u->bid_cap * 2 + 1;
+			struct exchg_test_l2_update *bids = realloc(u->bids, sizeof(*u->bids) * new_cap);
+			if (!bids) {
+				exchg_log("%s: OOM\n", __func__);
+				return -1;
+			}
+			u->bids = bids;
+			u->bid_cap = new_cap;
+		}
+		u->bids[u->num_bids].price = *price;
+		u->bids[u->num_bids].size = *size;
+		u->num_bids++;
+	} else {
+		if (u->num_asks >= u->ask_cap) {
+			int new_cap = u->ask_cap * 2 + 1;
+			struct exchg_test_l2_update *asks = realloc(u->asks, sizeof(*u->asks) * new_cap);
+			if (!asks) {
+				exchg_log("%s: OOM\n", __func__);
+				return -1;
+			}
+			u->asks = asks;
+			u->ask_cap = new_cap;
+		}
+		u->asks[u->num_asks].price = *price;
+		u->asks[u->num_asks].size = *size;
+		u->num_asks++;
+	}
+	return 0;
+}
+
 void exchg_test_add_l2_events(struct exchg_net_context *ctx,
 			      int n, struct exchg_test_str_l2_updates *msgs) {
 	for (int i = 0; i < n; i++) {
@@ -166,21 +200,25 @@ void exchg_test_add_l2_events(struct exchg_net_context *ctx,
 		e->type = EXCHG_EVENT_BOOK_UPDATE;
 		e->data.book.pair = o->pair;
 
-		for (int j = 0; j < FAKE_BOOK_UPDATE_SIZE; j++) {
-			struct exchg_test_str_l2_update *s = &o->bids[j];
-			if (!s->price)
-				break;
-			e->data.book.num_bids++;
-			decimal_from_str(&e->data.book.bids[j].price, s->price);
-			decimal_from_str(&e->data.book.bids[j].size, s->size);
+		for (struct exchg_test_str_l2_update *s = &o->bids[0];
+		     s->price; s++) {
+			decimal_t price, size;
+			decimal_from_str(&price, s->price);
+			decimal_from_str(&size, s->size);
+			if (exchg_test_l2_queue_order(&e->data.book, true, &price, &size)) {
+				exchg_log("%s: OOM\n", __func__);
+				return;
+			}
 		}
-		for (int j = 0; j < FAKE_BOOK_UPDATE_SIZE; j++) {
-			struct exchg_test_str_l2_update *s = &o->asks[j];
-			if (!s->price)
-				break;
-			e->data.book.num_asks++;
-			decimal_from_str(&e->data.book.asks[j].price, s->price);
-			decimal_from_str(&e->data.book.asks[j].size, s->size);
+		for (struct exchg_test_str_l2_update *s = &o->asks[0];
+		     s->price; s++) {
+			decimal_t price, size;
+			decimal_from_str(&price, s->price);
+			decimal_from_str(&size, s->size);
+			if (exchg_test_l2_queue_order(&e->data.book, false, &price, &size)) {
+				exchg_log("%s: OOM\n", __func__);
+				return;
+			}
 		}
 		set_matching_ws(ctx, event);
 		TAILQ_INSERT_TAIL(&ctx->events, event, list);
@@ -227,6 +265,15 @@ struct exchg_net_context *net_new(struct net_callbacks *c) {
 struct exchg_context *exchg_test_new(struct exchg_callbacks *c,
 				     const struct exchg_options *opts, void *user) {
 	return exchg_new(c, opts, user);
+}
+
+static void free_event(struct exchg_net_context *ctx, struct test_event *ev) {
+	TAILQ_REMOVE(&ctx->events, ev, list);
+	if (ev->event.type == EXCHG_EVENT_BOOK_UPDATE) {
+		free(ev->event.data.book.bids);
+		free(ev->event.data.book.asks);
+	}
+	free(ev);
 }
 
 int net_service(struct exchg_net_context *ctx) {
@@ -280,8 +327,7 @@ int net_service(struct exchg_net_context *ctx) {
 			TAILQ_FOREACH_SAFE(e, &ctx->events, list, tmp) {
 				if (e != ev && e->conn_type == CONN_TYPE_WS &&
 				    e->conn.ws == ev->conn.ws) {
-					TAILQ_REMOVE(&ctx->events, e, list);
-					free(e);
+					free_event(ctx, e);
 				}
 			}
 			ws->on_closed(wsock->user);
@@ -311,8 +357,7 @@ int net_service(struct exchg_net_context *ctx) {
 			TAILQ_FOREACH_SAFE(e, &ctx->events, list, tmp) {
 				if (e != ev && e->conn_type == CONN_TYPE_HTTP &&
 				    e->conn.http == ev->conn.http) {
-					TAILQ_REMOVE(&ctx->events, e, list);
-					free(e);
+					free_event(ctx, e);
 				}
 			}
 			http->on_closed(http_req->user);
@@ -328,16 +373,14 @@ int net_service(struct exchg_net_context *ctx) {
 		}
 		break;
 	}
-	TAILQ_REMOVE(&ctx->events, ev, list);
-	free(ev);
+	free_event(ctx, ev);
 	return 0;
 }
 
 void net_destroy(struct exchg_net_context *ctx) {
 	struct test_event *e, *tmp;
 	TAILQ_FOREACH_SAFE(e, &ctx->events, list, tmp) {
-		TAILQ_REMOVE(&ctx->events, e, list);
-		free(e);
+		free_event(ctx, e);
 	}
 	free(ctx);
 }

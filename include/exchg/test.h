@@ -36,8 +36,6 @@ enum exchg_test_event_type {
 	EXCHG_EVENT_HTTP_CLOSE,
 };
 
-#define FAKE_BOOK_UPDATE_SIZE 100
-
 struct exchg_test_l2_update {
 	decimal_t price;
 	decimal_t size;
@@ -49,10 +47,12 @@ struct exchg_test_event {
 	union {
 		struct exchg_test_l2_updates {
 			enum exchg_pair pair;
-			struct exchg_test_l2_update bids[FAKE_BOOK_UPDATE_SIZE];
-			struct exchg_test_l2_update asks[FAKE_BOOK_UPDATE_SIZE];
 			int num_bids;
 			int num_asks;
+			struct exchg_test_l2_update *bids;
+			struct exchg_test_l2_update *asks;
+			int bid_cap;
+			int ask_cap;
 		} book;
 		struct fake_ack {
 			bool finished;
@@ -66,6 +66,9 @@ struct exchg_test_event {
 		void *protocol_private;
 	} data;
 };
+
+int exchg_test_l2_queue_order(struct exchg_test_l2_updates *u,
+			      bool is_bid, decimal_t *price, decimal_t *size);
 
 struct exchg_context *exchg_test_new(struct exchg_callbacks *c,
 				     const struct exchg_options *opts, void *user);
@@ -99,6 +102,7 @@ struct exchg_test_str_l2_updates {
 	struct exchg_test_str_l2_update asks[10];
 };
 
+// TODO: delete this or put it in a helpers section. keep API small
 void exchg_test_add_l2_events(struct exchg_net_context *ctx,
 			      int n, struct exchg_test_str_l2_updates *msgs);
 
