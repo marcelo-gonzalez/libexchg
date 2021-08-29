@@ -16,13 +16,10 @@
 extern char _binary_test_json_coinbase_products_json_start[];
 extern char _binary_test_json_coinbase_products_json_size[];
 
-static size_t products_read(struct http_req *req, struct exchg_test_event *ev,
-			    char **dst) {
+static void products_read(struct http_req *req, struct exchg_test_event *ev,
+			  struct buf *buf) {
 	size_t size = (size_t)_binary_test_json_coinbase_products_json_size;
-	char *buf = xzalloc(size);
-	memcpy(buf, _binary_test_json_coinbase_products_json_start, size);
-	*dst = buf;
-	return size;
+	buf_xcpy(buf, _binary_test_json_coinbase_products_json_start, size);
 }
 
 static struct http_req *products_dial(struct exchg_net_context *ctx,
@@ -42,23 +39,19 @@ static struct http_req *products_dial(struct exchg_net_context *ctx,
 	return req;
 }
 
-static size_t accounts_read(struct http_req *req, struct exchg_test_event *ev,
-			    char **dst) {
-	char *buf = xzalloc(1<<15);
-	char *b = buf;
-	b += sprintf(b, "[");
+static void accounts_read(struct http_req *req, struct exchg_test_event *ev,
+			  struct buf *buf) {
+	buf_xsprintf(buf, "[");
 	for (enum exchg_currency c = 0; c < EXCHG_NUM_CCYS; c++) {
 		char s[30];
 		decimal_t *balance = &req->ctx->balances[EXCHG_COINBASE][c];
 		decimal_to_str(s, balance);
-		b += sprintf(b, "{\"id\": \"234-abc-def%d\", \"currency\": \"%s\", "
+		buf_xsprintf(buf, "{\"id\": \"234-abc-def%d\", \"currency\": \"%s\", "
 			     "\"balance\": \"%s\", \"hold\": \"0.00\", \"available\": \"%s\", "
 			     "\"profile_id\": \"234-abc-zyx%d\", \"trading_enabled\": true}, ",
 			     c, exchg_ccy_to_upper(c), s, s, c);
 	}
-	b += sprintf(b, "]");
-	*dst = buf;
-	return b-buf;
+	buf_xsprintf(buf, "]");
 }
 
 static struct http_req *accounts_dial(struct exchg_net_context *ctx,
@@ -132,87 +125,84 @@ static const char *coinbase_exchg_pair_to_str(enum exchg_pair p) {
 	}
 }
 
-static size_t proto_read(char *buf, struct coinbase_proto *p) {
-	char *c = buf;
-	c += sprintf(c, "{\"type\":\"subscriptions\",\"channels\":"
+static void proto_read(struct buf *buf, struct coinbase_proto *p) {
+	buf_xsprintf(buf, "{\"type\":\"subscriptions\",\"channels\":"
 		     "[{\"name\":\"level2\",\"product_ids\":[");
 	for (enum exchg_pair pair = 0; pair < EXCHG_NUM_PAIRS; pair++) {
 		if (p->new_sub[pair]) {
 			const char *str = coinbase_exchg_pair_to_str(pair);
 			if (!str) {
-				return sprintf(buf, "{\"error\": \"bad pair\"}");
+				buf_clear(buf);
+				buf_xsprintf(buf, "{\"error\": \"bad pair\"}");
+				return;
 			}
-			c += sprintf(c, "\"%s\", ", str);
+			buf_xsprintf(buf, "\"%s\", ", str);
 		}
 	}
-	c += sprintf(c, "]}]}");
+	buf_xsprintf(buf, "]}]}");
 	free(p);
-	return c-buf;
 }
 
-static size_t ws_read(struct websocket *ws, char **dst,
-		      struct exchg_test_event *msg) {
-	char *buf = xzalloc(1<<12);
-	*dst = buf;
-
-	if (msg->type == EXCHG_EVENT_WS_PROTOCOL)
-		return proto_read(buf, (struct coinbase_proto *)
-				  msg->data.protocol_private);
+static void ws_read(struct websocket *ws, struct buf *buf,
+		    struct exchg_test_event *msg) {
+	if (msg->type == EXCHG_EVENT_WS_PROTOCOL) {
+		proto_read(buf, (struct coinbase_proto *)
+			   msg->data.protocol_private);
+		return;
+	}
 	if (msg->type != EXCHG_EVENT_BOOK_UPDATE)
-		return 0;
+		return;
 
 	struct coinbase_websocket *cb = ws->priv;
 	struct exchg_test_l2_updates *b = &msg->data.book;
 	if (b->num_bids < 1 && b->num_asks < 1)
-		return 0;
+		return;
 	const char *id = coinbase_exchg_pair_to_str(b->pair);
 	if (!id)
-		return 0;
+		return;
 
-	char *c = buf;
-	c += sprintf(c, "{\"type\": \"%s\", \"product_id\": \"%s\", ",
+	buf_xsprintf(buf, "{\"type\": \"%s\", \"product_id\": \"%s\", ",
 		     cb->channels[b->pair].first_sent ? "l2update" : "snapshot", id);
 
 	if (!cb->channels[b->pair].first_sent) {
 		cb->channels[b->pair].first_sent = true;
 		if (b->num_asks > 0)
-			c += sprintf(c, "\"asks\":[");
+			buf_xsprintf(buf, "\"asks\":[");
 		for (int i = 0; i < b->num_asks; i++) {
 			char price[30], size[30];
 			decimal_to_str(price, &b->asks[i].price);
 			decimal_to_str(size, &b->asks[i].size);
-			c += sprintf(c, "[\"%s\",\"%s\"],", price, size);
+			buf_xsprintf(buf, "[\"%s\",\"%s\"],", price, size);
 		}
 		if (b->num_asks > 0)
-			c += sprintf(c, "], ");
+			buf_xsprintf(buf, "], ");
 		if (b->num_bids > 0)
-			c += sprintf(c, "\"bids\":[");
+			buf_xsprintf(buf, "\"bids\":[");
 		for (int i = 0; i < b->num_bids; i++) {
 			char price[30], size[30];
 			decimal_to_str(price, &b->bids[i].price);
 			decimal_to_str(size, &b->bids[i].size);
-			c += sprintf(c, "[\"%s\",\"%s\"],", price, size);
+			buf_xsprintf(buf, "[\"%s\",\"%s\"],", price, size);
 		}
 		if (b->num_bids > 0)
-			c += sprintf(c, "]");
-		c += sprintf(c, "}");
+			buf_xsprintf(buf, "]");
+		buf_xsprintf(buf, "}");
 	} else {
-		c += sprintf(c, "\"changes\":[");
+		buf_xsprintf(buf, "\"changes\":[");
 		for (int i = 0; i < b->num_asks; i++) {
 			char price[30], size[30];
 			decimal_to_str(price, &b->asks[i].price);
 			decimal_to_str(size, &b->asks[i].size);
-			c += sprintf(c, "[\"sell\",\"%s\",\"%s\"],", price, size);
+			buf_xsprintf(buf, "[\"sell\",\"%s\",\"%s\"],", price, size);
 		}
 		for (int i = 0; i < b->num_bids; i++) {
 			char price[30], size[30];
 			decimal_to_str(price, &b->bids[i].price);
 			decimal_to_str(size, &b->bids[i].size);
-			c += sprintf(c, "[\"buy\",\"%s\",\"%s\"],", price, size);
+			buf_xsprintf(buf, "[\"buy\",\"%s\",\"%s\"],", price, size);
 		}
-		c += sprintf(c, "], \"time\": \"2021-08-02T13:18:40.348975Z\"}");
+		buf_xsprintf(buf, "], \"time\": \"2021-08-02T13:18:40.348975Z\"}");
 	}
-	return c-buf;
 }
 
 static int coinbase_str_to_pair(enum exchg_pair *dst, const char *json,

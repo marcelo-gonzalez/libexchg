@@ -21,9 +21,8 @@ struct gemini_websocket {
 	int first_sent;
 };
 
-static size_t gemini_write_orders(char *buf, struct gemini_websocket *g,
-				  struct exchg_test_l2_updates *up, enum exchg_side side) {
-	char *c = buf;
+static void gemini_write_orders(struct buf *buf, struct gemini_websocket *g,
+				struct exchg_test_l2_updates *up, enum exchg_side side) {
 	struct exchg_test_l2_update *orders;
 	int n;
 
@@ -54,13 +53,12 @@ static size_t gemini_write_orders(char *buf, struct gemini_websocket *g,
 			sidestr = "ask";
 
 		// note "delta" is missing
-		c += sprintf(c,
+		buf_xsprintf(buf,
 			     "{\"type\": \"change\", \"reason\": \"%s\""
 			     ", \"price\": \"%s\", "
 			     "\"remaining\": \"%s\", \"side\": \"%s\"}, ",
 			     reason, price, size, sidestr);
 	}
-	return c-buf;
 }
 
 static int get_counter(void) {
@@ -68,17 +66,15 @@ static int get_counter(void) {
 	return ++x;
 }
 
-static size_t gemini_ws_read(struct websocket *ws, char **dst, struct exchg_test_event *msg) {
+static void gemini_ws_read(struct websocket *ws, struct buf *buf,
+			   struct exchg_test_event *msg) {
 	struct gemini_websocket *g = ws->priv;
-	char *buf = xzalloc(1<<13);
-	size_t len = sprintf(buf, "{\"type\": \"update\", \"event_id\": %d, "
-			     "\"socket_sequence\": %d, \"events\": [",
-			     get_counter(), g->sequence++);
-	len += gemini_write_orders(buf+len, g, &msg->data.book, EXCHG_SIDE_BUY);
-	len += gemini_write_orders(buf+len, g, &msg->data.book, EXCHG_SIDE_SELL);
-	len += sprintf(buf+len, "]}");
-	*dst = buf;
-	return len;
+	buf_xsprintf(buf, "{\"type\": \"update\", \"event_id\": %d, "
+		     "\"socket_sequence\": %d, \"events\": [",
+		     get_counter(), g->sequence++);
+	gemini_write_orders(buf, g, &msg->data.book, EXCHG_SIDE_BUY);
+	gemini_write_orders(buf, g, &msg->data.book, EXCHG_SIDE_SELL);
+	buf_xsprintf(buf, "]}");
 }
 
 static void gemini_ws_destroy(struct websocket *w) {
@@ -124,38 +120,30 @@ struct websocket *gemini_ws_dial(struct exchg_net_context *ctx,
 	return s;
 }
 
-static size_t balances_read(struct http_req *req, struct exchg_test_event *ev,
-			    char **dst) {
+static void balances_read(struct http_req *req, struct exchg_test_event *ev,
+			  struct buf *buf) {
 	struct auth_check *a = req->priv;
-	char *buf = xzalloc(400);
-	char *b = buf;
 
 	if (a->hmac_status == AUTH_GOOD) {
-		b += sprintf(b, "[");
+		buf_xsprintf(buf, "[");
 		for (enum exchg_currency c = 0; c < EXCHG_NUM_CCYS; c++) {
 			decimal_t *balance = &req->ctx->balances[EXCHG_GEMINI][c];
 			if (!decimal_is_positive(balance))
 				continue;
 			char s[30];
 			decimal_to_str(s, balance);
-			b += sprintf(b, "{ \"type\": \"exchange\", \"currency\": \"%s\", "
+			buf_xsprintf(buf, "{ \"type\": \"exchange\", \"currency\": \"%s\", "
 				     "\"amount\": \"%s\", \"available\": \"%s\", "
 				     "\"availableForWithdrawal\": \"%s\" }, ",
 				     exchg_ccy_to_upper(c), s, s, s);
 		}
-		b += sprintf(b, "]");
-		*dst = buf;
-		return b-buf;
+		buf_xsprintf(buf, "]");
+	} else if (a->hmac_status == AUTH_BAD) {
+		buf_xsprintf(buf, "{ \"result\": \"error\", \"reason\": \"InvalidSignature\","
+			     "\"message\": \"InvalidSignature\" }");
+	} else {
+		buf_xsprintf(buf, "{}");
 	}
-	if (a->hmac_status == AUTH_BAD) {
-		size_t len =  sprintf(buf, "{ \"result\": \"error\", \"reason\": \"InvalidSignature\","
-				      "\"message\": \"InvalidSignature\" }");
-		*dst = buf;
-		return len;
-	}
-	size_t len = sprintf(buf, "{}");
-	*dst = buf;
-	return len;
 }
 
 static void auth_add_header(struct auth_check *a, const unsigned char *name,
@@ -209,11 +197,9 @@ struct http_place_order {
 	jsmntok_t toks[200];
 };
 
-static size_t place_order_read(struct http_req *req, struct exchg_test_event *ev,
-			       char **dst) {
+static void place_order_read(struct http_req *req, struct exchg_test_event *ev,
+			     struct buf *buf) {
 	struct http_place_order *p = req->priv;
-	char *buf = xzalloc(1<<10);
-	char *b = buf;
 
 	if (p->auth->hmac_status == AUTH_GOOD) {
 		char price[30];
@@ -221,30 +207,24 @@ static size_t place_order_read(struct http_req *req, struct exchg_test_event *ev
 
 		decimal_to_str(price, &ev->data.ack.price);
 		decimal_to_str(size, &ev->data.ack.size);
-		size_t len =  sprintf(b,
-				      "{ \"order_id\": \"123\", \"id\": \"123\", \"symbol\": \"%s\", "
-				      "\"exchange\": \"gemini\", \"avg_execution_price\": \"%s\""
-				      ", \"side\": \"%s\", \"type\": \"exchange limit\", \"timestamp\": \"161"
-				      "1872750\", \"timestampms\": 1611872750275, \"is_live\": false, \"i"
-				      "s_cancelled\": false, \"is_hidden\": false, \"was_forced\": false"
-				      ", \"executed_amount\": \"%s\", \"client_order_id\": \"%"PRId64"\", "
-				      "\"options\": [ \"immediate-or-cancel\" ], \"price\": \"%s\", "
-				      "\"original_amount\": \"%s\", \"remaining_amount\": \"0\" }\n",
-				      exchg_pair_to_str(ev->data.ack.pair), price,
-				      ev->data.ack.side == EXCHG_SIDE_BUY ? "buy" : "sell",
-				      size, ev->data.ack.id, price, size);
-		*dst = buf;
-		return len;
-	}
-	if (p->auth->hmac_status == AUTH_BAD) {
-		size_t len =  sprintf(buf, "{ \"result\": \"error\", \"reason\": \"InvalidSignature\","
+		buf_xsprintf(buf,
+			     "{ \"order_id\": \"123\", \"id\": \"123\", \"symbol\": \"%s\", "
+			     "\"exchange\": \"gemini\", \"avg_execution_price\": \"%s\""
+			     ", \"side\": \"%s\", \"type\": \"exchange limit\", \"timestamp\": \"161"
+			     "1872750\", \"timestampms\": 1611872750275, \"is_live\": false, \"i"
+			     "s_cancelled\": false, \"is_hidden\": false, \"was_forced\": false"
+			     ", \"executed_amount\": \"%s\", \"client_order_id\": \"%"PRId64"\", "
+			     "\"options\": [ \"immediate-or-cancel\" ], \"price\": \"%s\", "
+			     "\"original_amount\": \"%s\", \"remaining_amount\": \"0\" }\n",
+			     exchg_pair_to_str(ev->data.ack.pair), price,
+			     ev->data.ack.side == EXCHG_SIDE_BUY ? "buy" : "sell",
+			     size, ev->data.ack.id, price, size);
+	} else if (p->auth->hmac_status == AUTH_BAD) {
+		buf_xsprintf(buf, "{ \"result\": \"error\", \"reason\": \"InvalidSignature\","
 				      "\"message\": \"InvalidSignature\" }");
-		*dst = buf;
-		return len;
+	} else {
+		buf_xsprintf(buf, "{}");
 	}
-	size_t len = sprintf(buf, "{}");
-	*dst = buf;
-	return len;
 }
 
 static void place_order_add_header(struct http_req *req, const unsigned char *name,

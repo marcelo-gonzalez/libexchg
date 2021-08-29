@@ -30,10 +30,9 @@ struct private_ws {
 	jsmntok_t toks[100];
 };
 
-static size_t kraken_write_orders(char *buf, struct kraken_websocket *k,
-				  struct exchg_test_l2_updates *up, enum exchg_side side) {
+static void kraken_write_orders(struct buf *buf, struct kraken_websocket *k,
+				struct exchg_test_l2_updates *up, enum exchg_side side) {
 	struct kraken_channel *chan = &k->channels[up->pair];
-	char *c = buf;
 	struct exchg_test_l2_update *orders;
 	const char *key;
 	int n;
@@ -49,20 +48,19 @@ static size_t kraken_write_orders(char *buf, struct kraken_websocket *k,
 	}
 
 	if (!orders)
-		return 0;
+		return;
 
-	c += sprintf(c, "\"%s\": [", key);
+	buf_xsprintf(buf, "\"%s\": [", key);
 	chan->first_sent = 1;
 
 	for (int i = 0; i < n; i++) {
 		char price[30], size[30];
 		decimal_to_str(price, &orders[i].price);
 		decimal_to_str(size, &orders[i].size);
-		c += sprintf(c, "[ \"%s\", \"%s\", \"123.456\" ], ",
+		buf_xsprintf(buf, "[ \"%s\", \"%s\", \"123.456\" ], ",
 			     price, size);
 	}
-	c += sprintf(c, "], ");
-	return c-buf;
+	buf_xsprintf(buf, "], ");
 }
 
 static const char *wsname(enum exchg_pair p) {
@@ -168,53 +166,48 @@ struct kraken_proto {
 	struct kraken_websocket *ws;
 };
 
-static size_t proto_read(char *buf, struct kraken_proto *p) {
-	size_t ret = 0;
-
+static void proto_read(struct buf *buf, struct kraken_proto *p) {
 	if (p->type == SYSTEM_STATUS) {
-		ret = sprintf(buf, "{ \"connectionID\": 12345, \"event\":"
-			      " \"systemStatus\", \"status\": \"online\", "
-			      " \"version\": \"1.7.2\" }");
+		buf_xsprintf(buf, "{ \"connectionID\": 12345, \"event\":"
+			     " \"systemStatus\", \"status\": \"online\", "
+			     " \"version\": \"1.7.2\" }");
 	} else if (p->type == SUB_ACK) {
 		p->ws->channels[p->pair].status_sent = 1;
-		ret = sprintf(buf, "{ \"channelID\": %d, \"channelName\": "
-			      "\"book-1000\", \"event\": \"subscriptionStatus\","
-			      " \"pair\": \"%s\", \"status\":"
-			      " \"subscribed\", \"subscription\": { \"depth\": "
-			      "1000, \"name\": \"book\" } }",
-			      p->pair, wsname(p->pair));
+		buf_xsprintf(buf, "{ \"channelID\": %d, \"channelName\": "
+			     "\"book-1000\", \"event\": \"subscriptionStatus\","
+			     " \"pair\": \"%s\", \"status\":"
+			     " \"subscribed\", \"subscription\": { \"depth\": "
+			     "1000, \"name\": \"book\" } }",
+			     p->pair, wsname(p->pair));
 	} else if (p->type == EMPTY_OPENORDERS) {
-		ret = sprintf(buf, "[[],\"openOrders\",{\"sequence\":1}]");
+		buf_xsprintf(buf, "[[],\"openOrders\",{\"sequence\":1}]");
 	}
 	free(p);
-	return ret;
 }
 
-static size_t kraken_ws_read(struct websocket *ws, char **dst,
-			     struct exchg_test_event *msg) {
+static void kraken_ws_read(struct websocket *ws, struct buf *buf,
+			   struct exchg_test_event *msg) {
 	struct exchg_test_l2_updates *up = &msg->data.book;
 	struct kraken_websocket *k = ws->priv;
-	char *buf = xzalloc(1<<10);
 
-	*dst = buf;
-
-	if (msg->type == EXCHG_EVENT_WS_PROTOCOL)
-		return proto_read(buf, (struct kraken_proto *)
-				  msg->data.protocol_private);
+	if (msg->type == EXCHG_EVENT_WS_PROTOCOL) {
+		proto_read(buf, (struct kraken_proto *)
+			   msg->data.protocol_private);
+		return;
+	}
 
 	if (msg->type != EXCHG_EVENT_BOOK_UPDATE)
-		return 0;
+		return;
 
 	if (!k->channels[up->pair].subbed || !k->channels[up->pair].status_sent) {
 		fprintf(stderr, "wtf Kraken cant send event for pair %s yet\n", exchg_pair_to_str(up->pair));
-		return 0;
+		return;
 	}
-	char *c = buf;
-	c += sprintf(c, "[ %d, { ", up->pair);
-	c += kraken_write_orders(c, k, up, EXCHG_SIDE_BUY);
-	c += kraken_write_orders(c, k, up, EXCHG_SIDE_SELL);
-	c += sprintf(c, "}, \"book-100\", \"%s\"]", wsname(up->pair));
-	return c-buf;
+
+	buf_xsprintf(buf, "[ %d, { ", up->pair);
+	kraken_write_orders(buf, k, up, EXCHG_SIDE_BUY);
+	kraken_write_orders(buf, k, up, EXCHG_SIDE_SELL);
+	buf_xsprintf(buf, "}, \"book-100\", \"%s\"]", wsname(up->pair));
 }
 
 static int kraken_ws_matches(struct websocket *w, enum exchg_pair p) {
@@ -319,19 +312,17 @@ struct websocket *kraken_ws_dial(struct exchg_net_context *ctx,
 	return s;
 }
 
-static size_t private_ws_read(struct websocket *ws, char **dst,
-			      struct exchg_test_event *msg) {
-	char *buf = xzalloc(1<<10);
-
-	*dst = buf;
-
-	if (msg->type == EXCHG_EVENT_WS_PROTOCOL)
-		return proto_read(buf, (struct kraken_proto *)
-				  msg->data.protocol_private);
+static void private_ws_read(struct websocket *ws, struct buf *buf,
+			    struct exchg_test_event *msg) {
+	if (msg->type == EXCHG_EVENT_WS_PROTOCOL) {
+		proto_read(buf, (struct kraken_proto *)
+			   msg->data.protocol_private);
+		return;
+	}
 	if (msg->type != EXCHG_EVENT_ORDER_ACK) {
 		fprintf(stderr, "%s: don't know what to do with event %d\n",
 			__func__, msg->type);
-		return 0;
+		return;
 	}
 
 	struct private_ws *pw = ws->priv;
@@ -344,10 +335,10 @@ static size_t private_ws_read(struct websocket *ws, char **dst,
 			ev->data.ack = msg->data.ack;
 			ev->data.ack.finished = true;
 		}
-		return sprintf(buf, "{\"event\": \"addOrderStatus\", "
-			       "\"status\": \"ok\", \"txid\": \"asdf\", "
-			       "\"reqid\": %"PRId64", "
-			       "}", ack->id);
+		buf_xsprintf(buf, "{\"event\": \"addOrderStatus\", "
+			     "\"status\": \"ok\", \"txid\": \"asdf\", "
+			     "\"reqid\": %"PRId64", "
+			     "}", ack->id);
 	} else {
 		decimal_t cost, fee;
 		char cost_str[30], fee_str[30];
@@ -363,10 +354,10 @@ static size_t private_ws_read(struct websocket *ws, char **dst,
 		decimal_to_str(price_str, &ack->price);
 		decimal_to_str(size_str, &ack->size);
 
-		return sprintf(buf, "[[{\"OTA3RV-MJC5U-T5FQE2\":{\"status\":\"closed\",\"cost\":\"%s\""
-			       ",\"vol_exec\":\"%s\",\"fee\":\"%s\",\"avg_price\":\"%s\","
-			       "\"lastupdated\":\"1627305317.892973\",\"userref\":%"PRId64"}"
-			       "}],\"openOrders\",{\"sequence\":5}]\n", cost_str, size_str, fee_str, price_str, ack->id);
+		buf_xsprintf(buf, "[[{\"OTA3RV-MJC5U-T5FQE2\":{\"status\":\"closed\",\"cost\":\"%s\""
+			     ",\"vol_exec\":\"%s\",\"fee\":\"%s\",\"avg_price\":\"%s\","
+			     "\"lastupdated\":\"1627305317.892973\",\"userref\":%"PRId64"}"
+			     "}],\"openOrders\",{\"sequence\":5}]\n", cost_str, size_str, fee_str, price_str, ack->id);
 	}
 }
 
@@ -557,13 +548,10 @@ struct websocket *kraken_ws_auth_dial(struct exchg_net_context *ctx,
 extern char _binary_test_json_kraken_pair_info_json_start[];
 extern char _binary_test_json_kraken_pair_info_json_size[];
 
-static size_t kraken_pair_info_read(struct http_req *req, struct exchg_test_event *ev,
-				    char **dst) {
+static void kraken_pair_info_read(struct http_req *req, struct exchg_test_event *ev,
+				  struct buf *buf) {
 	size_t size = (size_t)_binary_test_json_kraken_pair_info_json_size;
-	char *buf = xzalloc(size);
-	memcpy(buf, _binary_test_json_kraken_pair_info_json_start, size);
-	*dst = buf;
-	return size;
+	buf_xcpy(buf, _binary_test_json_kraken_pair_info_json_start, size);
 }
 
 static struct http_req *asset_pairs_dial(struct exchg_net_context *ctx,
@@ -592,22 +580,18 @@ static void balances_write(struct http_req *req) {
 	// TODO
 }
 
-static size_t balances_read(struct http_req *req, struct exchg_test_event *ev,
-			    char **dst) {
-	char *buf = xzalloc(300);
-	char *b = buf;
-	b += sprintf(b, "{\"error\": [], \"result\": {");
+static void balances_read(struct http_req *req, struct exchg_test_event *ev,
+			  struct buf *buf) {
+	buf_xsprintf(buf, "{\"error\": [], \"result\": {");
 	for (enum exchg_currency c = 0; c < EXCHG_NUM_CCYS; c++) {
 		char s[30];
 		decimal_t *balance = &req->ctx->balances[EXCHG_KRAKEN][c];
 		if (!decimal_is_positive(balance))
 			continue;
 		decimal_to_str(s, balance);
-		b += sprintf(b, "\"%s\": \"%s\", ", kraken_ccy_str(c), s);
+		buf_xsprintf(buf, "\"%s\": \"%s\", ", kraken_ccy_str(c), s);
 	}
-	b += sprintf(b, "}}");
-	*dst = buf;
-	return b-buf;
+	buf_xsprintf(buf, "}}");
 }
 
 static void balances_free(struct http_req *req) {
@@ -649,12 +633,10 @@ static struct http_req *balances_dial(struct exchg_net_context *ctx,
 
 #define FAKE_WS_TOKEN "asdfkrakentokenasdf"
 
-static size_t token_read(struct http_req *req, struct exchg_test_event *ev,
-			 char **dst) {
-	char *buf = xzalloc(300);
-	*dst = buf;
-	return sprintf(buf, "{\"error\":[],\"result\":{\""
-		       "token\":\"" FAKE_WS_TOKEN "\",\"expires\":900}}");
+static void token_read(struct http_req *req, struct exchg_test_event *ev,
+		       struct buf *buf) {
+	buf_xsprintf(buf, "{\"error\":[],\"result\":{\""
+		     "token\":\"" FAKE_WS_TOKEN "\",\"expires\":900}}");
 }
 
 static struct http_req *token_dial(struct exchg_net_context *ctx,

@@ -21,9 +21,8 @@ struct bitstamp_websocket {
 	} channels[EXCHG_NUM_PAIRS];
 };
 
-static size_t write_orders_side(char *buf, struct exchg_test_l2_updates *update,
-				bool is_bids) {
-	char *c = buf;
+static void write_orders_side(struct buf *buf, struct exchg_test_l2_updates *update,
+			      bool is_bids) {
 	struct exchg_test_l2_update *orders;
 	int n;
 
@@ -36,31 +35,28 @@ static size_t write_orders_side(char *buf, struct exchg_test_l2_updates *update,
 	}
 
 	if (n < 1)
-		return 0;
+		return;
 
-	c += sprintf(c, "\"%s\": [", is_bids ? "bids" : "asks");
+	buf_xsprintf(buf, "\"%s\": [", is_bids ? "bids" : "asks");
 	for (int i = 0; i < n; i++) {
 		char size[30], price[30];
 		decimal_to_str(size, &orders[i].size);
 		decimal_to_str(price, &orders[i].price);
-		c += sprintf(c, "[ \"%s\", \"%s\"], ",
+		buf_xsprintf(buf, "[ \"%s\", \"%s\"], ",
 			     price, size);
 	}
-	c += sprintf(c, "], ");
-	return c-buf;
+	buf_xsprintf(buf, "], ");
 }
 
-static size_t write_orders(char *buf, struct exchg_test_l2_updates *update,
-			   bool is_diff) {
-	char *c = buf;
-	c += sprintf(c, "{ \"data\": {\"timestamp\": \"123\", "
+static void write_orders(struct buf *buf, struct exchg_test_l2_updates *update,
+			 bool is_diff) {
+	buf_xsprintf(buf, "{ \"data\": {\"timestamp\": \"123\", "
 		     "\"microtimestamp\": \"123000\", ");
-	c += write_orders_side(c, update, true);
-	c += write_orders_side(c, update, false);
-	c += sprintf(c, "}, \"channel\": \"%sorder_book_%s\", "
+	write_orders_side(buf, update, true);
+	write_orders_side(buf, update, false);
+	buf_xsprintf(buf, "}, \"channel\": \"%sorder_book_%s\", "
 		     "\"event\": \"data\" }", is_diff ? "diff_" : "",
 		     exchg_pair_to_str(update->pair));
-	return c-buf;
 }
 
 enum proto_type {
@@ -73,9 +69,7 @@ struct bitstamp_proto {
 	enum exchg_pair pair;
 };
 
-static size_t proto_read(char *buf, struct bitstamp_proto *bp) {
-	size_t ret = 0;
-
+static void proto_read(struct buf *buf, struct bitstamp_proto *bp) {
 	if (bp->type == NONSENSE_DIFF) {
 		decimal_t dummy_value = {.places = 0, .value = 1};
 		struct exchg_test_l2_updates u = {
@@ -85,34 +79,33 @@ static size_t proto_read(char *buf, struct bitstamp_proto *bp) {
 					  &dummy_value, &dummy_value);
 		exchg_test_l2_queue_order(&u, false,
 					  &dummy_value, &dummy_value);
-		ret = write_orders(buf, &u, true);
+		write_orders(buf, &u, true);
 		free(u.bids);
 		free(u.asks);
 	} else if (bp->type == UNSUB_SUCCEEDED) {
-		ret = sprintf(buf, "{ \"event\": \""
-			      "bts:unsubscription_succeeded\","
-			      " \"channel\": \"order_book_%s\""
-			      ", \"data\": { } }",
-			      exchg_pair_to_str(bp->pair));
+		buf_xsprintf(buf, "{ \"event\": \""
+			     "bts:unsubscription_succeeded\","
+			     " \"channel\": \"order_book_%s\""
+			     ", \"data\": { } }",
+			     exchg_pair_to_str(bp->pair));
 	}
 	free(bp);
-	return ret;
 }
 
-static size_t bitstamp_ws_read(struct websocket *ws, char **dst, struct exchg_test_event *msg) {
-	char *buf = xzalloc(1<<10);
+static void bitstamp_ws_read(struct websocket *ws, struct buf *buf,
+			     struct exchg_test_event *msg) {
 	struct bitstamp_websocket *b = ws->priv;
 
-	*dst = buf;
-
-	if (msg->type == EXCHG_EVENT_WS_PROTOCOL)
-		return proto_read(buf, (struct bitstamp_proto *)
-				  msg->data.protocol_private);
+	if (msg->type == EXCHG_EVENT_WS_PROTOCOL) {
+		proto_read(buf, (struct bitstamp_proto *)
+			   msg->data.protocol_private);
+		return;
+	}
 
 	struct exchg_test_l2_updates *u = &msg->data.book;
 	struct bitstamp_channel *c = &b->channels[u->pair];
-	return write_orders(buf, u, c->diff_subbed &&
-			    (!c->full_subbed || c->full_unsubbed));
+	write_orders(buf, u, c->diff_subbed &&
+		     (!c->full_subbed || c->full_unsubbed));
 }
 
 static int bitstamp_ws_matches(struct websocket *w, enum exchg_pair p) {
@@ -215,13 +208,10 @@ struct websocket *bitstamp_ws_dial(struct exchg_net_context *ctx,
 extern char _binary_test_json_bitstamp_pairs_info_json_start[];
 extern char _binary_test_json_bitstamp_pairs_info_json_size[];
 
-static size_t bitstamp_pair_info_read(struct http_req *req, struct exchg_test_event *ev,
-				      char **dst) {
+static void bitstamp_pair_info_read(struct http_req *req, struct exchg_test_event *ev,
+				      struct buf *buf) {
 	size_t size = (size_t)_binary_test_json_bitstamp_pairs_info_json_size;
-	char *buf = xzalloc(size);
-	memcpy(buf, _binary_test_json_bitstamp_pairs_info_json_start, size);
-	*dst = buf;
-	return size;
+	buf_xcpy(buf, _binary_test_json_bitstamp_pairs_info_json_start, size);
 }
 
 static struct http_req *asset_pairs_dial(struct exchg_net_context *ctx,
@@ -241,22 +231,17 @@ static struct http_req *asset_pairs_dial(struct exchg_net_context *ctx,
 	return req;
 }
 
-static size_t bitstamp_balance_read(struct http_req *req, struct exchg_test_event *ev,
-				    char **dst) {
-	char *buf = xzalloc(1000);
-	char *p = buf;
-
-	p += sprintf(p, "{ ");
+static void bitstamp_balance_read(struct http_req *req, struct exchg_test_event *ev,
+				    struct buf *buf) {
+	buf_xsprintf(buf, "{ ");
 	for (enum exchg_currency c = 0; c < EXCHG_NUM_CCYS; c++) {
 		char s[30];
 		decimal_to_str(s, &req->ctx->balances[EXCHG_BITSTAMP][c]);
-		p += sprintf(p, "\"%s_available\": \"%s\", ",
+		buf_xsprintf(buf, "\"%s_available\": \"%s\", ",
 			     exchg_ccy_to_str(c), s);
 		// TODO: other fields too
 	}
-	p += sprintf(p, " }");
-	*dst = buf;
-	return p-buf;
+	buf_xsprintf(buf, " }");
 }
 
 static struct http_req *balance_dial(struct exchg_net_context *ctx,

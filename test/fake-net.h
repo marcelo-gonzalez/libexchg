@@ -26,7 +26,7 @@ struct http_req {
 	struct exchg_net_context *ctx;
 	struct exchg_test_event *read_event;
 	struct buf body;
-	size_t (*read)(struct http_req *req, struct exchg_test_event *ev, char **dst);
+	void (*read)(struct http_req *req, struct exchg_test_event *ev, struct buf *buf);
 	void (*write)(struct http_req *req);
 	void (*add_header)(struct http_req *req, const unsigned char *name,
 			   const unsigned char *val, size_t len);
@@ -40,12 +40,20 @@ struct websocket {
 	LIST_ENTRY(websocket) list;
 	void *user;
 	struct exchg_net_context *ctx;
-	size_t (*read)(struct websocket *, char **buf, struct exchg_test_event *);
+	void (*read)(struct websocket *, struct buf *buf, struct exchg_test_event *);
 	void (*write)(struct websocket *, char *buf, size_t len);
 	int (*matches)(struct websocket *, enum exchg_pair );
 	void (*destroy)(struct websocket *);
 	void *priv;
 };
+
+int buf_xsprintf(struct buf *buf, const char *fmt, ...)
+	__attribute__((format (printf, 2, 3)));
+void buf_xcpy(struct buf *buf, void *src, size_t len);
+
+static inline void buf_clear(struct buf *buf) {
+	buf->len = 0;
+}
 
 struct exchg_test_event *exchg_fake_queue_ws_event(
 	struct websocket *w, enum exchg_test_event_type type);

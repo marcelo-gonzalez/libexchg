@@ -24,7 +24,7 @@
 	     (var) = (tmp))
 #endif
 
-static int buf_alloc(struct buf *buf, size_t size) {
+static int buf_init(struct buf *buf, size_t size) {
 	buf->buf = malloc(size);
 	if (!buf->buf) {
 		fprintf(stderr, "%s: OOM\n", __func__);
@@ -43,7 +43,7 @@ static int buf_vsprintf(struct buf *buf, const char *fmt, va_list ap) {
 	while ((len = vsnprintf(&buf->buf[buf->len],
 				buf->size - buf->len, fmt, ap)) >=
 	       buf->size - buf->len) {
-		int sz = buf->len + len + 1;
+		int sz = 2*(buf->len + len + 1);
 		char *b = realloc(buf->buf, sz);
 		if (!b) {
 			fprintf(stderr, "%s: OOM\n", __func__);
@@ -58,8 +58,35 @@ static int buf_vsprintf(struct buf *buf, const char *fmt, va_list ap) {
 	return len;
 }
 
+int buf_xsprintf(struct buf *buf, const char *fmt, ...) {
+	va_list ap;
+
+	va_start(ap, fmt);
+	int ret = buf_vsprintf(buf, fmt, ap);
+	if (ret < 0)
+		exit(1);
+	va_end(ap);
+
+	return ret;
+}
+
+void buf_xcpy(struct buf *buf, void *src, size_t len) {
+	if (buf->size < len + buf->len) {
+		int sz = 2 * (len + buf->len);
+		char *b = realloc(buf->buf, sz);
+		if (!b) {
+			fprintf(stderr, "%s: OOM\n", __func__);
+			exit(1);
+		}
+		buf->buf = b;
+		buf->size = sz;
+	}
+	memcpy(&buf->buf[buf->len], src, len);
+	buf->len += len;
+}
+
 int http_vsprintf(struct http_req *req, const char *fmt, va_list ap) {
-	if (!req->body.buf && buf_alloc(&req->body, 200))
+	if (!req->body.buf && buf_init(&req->body, 200))
 		return -1;
 
 	return buf_vsprintf(&req->body, fmt, ap);
@@ -278,8 +305,7 @@ static void free_event(struct exchg_net_context *ctx, struct test_event *ev) {
 
 int net_service(struct exchg_net_context *ctx) {
 	int ret;
-	char *buf;
-	size_t len;
+	struct buf buf;
 	struct test_event *ev, *e, *tmp;
 	struct exchg_test_event *event = NULL;
 	struct websocket_callbacks *ws = &ctx->callbacks->ws;
@@ -334,9 +360,11 @@ int net_service(struct exchg_net_context *ctx) {
 			wsock->destroy(wsock);
 			break;
 		default:
-			len = wsock->read(wsock, &buf, event);
-			ws->recv(wsock->user, buf, len);
-			free(buf);
+			if (buf_init(&buf, 1<<10))
+				return -1;
+			wsock->read(wsock, &buf, event);
+			ws->recv(wsock->user, buf.buf, buf.len);
+			free(buf.buf);
 			break;
 		}
 		break;
@@ -364,9 +392,11 @@ int net_service(struct exchg_net_context *ctx) {
 			http_req->destroy(http_req);
 			break;
 		default:
-			len = http_req->read(http_req, event, &buf);
-			http->recv(http_req->user, buf, len);
-			free(buf);
+			if (buf_init(&buf, 1<<10))
+				return -1;
+			http_req->read(http_req, event, &buf);
+			http->recv(http_req->user, buf.buf, buf.len);
+			free(buf.buf);
 			http_close(http_req);
 			http_req->read_event = NULL;
 			break;
@@ -492,7 +522,7 @@ int ws_vprintf(struct websocket *ws, const char *fmt, va_list ap) {
 	} else {
 		struct buf b;
 
-		if (buf_alloc(&b, len+1))
+		if (buf_init(&b, len+1))
 			return -1;
 		len = buf_vsprintf(&b, fmt, a);
 		if (len < 0) {
