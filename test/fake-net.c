@@ -252,9 +252,15 @@ void exchg_test_add_l2_events(struct exchg_net_context *ctx,
 	}
 }
 
+void *test_event_private(struct exchg_test_event *event) {
+	struct test_event *container = (struct test_event *)((void *)event -
+							     (void *)&((struct test_event *)NULL)->event);
+	return container->private;
+}
+
 struct exchg_test_event *exchg_fake_queue_ws_event(
-	struct websocket *w, enum exchg_test_event_type type) {
-	struct test_event *event = xzalloc(sizeof(*event));
+	struct websocket *w, enum exchg_test_event_type type, size_t private_size) {
+	struct test_event *event = xzalloc(sizeof(*event) + private_size);
 	struct exchg_test_event *e = &event->event;
 
 	event->conn_type = CONN_TYPE_WS;
@@ -273,12 +279,6 @@ struct exchg_test_event *exchg_fake_queue_ws_event(
 	else
 		TAILQ_INSERT_HEAD(&w->ctx->events, event, list);
 	return e;
-}
-
-void exchg_fake_queue_ws_protocol(struct websocket *w, void *private) {
-	struct exchg_test_event *e = exchg_fake_queue_ws_event(
-		w, EXCHG_EVENT_WS_PROTOCOL);
-	e->data.protocol_private = private;
 }
 
 struct exchg_net_context *net_new(struct net_callbacks *c) {

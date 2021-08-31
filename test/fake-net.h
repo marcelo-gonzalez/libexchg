@@ -56,9 +56,7 @@ static inline void buf_clear(struct buf *buf) {
 }
 
 struct exchg_test_event *exchg_fake_queue_ws_event(
-	struct websocket *w, enum exchg_test_event_type type);
-
-void exchg_fake_queue_ws_protocol(struct websocket *w, void *private);
+	struct websocket *w, enum exchg_test_event_type type, size_t private_size);
 
 void no_ws_write(struct websocket *, char *, size_t);
 
@@ -105,7 +103,10 @@ struct test_event {
 	} conn;
 	struct exchg_test_event event;
 	TAILQ_ENTRY(test_event) list;
+	char private[];
 };
+
+void *test_event_private(struct exchg_test_event *event);
 
 struct exchg_net_context {
 	struct net_callbacks *callbacks;

@@ -63,7 +63,6 @@ struct exchg_test_event {
 			decimal_t size;
 			enum exchg_side side;
 		} ack;
-		void *protocol_private;
 	} data;
 };
 

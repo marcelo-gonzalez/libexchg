@@ -182,7 +182,6 @@ static void proto_read(struct buf *buf, struct kraken_proto *p) {
 	} else if (p->type == EMPTY_OPENORDERS) {
 		buf_xsprintf(buf, "[[],\"openOrders\",{\"sequence\":1}]");
 	}
-	free(p);
 }
 
 static void kraken_ws_read(struct websocket *ws, struct buf *buf,
@@ -191,8 +190,7 @@ static void kraken_ws_read(struct websocket *ws, struct buf *buf,
 	struct kraken_websocket *k = ws->priv;
 
 	if (msg->type == EXCHG_EVENT_WS_PROTOCOL) {
-		proto_read(buf, (struct kraken_proto *)
-			   msg->data.protocol_private);
+		proto_read(buf, (struct kraken_proto *)test_event_private(msg));
 		return;
 	}
 
@@ -256,11 +254,12 @@ static void kraken_ws_write(struct websocket *w, char *buf, size_t len) {
 				}
 				// TODO: be more correct around logic. e.g.
 				// what if you sub twice?
-				struct kraken_proto *kp = xzalloc(sizeof(*kp));
+				struct kraken_proto *kp = test_event_private(
+					exchg_fake_queue_ws_event(w, EXCHG_EVENT_WS_PROTOCOL,
+								  sizeof(struct kraken_proto)));
 				kp->type = SUB_ACK;
 				kp->pair = pair;
 				kp->ws = k;
-				exchg_fake_queue_ws_protocol(w, kp);
 				k->channels[pair].subbed = 1;
 			}
 			got_pair = true;
@@ -306,17 +305,17 @@ struct websocket *kraken_ws_dial(struct exchg_net_context *ctx,
 	s->destroy = kraken_ws_destroy;
 	struct kraken_websocket *kkn = xzalloc(sizeof(*kkn));
 	s->priv = kkn;
-	struct kraken_proto *k = xzalloc(sizeof(*k));
+	struct kraken_proto *k = test_event_private(
+		exchg_fake_queue_ws_event(s, EXCHG_EVENT_WS_PROTOCOL,
+					  sizeof(struct kraken_proto)));
 	k->type = SYSTEM_STATUS;
-	exchg_fake_queue_ws_protocol(s, k);
 	return s;
 }
 
 static void private_ws_read(struct websocket *ws, struct buf *buf,
 			    struct exchg_test_event *msg) {
 	if (msg->type == EXCHG_EVENT_WS_PROTOCOL) {
-		proto_read(buf, (struct kraken_proto *)
-			   msg->data.protocol_private);
+		proto_read(buf, (struct kraken_proto *)test_event_private(msg));
 		return;
 	}
 	if (msg->type != EXCHG_EVENT_ORDER_ACK) {
@@ -331,7 +330,7 @@ static void private_ws_read(struct websocket *ws, struct buf *buf,
 	if (!ack->finished) {
 		if (pw->openorders_subbed) {
 			struct exchg_test_event *ev = exchg_fake_queue_ws_event(
-				ws, EXCHG_EVENT_ORDER_ACK);
+				ws, EXCHG_EVENT_ORDER_ACK, 0);
 			ev->data.ack = msg->data.ack;
 			ev->data.ack.finished = true;
 		}
@@ -503,7 +502,7 @@ static void private_ws_write(struct websocket *w, char *buf, size_t len) {
 			goto bad;
 		}
 		struct exchg_test_event *ev = exchg_fake_queue_ws_event(
-			w, EXCHG_EVENT_ORDER_ACK);
+			w, EXCHG_EVENT_ORDER_ACK, 0);
 		ev->data.ack = ack;
 		ev->data.ack.finished = false;
 	} else if (event == EVENT_SUB) {
@@ -511,9 +510,10 @@ static void private_ws_write(struct websocket *w, char *buf, size_t len) {
 			problem = "missing \"name\"";
 			goto bad;
 		}
-		struct kraken_proto *kp = xzalloc(sizeof(*kp));
+		struct kraken_proto *kp = test_event_private(
+			exchg_fake_queue_ws_event(w, EXCHG_EVENT_WS_PROTOCOL,
+						  sizeof(struct kraken_proto)));
 		kp->type = EMPTY_OPENORDERS;
-		exchg_fake_queue_ws_protocol(w, kp);
 		pw->openorders_subbed = true;
 	}
 	return;
@@ -539,9 +539,10 @@ struct websocket *kraken_ws_auth_dial(struct exchg_net_context *ctx,
 	s->destroy = private_ws_destroy;
 	struct private_ws *pw = xzalloc(sizeof(*pw));
 	s->priv = pw;
-	struct kraken_proto *k = xzalloc(sizeof(*k));
+	struct kraken_proto *k = test_event_private(
+		exchg_fake_queue_ws_event(s, EXCHG_EVENT_WS_PROTOCOL,
+					  sizeof(struct kraken_proto)));
 	k->type = SYSTEM_STATUS;
-	exchg_fake_queue_ws_protocol(s, k);
 	return s;
 }
 

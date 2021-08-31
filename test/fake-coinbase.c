@@ -140,14 +140,12 @@ static void proto_read(struct buf *buf, struct coinbase_proto *p) {
 		}
 	}
 	buf_xsprintf(buf, "]}]}");
-	free(p);
 }
 
 static void ws_read(struct websocket *ws, struct buf *buf,
 		    struct exchg_test_event *msg) {
 	if (msg->type == EXCHG_EVENT_WS_PROTOCOL) {
-		proto_read(buf, (struct coinbase_proto *)
-			   msg->data.protocol_private);
+		proto_read(buf, (struct coinbase_proto *)test_event_private(msg));
 		return;
 	}
 	if (msg->type != EXCHG_EVENT_BOOK_UPDATE)
@@ -293,9 +291,10 @@ static void ws_write(struct websocket *w, char *json, size_t len) {
 		key_idx = json_skip(r, c->toks, key_idx+1);
 	}
 	if (subbed) {
-		struct coinbase_proto *cp = xzalloc(sizeof(*cp));
+		struct coinbase_proto *cp = test_event_private(
+			exchg_fake_queue_ws_event(w, EXCHG_EVENT_WS_PROTOCOL,
+						  sizeof(struct coinbase_proto)));
 		memcpy(cp->new_sub, new_sub, sizeof(new_sub));
-		exchg_fake_queue_ws_protocol(w, cp);
 	}
 	return;
 

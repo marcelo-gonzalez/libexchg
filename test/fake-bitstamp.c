@@ -89,7 +89,6 @@ static void proto_read(struct buf *buf, struct bitstamp_proto *bp) {
 			     ", \"data\": { } }",
 			     exchg_pair_to_str(bp->pair));
 	}
-	free(bp);
 }
 
 static void bitstamp_ws_read(struct websocket *ws, struct buf *buf,
@@ -97,8 +96,7 @@ static void bitstamp_ws_read(struct websocket *ws, struct buf *buf,
 	struct bitstamp_websocket *b = ws->priv;
 
 	if (msg->type == EXCHG_EVENT_WS_PROTOCOL) {
-		proto_read(buf, (struct bitstamp_proto *)
-			   msg->data.protocol_private);
+		proto_read(buf, (struct bitstamp_proto *)test_event_private(msg));
 		return;
 	}
 
@@ -162,10 +160,11 @@ static void bitstamp_ws_write(struct websocket *w, char *buf, size_t len) {
 			b->channels[p].full_subbed = true;
 		} else {
 			b->channels[p].diff_subbed = true;
-			struct bitstamp_proto *bp = xzalloc(sizeof(*bp));
+			struct bitstamp_proto *bp = test_event_private(
+				exchg_fake_queue_ws_event(w, EXCHG_EVENT_WS_PROTOCOL,
+							  sizeof(struct bitstamp_proto)));
 			bp->type = NONSENSE_DIFF;
 			bp->pair = p;
-			exchg_fake_queue_ws_protocol(w, bp);
 		}
 	} else if (!strncmp("{ \"event\": \"bts:unsubscribe\","
 			    "\"data\": { \"channel\": \"", buf,
@@ -176,10 +175,11 @@ static void bitstamp_ws_write(struct websocket *w, char *buf, size_t len) {
 				&p, &is_full))
 			return;
 		if (is_full) {
-			struct bitstamp_proto *bp = xzalloc(sizeof(*bp));
+			struct bitstamp_proto *bp = test_event_private(
+				exchg_fake_queue_ws_event(w, EXCHG_EVENT_WS_PROTOCOL,
+							  sizeof(struct bitstamp_proto)));
 			bp->type = UNSUB_SUCCEEDED;
 			bp->pair = p;
-			exchg_fake_queue_ws_protocol(w, bp);
 			b->channels[p].full_unsubbed = true;
 	        } else {
 			fprintf(stderr, "Bitsamp unsubbed from diff order book?\n");
