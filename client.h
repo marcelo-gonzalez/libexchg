@@ -7,6 +7,7 @@
 #include <glib.h>
 #include <jsmn/jsmn.h>
 #include <libwebsockets.h>
+#include <openssl/hmac.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <sys/queue.h>

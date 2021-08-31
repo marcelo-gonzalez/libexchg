@@ -12,3 +12,4 @@ hero@foo.bar:~/libexchg$ ./examples/print-book/print-book -E kraken ethusd
 * [libglib](https://gitlab.gnome.org/GNOME/glib) (version 2.68 or later required)
 * [libwebsockets](https://libwebsockets.org/git/libwebsockets/)
 * [jsmn](https://github.com/zserge/jsmn)
+* [libcrypto](https://git.openssl.org/?p=openssl.git;a=summary)
