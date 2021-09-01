@@ -317,6 +317,11 @@ enum ack_type {
 	ACK_OPENORDERS,
 };
 
+struct ack_msg {
+	enum ack_type type;
+	int64_t reqid;
+};
+
 static void private_ws_read(struct websocket *ws, struct buf *buf,
 			    struct exchg_test_event *msg) {
 	if (msg->type == EXCHG_EVENT_WS_PROTOCOL) {
@@ -334,13 +339,14 @@ static void private_ws_read(struct websocket *ws, struct buf *buf,
 	char cost_str[30], fee_str[30];
 	char price_str[30], size_str[30];
 	struct exchg_order_info *ack = &msg->data.ack;
+	struct ack_msg *ack_msg = test_event_private(msg);
 
-	switch (*(enum ack_type *)test_event_private(msg)) {
+	switch (ack_msg->type) {
 	case ACK_ADDORDERSTATUS:
 		buf_xsprintf(buf, "{\"event\": \"addOrderStatus\", "
 			     "\"status\": \"ok\", \"txid\": \"asdf\", "
 			     "\"reqid\": %"PRId64", "
-			     "}", ack->id);
+			     "}", ack_msg->reqid);
 		break;
 	case ACK_OPENORDERS:
 		switch (ack->status) {
@@ -375,7 +381,7 @@ static void private_ws_read(struct websocket *ws, struct buf *buf,
 			     ",\"vol_exec\":\"%s\",\"fee\":\"%s\",\"avg_price\":\"%s\","
 			     "\"lastupdated\":\"1627305317.892973\",\"userref\":%"PRId64"}"
 			     "}],\"openOrders\",{\"sequence\":5}]\n",
-			     status, cost_str, size_str, fee_str, price_str, ack->id);
+			     status, cost_str, size_str, fee_str, price_str, ack_msg->reqid);
 		break;
 	}
 }
@@ -415,6 +421,7 @@ static void private_ws_write(struct websocket *w, char *buf, size_t len) {
 	}
 
 	struct exchg_order_info ack = {};
+	int64_t reqid;
 	enum private_ws_event event = EVENT_UNKNOWN;
 	enum private_ws_channel chan = CHAN_UNKNOWN;
 	bool got_id = false, got_price = false;
@@ -487,7 +494,7 @@ static void private_ws_write(struct websocket *w, char *buf, size_t len) {
 			}
 			got_size = true;
 		} else if (json_streq(buf, key, "reqid")) {
-			if (json_get_int64(&ack.id, buf, value)) {
+			if (json_get_int64(&reqid, buf, value)) {
 				problem = "bad reqid field";
 				goto bad;
 			}
@@ -522,18 +529,20 @@ static void private_ws_write(struct websocket *w, char *buf, size_t len) {
 			goto bad;
 		}
 		struct exchg_test_event *ev = exchg_fake_queue_ws_event_tail(
-			w, EXCHG_EVENT_ORDER_ACK, sizeof(enum ack_type));
+			w, EXCHG_EVENT_ORDER_ACK, sizeof(struct ack_msg));
 		ev->data.ack = ack;
 		ev->data.ack.status = EXCHG_ORDER_PENDING;
-		*(enum ack_type *)test_event_private(ev) = ACK_ADDORDERSTATUS;
+		struct ack_msg *msg = test_event_private(ev);
+		msg->type = ACK_ADDORDERSTATUS;
+		msg->reqid = reqid;
 		if (pw->openorders_subbed) {
 			ev = exchg_fake_queue_ws_event_tail(
-				w, EXCHG_EVENT_ORDER_ACK, sizeof(enum ack_type));
+				w, EXCHG_EVENT_ORDER_ACK, sizeof(struct ack_msg));
 			ev->data.ack = ack;
-			on_order_placed(w->ctx, EXCHG_KRAKEN,
-					&ev->data.ack.filled_size, &ev->data.ack.status,
-					&ack.order, &ack.opts);
-			*(enum ack_type *)test_event_private(ev) = ACK_OPENORDERS;
+			on_order_placed(w->ctx, EXCHG_KRAKEN, &ev->data.ack);
+			struct ack_msg *msg = test_event_private(ev);
+			msg->type = ACK_OPENORDERS;
+			msg->reqid = reqid;
 		}
 	} else if (event == EVENT_SUB) {
 		if (chan == CHAN_UNKNOWN) {

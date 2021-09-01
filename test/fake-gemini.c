@@ -192,6 +192,7 @@ static struct http_req *balances_dial(struct exchg_net_context *ctx,
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof(*x))
 
 struct http_place_order {
+	int64_t client_oid;
 	struct auth_check *auth;
 	jsmn_parser parser;
 	jsmntok_t toks[200];
@@ -231,7 +232,7 @@ static void place_order_read(struct http_req *req, struct exchg_test_event *ev,
 			     "\"original_amount\": \"%s\", \"remaining_amount\": \"0\" }\n",
 			     exchg_pair_to_str(ev->data.ack.order.pair), price,
 			     ev->data.ack.order.side == EXCHG_SIDE_BUY ? "buy" : "sell",
-			     is_live, is_canceled, size, ev->data.ack.id, price, size);
+			     is_live, is_canceled, size, p->client_oid, price, size);
 	} else if (p->auth->hmac_status == AUTH_BAD) {
 		buf_xsprintf(buf, "{ \"result\": \"error\", \"reason\": \"InvalidSignature\","
 				      "\"message\": \"InvalidSignature\" }");
@@ -262,7 +263,6 @@ static void place_order_add_header(struct http_req *req, const unsigned char *na
 		goto bad;
 	}
 
-	ack->id = -1;
 	bool got_price = false;
 	bool got_size = false;
 	bool got_pair = false;
@@ -274,7 +274,7 @@ static void place_order_add_header(struct http_req *req, const unsigned char *na
 		jsmntok_t *val = key + 1;
 
 		if (json_streq(json, key, "client_order_id")) {
-			if (json_get_int64(&ack->id, json, val)) {
+			if (json_get_int64(&o->client_oid, json, val)) {
 				sprintf(problem, "bad order id");
 				goto bad;
 			}
@@ -336,8 +336,7 @@ static void place_order_add_header(struct http_req *req, const unsigned char *na
 		sprintf(problem, "no side given");
 		goto bad;
 	}
-	on_order_placed(req->ctx, EXCHG_GEMINI,
-			&ack->filled_size, &ack->status, &ack->order, &ack->opts);
+	on_order_placed(req->ctx, EXCHG_GEMINI, ack);
 	g_free(json);
 	return;
 

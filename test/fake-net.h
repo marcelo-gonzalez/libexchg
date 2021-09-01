@@ -127,8 +127,6 @@ struct http_req *fake_http_req_alloc(struct exchg_net_context *ctx, enum exchg_i
 void fake_http_req_free(struct http_req *);
 
 void on_order_placed(struct exchg_net_context *ctx, enum exchg_id id,
-		     decimal_t *fill_size, enum exchg_order_status *status,
-		     const struct exchg_order *order,
-		     const struct exchg_place_order_opts *opts);
+		     struct exchg_order_info *ack);
 
 #endif
