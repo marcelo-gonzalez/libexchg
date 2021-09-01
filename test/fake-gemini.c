@@ -200,25 +200,38 @@ struct http_place_order {
 static void place_order_read(struct http_req *req, struct exchg_test_event *ev,
 			     struct buf *buf) {
 	struct http_place_order *p = req->priv;
+	struct exchg_order_info *ack = &ev->data.ack;
 
 	if (p->auth->hmac_status == AUTH_GOOD) {
 		char price[30];
 		char size[30];
+		const char *is_live, *is_canceled;
 
-		decimal_to_str(price, &ev->data.ack.price);
-		decimal_to_str(size, &ev->data.ack.size);
+		// TODO: EXCHG_ORDER_ERROR
+		if (ack->status == EXCHG_ORDER_FINISHED ||
+		    ack->status == EXCHG_ORDER_CANCELED)
+			is_live = "false";
+		else
+			is_live = "true";
+		if (ack->status == EXCHG_ORDER_CANCELED)
+			is_canceled = "true";
+		else
+			is_canceled = "false";
+
+		decimal_to_str(price, &ev->data.ack.order.price);
+		decimal_to_str(size, &ev->data.ack.filled_size);
 		buf_xsprintf(buf,
 			     "{ \"order_id\": \"123\", \"id\": \"123\", \"symbol\": \"%s\", "
 			     "\"exchange\": \"gemini\", \"avg_execution_price\": \"%s\""
 			     ", \"side\": \"%s\", \"type\": \"exchange limit\", \"timestamp\": \"161"
-			     "1872750\", \"timestampms\": 1611872750275, \"is_live\": false, \"i"
-			     "s_cancelled\": false, \"is_hidden\": false, \"was_forced\": false"
+			     "1872750\", \"timestampms\": 1611872750275, \"is_live\": %s, \"i"
+			     "s_cancelled\": %s, \"is_hidden\": false, \"was_forced\": false"
 			     ", \"executed_amount\": \"%s\", \"client_order_id\": \"%"PRId64"\", "
 			     "\"options\": [ \"immediate-or-cancel\" ], \"price\": \"%s\", "
 			     "\"original_amount\": \"%s\", \"remaining_amount\": \"0\" }\n",
-			     exchg_pair_to_str(ev->data.ack.pair), price,
-			     ev->data.ack.side == EXCHG_SIDE_BUY ? "buy" : "sell",
-			     size, ev->data.ack.id, price, size);
+			     exchg_pair_to_str(ev->data.ack.order.pair), price,
+			     ev->data.ack.order.side == EXCHG_SIDE_BUY ? "buy" : "sell",
+			     is_live, is_canceled, size, ev->data.ack.id, price, size);
 	} else if (p->auth->hmac_status == AUTH_BAD) {
 		buf_xsprintf(buf, "{ \"result\": \"error\", \"reason\": \"InvalidSignature\","
 				      "\"message\": \"InvalidSignature\" }");
@@ -230,7 +243,7 @@ static void place_order_read(struct http_req *req, struct exchg_test_event *ev,
 static void place_order_add_header(struct http_req *req, const unsigned char *name,
 				   const unsigned char *val, size_t len) {
 	struct http_place_order *o = req->priv;
-	struct fake_ack *ack = &req->read_event->data.ack;
+	struct exchg_order_info *ack = &req->read_event->data.ack;
 
 	auth_add_header(o->auth, name, val, len);
 	if (strcmp((char *)name, "X-GEMINI-PAYLOAD:"))
@@ -249,7 +262,6 @@ static void place_order_add_header(struct http_req *req, const unsigned char *na
 		goto bad;
 	}
 
-	ack->finished = true;
 	ack->id = -1;
 	bool got_price = false;
 	bool got_size = false;
@@ -268,21 +280,21 @@ static void place_order_add_header(struct http_req *req, const unsigned char *na
 			}
 			key_idx += 2;
 		} else if (json_streq(json, key, "symbol")) {
-			if (json_get_pair(&ack->pair, json, val)) {
+			if (json_get_pair(&ack->order.pair, json, val)) {
 				sprintf(problem, "bad currency");
 				goto bad;
 			}
 			got_pair = true;
 			key_idx += 2;
 		} else if (json_streq(json, key, "amount")) {
-			if (json_get_decimal(&ack->size, json, val)) {
+			if (json_get_decimal(&ack->order.size, json, val)) {
 				sprintf(problem, "bad amount");
 				goto bad;
 			}
 			got_size = true;
 			key_idx += 2;
 		} else if (json_streq(json, key, "price")) {
-			if (json_get_decimal(&ack->price, json, val)) {
+			if (json_get_decimal(&ack->order.price, json, val)) {
 				sprintf(problem, "bad price");
 				goto bad;
 			}
@@ -290,9 +302,9 @@ static void place_order_add_header(struct http_req *req, const unsigned char *na
 			key_idx += 2;
 		} else if (json_streq(json, key, "side")) {
 			if (json_streq(json, val, "buy")) {
-				ack->side = EXCHG_SIDE_BUY;
+				ack->order.side = EXCHG_SIDE_BUY;
 			} else if (json_streq(json, val, "sell")) {
-				ack->side = EXCHG_SIDE_SELL;
+				ack->order.side = EXCHG_SIDE_SELL;
 			} else {
 				sprintf(problem, "bad side");
 				goto bad;
@@ -300,6 +312,7 @@ static void place_order_add_header(struct http_req *req, const unsigned char *na
 			got_side = true;
 			key_idx += 2;
 		} else {
+			// TODO: also parse immediate-or-cancel option
 			key_idx = json_skip(n, o->toks, key_idx+1);
 		}
 	}
@@ -323,6 +336,8 @@ static void place_order_add_header(struct http_req *req, const unsigned char *na
 		sprintf(problem, "no side given");
 		goto bad;
 	}
+	ack->status = EXCHG_ORDER_FINISHED;
+	ack->filled_size = ack->order.size;
 	g_free(json);
 	return;
 

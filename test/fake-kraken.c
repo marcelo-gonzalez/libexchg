@@ -312,6 +312,11 @@ struct websocket *kraken_ws_dial(struct exchg_net_context *ctx,
 	return s;
 }
 
+enum ack_type {
+	ACK_ADDORDERSTATUS,
+	ACK_OPENORDERS,
+};
+
 static void private_ws_read(struct websocket *ws, struct buf *buf,
 			    struct exchg_test_event *msg) {
 	if (msg->type == EXCHG_EVENT_WS_PROTOCOL) {
@@ -324,39 +329,63 @@ static void private_ws_read(struct websocket *ws, struct buf *buf,
 		return;
 	}
 
+	const char *status;
+	decimal_t cost, fee;
+	char cost_str[30], fee_str[30];
+	char price_str[30], size_str[30];
 	struct private_ws *pw = ws->priv;
-	struct fake_ack *ack = &msg->data.ack;
+	struct exchg_order_info *ack = &msg->data.ack;
 
-	if (!ack->finished) {
+	switch (*(enum ack_type *)test_event_private(msg)) {
+	case ACK_ADDORDERSTATUS:
 		if (pw->openorders_subbed) {
 			struct exchg_test_event *ev = exchg_fake_queue_ws_event(
-				ws, EXCHG_EVENT_ORDER_ACK, 0);
-			ev->data.ack = msg->data.ack;
-			ev->data.ack.finished = true;
+				ws, EXCHG_EVENT_ORDER_ACK, sizeof(enum ack_type));
+			ev->data.ack = *ack;
+			ev->data.ack.status = EXCHG_ORDER_FINISHED;
+			ev->data.ack.filled_size = ack->order.size;
+			*(enum ack_type *)test_event_private(ev) = ACK_OPENORDERS;
 		}
 		buf_xsprintf(buf, "{\"event\": \"addOrderStatus\", "
 			     "\"status\": \"ok\", \"txid\": \"asdf\", "
 			     "\"reqid\": %"PRId64", "
 			     "}", ack->id);
-	} else {
-		decimal_t cost, fee;
-		char cost_str[30], fee_str[30];
-		char price_str[30], size_str[30];
+		break;
+	case ACK_OPENORDERS:
+		switch (ack->status) {
+		case EXCHG_ORDER_PENDING:
+			status = "pending";
+			break;
+		case EXCHG_ORDER_OPEN:
+			status = "open";
+			break;
+		case EXCHG_ORDER_FINISHED:
+			status = "closed";
+			break;
+		case EXCHG_ORDER_CANCELED:
+			status = "canceled";
+			break;
+		default:
+			exchg_log("kraken-test: Don't know how to generate an event for order status %d\n", ack->status);
+			return;
+		}
 
-		decimal_multiply(&cost, &ack->size, &ack->price);
+		decimal_multiply(&cost, &ack->filled_size, &ack->order.price);
 		decimal_trunc(&cost, &cost, 6);
 		decimal_inc_bps(&fee, &cost, 26, 6);
 		decimal_subtract(&fee, &fee, &cost);
 
 		decimal_to_str(cost_str, &cost);
 		decimal_to_str(fee_str, &fee);
-		decimal_to_str(price_str, &ack->price);
-		decimal_to_str(size_str, &ack->size);
+		decimal_to_str(price_str, &ack->order.price);
+		decimal_to_str(size_str, &ack->filled_size);
 
-		buf_xsprintf(buf, "[[{\"OTA3RV-MJC5U-T5FQE2\":{\"status\":\"closed\",\"cost\":\"%s\""
+		buf_xsprintf(buf, "[[{\"OTA3RV-MJC5U-T5FQE2\":{\"status\":\"%s\",\"cost\":\"%s\""
 			     ",\"vol_exec\":\"%s\",\"fee\":\"%s\",\"avg_price\":\"%s\","
 			     "\"lastupdated\":\"1627305317.892973\",\"userref\":%"PRId64"}"
-			     "}],\"openOrders\",{\"sequence\":5}]\n", cost_str, size_str, fee_str, price_str, ack->id);
+			     "}],\"openOrders\",{\"sequence\":5}]\n",
+			     status, cost_str, size_str, fee_str, price_str, ack->id);
+		break;
 	}
 }
 
@@ -394,7 +423,7 @@ static void private_ws_write(struct websocket *w, char *buf, size_t len) {
 		goto bad;
 	}
 
-	struct fake_ack ack = {};
+	struct exchg_order_info ack = {};
 	enum private_ws_event event = EVENT_UNKNOWN;
 	enum private_ws_channel chan = CHAN_UNKNOWN;
 	bool got_id = false, got_price = false;
@@ -437,31 +466,31 @@ static void private_ws_write(struct websocket *w, char *buf, size_t len) {
 				idx = json_skip(r, pw->toks, idx+1);
 			}
 		} else if (json_streq(buf, key, "pair")) {
-			ack.pair = wsname_to_pair(buf, value);
-			if (ack.pair < 0) {
+			ack.order.pair = wsname_to_pair(buf, value);
+			if (ack.order.pair < 0) {
 				problem = "bad pairs field";
 				goto bad;
 			}
 			got_pair = true;
 		} else if (json_streq(buf, key, "price")) {
-			if (json_get_decimal(&ack.price, buf, value)) {
+			if (json_get_decimal(&ack.order.price, buf, value)) {
 				problem = "bad price field";
 				goto bad;
 			}
 			got_price = true;
 		} else if (json_streq(buf, key, "type")) {
 			if (json_streq(buf, value, "buy")) {
-				ack.side = EXCHG_SIDE_BUY;
+				ack.order.side = EXCHG_SIDE_BUY;
 				got_side = true;
 			} else if (json_streq(buf, value, "sell")) {
-				ack.side = EXCHG_SIDE_SELL;
+				ack.order.side = EXCHG_SIDE_SELL;
 				got_side = true;
 			} else {
 				problem = "bad type field";
 				goto bad;
 			}
 		} else if (json_streq(buf, key, "volume")) {
-			if (json_get_decimal(&ack.size, buf, value)) {
+			if (json_get_decimal(&ack.order.size, buf, value)) {
 				problem = "bad size field";
 				goto bad;
 			}
@@ -501,10 +530,11 @@ static void private_ws_write(struct websocket *w, char *buf, size_t len) {
 			problem = "no \"reqid\" field";
 			goto bad;
 		}
+		ack.status = EXCHG_ORDER_PENDING;
 		struct exchg_test_event *ev = exchg_fake_queue_ws_event(
-			w, EXCHG_EVENT_ORDER_ACK, 0);
+			w, EXCHG_EVENT_ORDER_ACK, sizeof(enum ack_type));
 		ev->data.ack = ack;
-		ev->data.ack.finished = false;
+		*(enum ack_type *)test_event_private(ev) = ACK_ADDORDERSTATUS;
 	} else if (event == EVENT_SUB) {
 		if (chan == CHAN_UNKNOWN) {
 			problem = "missing \"name\"";

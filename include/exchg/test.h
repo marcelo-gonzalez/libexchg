@@ -45,6 +45,7 @@ struct exchg_test_event {
 	enum exchg_id id;
 	enum exchg_test_event_type type;
 	union {
+		// present in EXCHG_EVENT_BOOK_UPDATE events
 		struct exchg_test_l2_updates {
 			enum exchg_pair pair;
 			int num_bids;
@@ -54,15 +55,8 @@ struct exchg_test_event {
 			int bid_cap;
 			int ask_cap;
 		} book;
-		struct fake_ack {
-			bool finished;
-			bool err;
-			enum exchg_pair pair;
-			int64_t id;
-			decimal_t price;
-			decimal_t size;
-			enum exchg_side side;
-		} ack;
+		// present in EXCHG_EVENT_ORDER_ACK events
+		struct exchg_order_info ack;
 	} data;
 };
 
