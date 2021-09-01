@@ -27,6 +27,11 @@ enum exchg_test_event_type {
 	EXCHG_EVENT_HTTP_PREP,
 	EXCHG_EVENT_WS_PREP,
 	EXCHG_EVENT_BOOK_UPDATE,
+	/* The code under test has just placed an order, with details
+	in the event's order_placed field. You can write to
+	order_placed.fill_size and order_placed.status to affect
+	what will happen immediately to the order */
+	EXCHG_EVENT_ORDER_PLACED,
 	EXCHG_EVENT_ORDER_ACK,
 	EXCHG_EVENT_PAIRS_DATA,
 	EXCHG_EVENT_BALANCES,
@@ -57,6 +62,14 @@ struct exchg_test_event {
 		} book;
 		// present in EXCHG_EVENT_ORDER_ACK events
 		struct exchg_order_info ack;
+		// present in EXCHG_EVENT_ORDER_PLACED events
+		struct exchg_test_order_placed {
+			const int id;
+			const struct exchg_order order;
+			const struct exchg_place_order_opts opts;
+			decimal_t fill_size;
+			enum exchg_order_status status;
+		} order_placed;
 	} data;
 };
 

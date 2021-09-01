@@ -122,6 +122,9 @@ void exchg_test_event_print(struct exchg_test_event *ev) {
 	case EXCHG_EVENT_BOOK_UPDATE:
 		type = "BOOK_UPDATE";
 		break;
+	case EXCHG_EVENT_ORDER_PLACED:
+		type = "ORDER_PLACED";
+		break;
 	case EXCHG_EVENT_ORDER_ACK:
 		type = "ORDER_ACK";
 		break;
@@ -315,6 +318,27 @@ static void free_event(struct exchg_net_context *ctx, struct test_event *ev) {
 		free(ev->event.data.book.asks);
 	}
 	free(ev);
+}
+
+void on_order_placed(struct exchg_net_context *ctx, enum exchg_id id,
+		     decimal_t *fill_size, enum exchg_order_status *status,
+		     const struct exchg_order *order,
+		     const struct exchg_place_order_opts *opts) {
+	struct exchg_test_event event = {
+		.id = id,
+		.type = EXCHG_EVENT_ORDER_PLACED,
+		.data.order_placed = {
+			.id = ctx->next_order_id++,
+			.order = *order,
+			.opts = *opts,
+			.fill_size = order->size,
+			.status = EXCHG_ORDER_FINISHED,
+		},
+	};
+	if (ctx->callback)
+		ctx->callback(ctx, &event, ctx->cb_private);
+	*fill_size = event.data.order_placed.fill_size;
+	*status = event.data.order_placed.status;
 }
 
 int net_service(struct exchg_net_context *ctx) {

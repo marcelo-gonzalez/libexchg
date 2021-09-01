@@ -115,6 +115,7 @@ struct exchg_net_context {
 	LIST_HEAD(ws_list, websocket) ws_list;
 	TAILQ_HEAD(events, test_event) events;
 	decimal_t balances[EXCHG_ALL_EXCHANGES][EXCHG_NUM_CCYS];
+	int next_order_id;
 	exchg_test_callback_t callback;
 	void *cb_private;
 	// TODO: char error[100];
@@ -124,5 +125,10 @@ struct websocket *fake_websocket_alloc(struct exchg_net_context *ctx, void *user
 struct http_req *fake_http_req_alloc(struct exchg_net_context *ctx, enum exchg_id exchange,
 				     enum exchg_test_event_type type, void *private);
 void fake_http_req_free(struct http_req *);
+
+void on_order_placed(struct exchg_net_context *ctx, enum exchg_id id,
+		     decimal_t *fill_size, enum exchg_order_status *status,
+		     const struct exchg_order *order,
+		     const struct exchg_place_order_opts *opts);
 
 #endif

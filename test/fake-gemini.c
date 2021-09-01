@@ -336,8 +336,8 @@ static void place_order_add_header(struct http_req *req, const unsigned char *na
 		sprintf(problem, "no side given");
 		goto bad;
 	}
-	ack->status = EXCHG_ORDER_FINISHED;
-	ack->filled_size = ack->order.size;
+	on_order_placed(req->ctx, EXCHG_GEMINI,
+			&ack->filled_size, &ack->status, &ack->order, &ack->opts);
 	g_free(json);
 	return;
 

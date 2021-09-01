@@ -530,8 +530,9 @@ static void private_ws_write(struct websocket *w, char *buf, size_t len) {
 			ev = exchg_fake_queue_ws_event_tail(
 				w, EXCHG_EVENT_ORDER_ACK, sizeof(enum ack_type));
 			ev->data.ack = ack;
-			ev->data.ack.filled_size = ack.order.size;
-			ev->data.ack.status = EXCHG_ORDER_FINISHED;
+			on_order_placed(w->ctx, EXCHG_KRAKEN,
+					&ev->data.ack.filled_size, &ev->data.ack.status,
+					&ack.order, &ack.opts);
 			*(enum ack_type *)test_event_private(ev) = ACK_OPENORDERS;
 		}
 	} else if (event == EVENT_SUB) {
