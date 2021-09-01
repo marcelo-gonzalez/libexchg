@@ -258,7 +258,7 @@ void *test_event_private(struct exchg_test_event *event) {
 	return container->private;
 }
 
-struct exchg_test_event *exchg_fake_queue_ws_event(
+struct test_event *event_alloc(
 	struct websocket *w, enum exchg_test_event_type type, size_t private_size) {
 	struct test_event *event = xzalloc(sizeof(*event) + private_size);
 	struct exchg_test_event *e = &event->event;
@@ -267,8 +267,14 @@ struct exchg_test_event *exchg_fake_queue_ws_event(
 	event->conn.ws = w;
 	e->id = w->id;
 	e->type = type;
+	return event;
+}
 
+struct exchg_test_event *exchg_fake_queue_ws_event(
+	struct websocket *w, enum exchg_test_event_type type, size_t private_size) {
+	struct test_event *event = event_alloc(w, type, private_size);
 	struct test_event *last = NULL, *tmp;
+
 	TAILQ_FOREACH(tmp, &w->ctx->events, list) {
 		if (tmp->event.type == EXCHG_EVENT_WS_PROTOCOL &&
 		    tmp->conn.ws == w)
@@ -278,7 +284,15 @@ struct exchg_test_event *exchg_fake_queue_ws_event(
 		TAILQ_INSERT_AFTER(&w->ctx->events, last, event, list);
 	else
 		TAILQ_INSERT_HEAD(&w->ctx->events, event, list);
-	return e;
+	return &event->event;
+}
+
+struct exchg_test_event *exchg_fake_queue_ws_event_tail(
+	struct websocket *w, enum exchg_test_event_type type, size_t private_size) {
+	struct test_event *event = event_alloc(w, type, private_size);
+
+	TAILQ_INSERT_TAIL(&w->ctx->events, event, list);
+	return &event->event;
 }
 
 struct exchg_net_context *net_new(struct net_callbacks *c) {

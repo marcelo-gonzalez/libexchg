@@ -333,19 +333,10 @@ static void private_ws_read(struct websocket *ws, struct buf *buf,
 	decimal_t cost, fee;
 	char cost_str[30], fee_str[30];
 	char price_str[30], size_str[30];
-	struct private_ws *pw = ws->priv;
 	struct exchg_order_info *ack = &msg->data.ack;
 
 	switch (*(enum ack_type *)test_event_private(msg)) {
 	case ACK_ADDORDERSTATUS:
-		if (pw->openorders_subbed) {
-			struct exchg_test_event *ev = exchg_fake_queue_ws_event(
-				ws, EXCHG_EVENT_ORDER_ACK, sizeof(enum ack_type));
-			ev->data.ack = *ack;
-			ev->data.ack.status = EXCHG_ORDER_FINISHED;
-			ev->data.ack.filled_size = ack->order.size;
-			*(enum ack_type *)test_event_private(ev) = ACK_OPENORDERS;
-		}
 		buf_xsprintf(buf, "{\"event\": \"addOrderStatus\", "
 			     "\"status\": \"ok\", \"txid\": \"asdf\", "
 			     "\"reqid\": %"PRId64", "
@@ -530,11 +521,19 @@ static void private_ws_write(struct websocket *w, char *buf, size_t len) {
 			problem = "no \"reqid\" field";
 			goto bad;
 		}
-		ack.status = EXCHG_ORDER_PENDING;
-		struct exchg_test_event *ev = exchg_fake_queue_ws_event(
+		struct exchg_test_event *ev = exchg_fake_queue_ws_event_tail(
 			w, EXCHG_EVENT_ORDER_ACK, sizeof(enum ack_type));
 		ev->data.ack = ack;
+		ev->data.ack.status = EXCHG_ORDER_PENDING;
 		*(enum ack_type *)test_event_private(ev) = ACK_ADDORDERSTATUS;
+		if (pw->openorders_subbed) {
+			ev = exchg_fake_queue_ws_event_tail(
+				w, EXCHG_EVENT_ORDER_ACK, sizeof(enum ack_type));
+			ev->data.ack = ack;
+			ev->data.ack.filled_size = ack.order.size;
+			ev->data.ack.status = EXCHG_ORDER_FINISHED;
+			*(enum ack_type *)test_event_private(ev) = ACK_OPENORDERS;
+		}
 	} else if (event == EVENT_SUB) {
 		if (chan == CHAN_UNKNOWN) {
 			problem = "missing \"name\"";

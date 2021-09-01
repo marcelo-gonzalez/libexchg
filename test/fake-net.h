@@ -57,6 +57,8 @@ static inline void buf_clear(struct buf *buf) {
 
 struct exchg_test_event *exchg_fake_queue_ws_event(
 	struct websocket *w, enum exchg_test_event_type type, size_t private_size);
+struct exchg_test_event *exchg_fake_queue_ws_event_tail(
+	struct websocket *w, enum exchg_test_event_type type, size_t private_size);
 
 void no_ws_write(struct websocket *, char *, size_t);
 
