@@ -82,6 +82,10 @@ struct exchg_order_info {
 	char err[EXCHG_ORDER_ERR_SIZE+1];
 };
 
+enum exchg_event_type {
+	EXCHG_PRIVATE_WS_ONLINE,
+};
+
 // main callbacks. user arg is the same as was passed to exchg_new(). request_private
 // is the private argument passed to the corresponding function triggering
 // the callback, where this applies.
@@ -105,8 +109,8 @@ struct exchg_callbacks {
 	// We have now successfully fetched pair/symbol info for this client
 	void (*on_pair_info)(struct exchg_client *, void *user);
 	// Generic "something-has-happened" callback. Currently only used by
-	// KRAKEN_PRIVATE_WS_ONLINE, but could be used for more stuff later
-	void (*on_event)(struct exchg_client *, int type, void *user);
+	// PRIVATE_WS_ONLINE, but could be used for more stuff later
+	void (*on_event)(struct exchg_client *, enum exchg_event_type , void *user);
 };
 
 // ---------------- actions -----------------------
@@ -135,16 +139,13 @@ int exchg_get_balances(struct exchg_client *cl, void *req_private);
 int64_t exchg_place_order(struct exchg_client *cl, struct exchg_order *,
 			  struct exchg_place_order_opts *, void *request_private);
 
-// ------------------------------------------------
-// ------------------------------------------------
-
-// --------------- Kraken-specific -----------------
-int exchg_kraken_private_ws_connect(struct exchg_client *);
-// passed to the on_event() callback
-enum exchg_kraken_event_type {
-	EXCHG_KRAKEN_PRIVATE_WS_ONLINE,
-};
-// ------------------------------------------------
+// If available, subscribe to private data feed that will give updates
+// on our orders in the future.
+// pass EXCHG_ALL_EXCHANGES to connect on all previously allocated clients
+int exchg_private_ws_connect(struct exchg_context *, enum exchg_id);
+// Is the private data feed online? If this doesn't apply for the given
+// exchange, this returns true.
+bool exchg_private_ws_online(struct exchg_client *);
 
 // --------------------- helpers -------------------
 // ------------------------------------------------

@@ -55,6 +55,8 @@ struct exchg_client {
 			       void *request_private);
 	int (*new_keypair)(struct exchg_client *cl,
 			   const unsigned char *key, size_t len);
+	int (*priv_ws_connect)(struct exchg_client *cl);
+	bool (*priv_ws_online)(struct exchg_client *cl);
 	void (*destroy)(struct exchg_client *cl);
 	void *priv;
 	LIST_HEAD(conn_list, conn) conn_list;

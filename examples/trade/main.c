@@ -142,7 +142,7 @@ int main(int argc, char **argv) {
 	if (set_keys(cl, pub_key, priv_key))
 		goto free_ctx;
 
-	if (id == EXCHG_KRAKEN && exchg_kraken_private_ws_connect(cl))
+	if (exchg_private_ws_connect(ctx, id))
 		goto free_ctx;
 
 	if (!check_intent(argv[optind], state.order.pair, state.order.side,

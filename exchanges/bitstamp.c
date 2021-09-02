@@ -976,6 +976,14 @@ static void bitstamp_destroy(struct exchg_client *cli) {
 	free_exchg_client(cli);
 }
 
+static int bitstamp_priv_ws_connect(struct exchg_client *cl) {
+	return 0;
+}
+
+static bool bitstamp_priv_ws_online(struct exchg_client *cl) {
+	return true;
+}
+
 static int bitstamp_new_keypair(struct exchg_client *cl,
 				const unsigned char *key, size_t len) {
 	struct bitstamp_client *bts = cl->priv;
@@ -1020,6 +1028,8 @@ struct exchg_client *alloc_bitstamp_client(struct exchg_context *ctx) {
 	ret->l2_subscribe = bitstamp_l2_subscribe;
 	ret->get_pair_info = bitstamp_get_pair_info;
 	ret->place_order = bitstamp_place_order;
+	ret->priv_ws_connect = bitstamp_priv_ws_connect;
+	ret->priv_ws_online = bitstamp_priv_ws_online;
 	ret->destroy = bitstamp_destroy;
 	ret->new_keypair = bitstamp_new_keypair;
 	return ret;

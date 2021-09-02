@@ -737,6 +737,14 @@ static void gemini_destroy(struct exchg_client *cli) {
 	free_exchg_client(cli);
 }
 
+static int gemini_priv_ws_connect(struct exchg_client *cl) {
+	return 0;
+}
+
+static bool gemini_priv_ws_online(struct exchg_client *cl) {
+	return true;
+}
+
 static int gemini_new_keypair(struct exchg_client *cl,
 			      const unsigned char *key, size_t len) {
 	if (!HMAC_Init_ex(cl->hmac_ctx, key, len, EVP_sha384(), NULL)) {
@@ -771,6 +779,8 @@ struct exchg_client *alloc_gemini_client(struct exchg_context *ctx) {
 	ret->l2_subscribe = gemini_l2_subscribe;
 	ret->get_pair_info = gemini_get_pair_info;
 	ret->place_order = gemini_place_order;
+	ret->priv_ws_connect = gemini_priv_ws_connect;
+	ret->priv_ws_online = gemini_priv_ws_online;
 	ret->destroy = gemini_destroy;
 	return ret;
 }

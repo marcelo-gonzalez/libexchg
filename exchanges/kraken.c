@@ -1066,7 +1066,7 @@ static int parse_openorders(struct exchg_client *cl,
 
 	if (!kkn->openorders_recvd) {
 		kkn->openorders_recvd = true;
-		exchg_on_event(cl, EXCHG_KRAKEN_PRIVATE_WS_ONLINE);
+		exchg_on_event(cl, EXCHG_PRIVATE_WS_ONLINE);
 		exchg_do_work(cl);
 		exchg_log("Kraken: openOrders channel inited\n");
 		return 0;
@@ -1250,24 +1250,15 @@ static int private_ws_connect(struct exchg_client *cl) {
 	return -1;
 }
 
-bool exchg_kraken_private_ws_online(struct exchg_context *ctx) {
-	struct exchg_client *cl = exchg_client(ctx, EXCHG_KRAKEN);
-	struct kraken_client *kc;
-
-	if (!cl)
-		return false;
+bool kraken_private_ws_online(struct exchg_client *cl) {
+	struct kraken_client *kc = cl->priv;
 
 	kc = cl->priv;
 	return cl->pair_info_current && kc->openorders_recvd;
 }
 
-int exchg_kraken_private_ws_connect(struct exchg_client *cl) {
+static int kraken_private_ws_connect(struct exchg_client *cl) {
 	struct kraken_client *kc = cl->priv;
-
-	if (cl->id != EXCHG_KRAKEN) {
-		exchg_log("%s called on %s client\n", __func__, cl->name);
-		return -1;
-	}
 
 	if (kc->private_ws)
 		return 0;
@@ -1349,7 +1340,7 @@ static int64_t kraken_place_order(struct exchg_client *cl, struct exchg_order *o
 	if (!cl->pair_info_current && exchg_get_pair_info(cl))
 		return -1;
 
-	if (exchg_kraken_private_ws_connect(cl))
+	if (kraken_private_ws_connect(cl))
 		return -1;
 
 	if (queue_work(cl, place_order_work, info))
@@ -1392,6 +1383,8 @@ struct exchg_client *alloc_kraken_client(struct exchg_context *ctx) {
 	ret->get_pair_info = kraken_get_pair_info;
 	ret->get_balances = kraken_get_balances;
 	ret->place_order = kraken_place_order;
+	ret->priv_ws_connect = kraken_private_ws_connect;
+	ret->priv_ws_online = kraken_private_ws_online;
 	ret->new_keypair = kraken_new_keypair;
 	ret->destroy = kraken_destroy;
 	return ret;

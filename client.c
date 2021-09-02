@@ -774,7 +774,52 @@ static int alloc_book(struct exchg_context *ctx, enum exchg_pair pair) {
 	return 0;
 }
 
-static int l2_subscribe(struct exchg_client *cl, enum exchg_pair pair) {
+static int call_per_exchange(struct exchg_context *ctx, const char *caller,
+			     int (*f)(struct exchg_client *, void *), enum exchg_id id, void *p) {
+	if (0 <= id && id < EXCHG_ALL_EXCHANGES) {
+		if (!ctx->clients[id]) {
+			const char *name = exchg_id_to_name(id);
+			exchg_log("%s called with id == %s, but %s "
+				  "client not allocated\n",
+				  caller, name, name);
+			return -1;
+		}
+		return f(ctx->clients[id], p);
+	}
+	if (id == EXCHG_ALL_EXCHANGES) {
+		int ret = 0;
+		bool did_something = false;
+		for (enum exchg_id id = 0; id < EXCHG_ALL_EXCHANGES; id++) {
+			struct exchg_client *cl = ctx->clients[id];
+			if (cl) {
+				ret |= f(cl, p);
+				did_something = true;
+			}
+		}
+		if (!did_something) {
+			exchg_log("%s called with no clients allocated\n", caller);
+			return -1;
+		}
+		return ret ? -1 : 0;
+	}
+	exchg_log("%s: bad exchgange id given: %d\n", caller, id);
+	return -1;
+}
+
+static int priv_ws_connect(struct exchg_client *cl, void *p) {
+	return cl->priv_ws_connect(cl);
+}
+
+int exchg_private_ws_connect(struct exchg_context *ctx, enum exchg_id id) {
+	return call_per_exchange(ctx, __func__, priv_ws_connect, id, NULL);
+}
+
+bool exchg_private_ws_online(struct exchg_client *cl) {
+	return cl->priv_ws_online(cl);
+}
+
+static int l2_subscribe(struct exchg_client *cl, void *p) {
+	enum exchg_pair pair = (enum exchg_pair)p;
 	struct exchg_pair_info *pi = &cl->pair_info[pair];
 	// TODO: free if ends up unused cus its not available
 	int err = alloc_book(cl->ctx, pair);
@@ -798,34 +843,7 @@ static int l2_subscribe(struct exchg_client *cl, enum exchg_pair pair) {
 
 int exchg_l2_subscribe(struct exchg_context *ctx, enum exchg_id id,
 		       enum exchg_pair pair) {
-	if (0 <= id && id < EXCHG_ALL_EXCHANGES) {
-		if (!ctx->clients[id]) {
-			const char *name = exchg_id_to_name(id);
-			exchg_log("%s called with id == %s, but %s "
-				  "client not allocated\n",
-				  __func__, name, name);
-			return -1;
-		}
-		return l2_subscribe(ctx->clients[id], pair);
-	}
-	if (id == EXCHG_ALL_EXCHANGES) {
-		int ret = 0;
-		bool did_something = false;
-		for (enum exchg_id id = 0; id < EXCHG_ALL_EXCHANGES; id++) {
-			struct exchg_client *cl = ctx->clients[id];
-			if (cl) {
-				ret |= l2_subscribe(cl, pair);
-				did_something = true;
-			}
-		}
-		if (!did_something) {
-			exchg_log("%s called with no clients allocated\n", __func__);
-			return -1;
-		}
-		return ret ? -1 : 0;
-	}
-	exchg_log("%s: bad exchgange id given: %d\n", __func__, id);
-	return -1;
+	return call_per_exchange(ctx, __func__, l2_subscribe, id, (void *)pair);
 }
 
 static struct net_callbacks net_callbacks = {

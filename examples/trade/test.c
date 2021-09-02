@@ -71,8 +71,6 @@ int main(void) {
 						  (unsigned char *)exchg_test_kraken_public,
 						  strlen(exchg_test_kraken_private),
 						  (unsigned char *)exchg_test_kraken_private);
-				if (exchg_kraken_private_ws_connect(cl))
-					goto free_ctx;
 				break;
 			case EXCHG_BITSTAMP:
 				exchg_set_keypair(cl, strlen(exchg_test_bitstamp_public),
@@ -90,6 +88,9 @@ int main(void) {
 				fprintf(stderr, "wtf\n");
 				return 1;
 			}
+
+			if (exchg_private_ws_connect(ctx, id))
+				goto free_ctx;
 
 			exchg_test_add_l2_events(net_ctx, 3, events);
 

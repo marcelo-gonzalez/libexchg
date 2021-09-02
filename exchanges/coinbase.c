@@ -838,6 +838,14 @@ static int coinbase_new_keypair(struct exchg_client *cl,
 	return 0;
 }
 
+static int coinbase_priv_ws_connect(struct exchg_client *cl) {
+	return 0;
+}
+
+static bool coinbase_priv_ws_online(struct exchg_client *cl) {
+	return true;
+}
+
 static void coinbase_destroy(struct exchg_client *cl) {
 	struct coinbase_client *cb = cl->priv;
 
@@ -865,6 +873,8 @@ struct exchg_client *alloc_coinbase_client(struct exchg_context *ctx) {
 	ret->get_pair_info = coinbase_get_pair_info;
 	ret->get_balances = coinbase_get_balances;
 	ret->place_order = coinbase_place_order;
+	ret->priv_ws_connect = coinbase_priv_ws_connect;
+	ret->priv_ws_online = coinbase_priv_ws_online;
 	ret->new_keypair = coinbase_new_keypair;
 	ret->destroy = coinbase_destroy;
 	return ret;
