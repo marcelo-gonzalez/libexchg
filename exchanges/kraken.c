@@ -328,8 +328,7 @@ bad:
 }
 
 static int insert_orders(struct exchg_client *cl, const char *json,
-			 int num_toks, jsmntok_t *toks, int idx,
-			 enum exchg_pair pair) {
+			 int num_toks, jsmntok_t *toks, int idx, enum exchg_pair pair) {
 	if (toks[idx].type != JSMN_OBJECT) {
 		exchg_log("Kraken sent non-object update data:\n");
 		json_fprintln(stderr, json, &toks[0]);
@@ -363,7 +362,7 @@ static int insert_orders(struct exchg_client *cl, const char *json,
 }
 
 static int kraken_recv(struct exchg_client *cl, struct conn *conn,
-		       const char *json, int num_toks, jsmntok_t *toks) {
+		       char *json, int num_toks, jsmntok_t *toks) {
 	struct kraken_client *kkn = cl->priv;
 
 	if (num_toks < 3)
@@ -683,8 +682,7 @@ static int parse_info_result(struct exchg_client *cl, const char *json,
 }
 
 static int kraken_parse_info(struct exchg_client *cl, struct conn *conn,
-			     int status, const char *json,
-			     int num_toks, jsmntok_t *toks) {
+			     int status, char *json, int num_toks, jsmntok_t *toks) {
 	const char *url = "https://api.kraken.com/0/public/AssetPairs";
 	char problem[100];
 
@@ -807,8 +805,7 @@ static int private_http_add_headers(struct exchg_client *cl, struct conn *conn) 
 }
 
 static int balances_recv(struct exchg_client *cl, struct conn *conn,
-			 int status, const char *json,
-			 int num_toks, jsmntok_t *toks) {
+			 int status, char *json, int num_toks, jsmntok_t *toks) {
 	const char *problem;
 
 	if (num_toks < 1) {
@@ -955,8 +952,7 @@ static int kraken_new_keypair(struct exchg_client *cl,
 }
 
 static int token_recv(struct exchg_client *cl, struct conn *conn,
-		      int status, const char *json,
-		      int num_toks, jsmntok_t *toks) {
+		      int status, char *json, int num_toks, jsmntok_t *toks) {
 	struct kraken_client *kc = cl->priv;
 	const char *problem;
 	const char *url = "api.kraken.com/0/private/GetWebSocketsTokeninfo";
@@ -1167,7 +1163,7 @@ bad:
 }
 
 static int private_ws_recv(struct exchg_client *cl, struct conn *conn,
-			   const char *json, int num_toks, jsmntok_t *toks) {
+			   char *json, int num_toks, jsmntok_t *toks) {
 	const char *problem;
 
 	if (toks[0].type == JSMN_OBJECT)

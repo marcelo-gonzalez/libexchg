@@ -48,8 +48,7 @@ struct order_data {
 };
 
 static int parse_events(struct exchg_client *cl, struct gemini_msg *msg,
-			enum exchg_pair pair,
-			const char *json, int num_toks,
+			enum exchg_pair pair, const char *json, int num_toks,
 			jsmntok_t *toks, int data_idx) {
 	jsmntok_t *data = &toks[data_idx];
 	struct exchg_pair_info *pi = &cl->pair_info[pair];
@@ -180,7 +179,7 @@ static int msg_finish(struct exchg_client *cl, struct conn *conn,
 }
 
 static int gemini_recv(struct exchg_client *cl, struct conn *conn,
-		       const char *json, int num_toks, jsmntok_t *toks) {
+		       char *json, int num_toks, jsmntok_t *toks) {
 	char problem[100];
 	struct gemini_conn_info *gc = conn_private(conn);
 	struct gemini_msg msg = {
@@ -459,8 +458,7 @@ static struct order_info *conn_priv_order_info(struct conn *conn) {
 }
 
 static int place_order_recv(struct exchg_client *cl, struct conn *conn,
-			    int status, const char *json,
-			    int num_toks, jsmntok_t *toks) {
+			    int status, char *json, int num_toks, jsmntok_t *toks) {
 	const char *problem;
 	struct order_info *oi = conn_priv_order_info(conn);
 	struct exchg_order_info *info = &oi->info;
@@ -627,10 +625,8 @@ static int gemini_balances_add_headers(struct exchg_client *cl, struct conn *con
 	return add_headers(cl, conn, request, len);
 }
 
-static int gemini_balances_recv(struct exchg_client *cl,
-				struct conn *conn, int status,
-				const char *json, int num_toks,
-				jsmntok_t *toks) {
+static int gemini_balances_recv(struct exchg_client *cl, struct conn *conn, int status,
+				char *json, int num_toks, jsmntok_t *toks) {
 	if (num_toks < 1)
 		return 0;
 

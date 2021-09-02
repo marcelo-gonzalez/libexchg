@@ -166,7 +166,7 @@ struct exchg_websocket_ops {
 	void (*on_disconnect)(struct exchg_client *, struct conn *,
 			      int reconnect_seconds);
 	int (*recv)(struct exchg_client *, struct conn *,
-		    const char *js, int num_toks, jsmntok_t *toks);
+		    char *js, int num_toks, jsmntok_t *toks);
 	size_t conn_data_size;
 };
 
@@ -206,7 +206,7 @@ struct exchg_http_ops {
 	int (*add_headers)(struct exchg_client *, struct conn *);
 	// TODO: remove status param
 	int (*recv)(struct exchg_client *cl, struct conn *, int status,
-		    const char *js, int num_toks, jsmntok_t *toks);
+		    char *js, int num_toks, jsmntok_t *toks);
 	int (*on_established)(struct exchg_client *cl,
 			      struct conn *, int status);
 	void (*on_closed)(struct exchg_client *cl, struct conn *);

@@ -294,7 +294,7 @@ static int msg_complete(struct exchg_client *cl, struct conn *conn,
 }
 
 static int bitstamp_recv(struct exchg_client *cl, struct conn *conn,
-			 const char *json, int num_toks, jsmntok_t *toks) {
+			 char *json, int num_toks, jsmntok_t *toks) {
 	if (num_toks < 3)
 		return 0;
 
@@ -474,7 +474,7 @@ struct bitstamp_pair_info {
 	bool min_order_good;
 };
 
-static int parse_info_token(struct bitstamp_pair_info *info, const char *json,
+static int parse_info_token(struct bitstamp_pair_info *info, char *json,
 			    int num_toks, jsmntok_t *toks, int key_idx,
 			    char *problem) {
 	jsmntok_t *key = &toks[key_idx];
@@ -542,8 +542,7 @@ static int parse_info_token(struct bitstamp_pair_info *info, const char *json,
 }
 
 static int bitstamp_parse_info(struct exchg_client *cl, struct conn *conn,
-			       int status, const char *json,
-			       int num_toks, jsmntok_t *toks) {
+			       int status, char *json, int num_toks, jsmntok_t *toks) {
 	char problem[100];
 	if (status != 200) {
 		fprintf(stderr,
@@ -676,8 +675,7 @@ struct http_data {
 };
 
 static int balances_recv(struct exchg_client *cl, struct conn *conn,
-			 int status, const char *json,
-			 int num_toks, jsmntok_t *toks) {
+			 int status, char *json, int num_toks, jsmntok_t *toks) {
 	if (num_toks < 1) {
 		exchg_log("Bitstamp sent bad balance info:"
 			  " no json fields received\n");
@@ -817,8 +815,7 @@ static int bitstamp_get_balances(struct exchg_client *cl, void *request_private)
 
 // UNTESTED!!!
 static int place_order_recv(struct exchg_client *cl, struct conn *conn,
-			    int status, const char *json,
-			    int num_toks, jsmntok_t *toks) {
+			    int status, char *json, int num_toks, jsmntok_t *toks) {
 	struct http_data *h = conn_private(conn);
 	struct order_info *oi = h->p;
 	struct exchg_order_info *info = &oi->info;

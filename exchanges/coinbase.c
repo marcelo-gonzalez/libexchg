@@ -117,8 +117,7 @@ static int parse_changes(struct exchg_client *cl, struct ws_msg *msg,
 }
 
 static int parse_snapshot(struct exchg_client *cl, struct ws_msg *msg, bool is_bids,
-			  const char *json, jsmntok_t *toks,
-			  int idx, const char **problem) {
+			  const char *json, jsmntok_t *toks, int idx, const char **problem) {
 	struct exchg_l2_update *upd = &cl->update;
 	struct exchg_pair_info *pi;
 
@@ -242,7 +241,7 @@ static int update_finish(struct exchg_client *cl, struct ws_msg *msg,
 }
 
 static int ws_recv(struct exchg_client *cl, struct conn *conn,
-		   const char *json, int num_toks, jsmntok_t *toks) {
+		   char *json, int num_toks, jsmntok_t *toks) {
 	struct coinbase_client *cb = cl->priv;
 	const char *problem = "";
 	if (toks[0].type != JSMN_OBJECT) {
@@ -481,8 +480,7 @@ static int decimal_inc_to_places(const decimal_t *d) {
 }
 
 static int parse_info(struct exchg_client *cl, struct conn *conn,
-		      int status, const char *json,
-		      int num_toks, jsmntok_t *toks) {
+		      int status, char *json, int num_toks, jsmntok_t *toks) {
 	struct coinbase_client *cb = cl->priv;
 	const char *problem = "";
 	jsmntok_t *bad_tok = &toks[0];
@@ -709,8 +707,7 @@ static int balances_add_headers(struct exchg_client *cl, struct conn *conn) {
 }
 
 static int balances_recv(struct exchg_client *cl, struct conn *conn,
-			 int status, const char *json,
-			 int num_toks, jsmntok_t *toks) {
+			 int status, char *json, int num_toks, jsmntok_t *toks) {
 	const char *problem = "";
 	jsmntok_t *bad_tok = &toks[0];
 
