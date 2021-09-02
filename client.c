@@ -585,6 +585,7 @@ void exchg_order_update(struct exchg_client *cl,
 		cl->ctx->callbacks.on_order_update(cl, &info->info, cl->ctx->user,
 						   info->private);
 	if (info->info.status == EXCHG_ORDER_FINISHED ||
+	    info->info.status == EXCHG_ORDER_CANCELED ||
 	    info->info.status == EXCHG_ORDER_ERROR)
 		g_hash_table_remove(cl->orders, &info->info.id);
 }
