@@ -965,6 +965,7 @@ static int64_t bitstamp_place_order(struct exchg_client *cl, struct exchg_order 
 		conn_close(conn);
 		return -ENOMEM;
 	}
+	info->info.status = EXCHG_ORDER_SUBMITTED;
 	return info->info.id;
 }
 

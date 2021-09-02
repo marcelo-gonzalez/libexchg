@@ -613,6 +613,7 @@ static int64_t gemini_place_order(struct exchg_client *cl, struct exchg_order *o
 		return -ENOMEM;
 	struct order_info **p = conn_private(conn);
 	*p = info;
+	info->info.status = EXCHG_ORDER_SUBMITTED;
 	return info->info.id;
 }
 

@@ -1317,6 +1317,7 @@ static int private_ws_add_order(struct exchg_client *cl,
 			"buy" : "sell", kpi->wsname, px, sz,
 			timeinforce) < 0)
 		return -1;
+	info->status = EXCHG_ORDER_SUBMITTED;
 	return 0;
 }
 

@@ -57,6 +57,7 @@ struct exchg_order {
 // TODO: cancel reason enum
 enum exchg_order_status {
 	EXCHG_ORDER_UNSUBMITTED,
+	EXCHG_ORDER_SUBMITTED,
 	EXCHG_ORDER_PENDING,
 	EXCHG_ORDER_OPEN,
 	EXCHG_ORDER_FINISHED,
