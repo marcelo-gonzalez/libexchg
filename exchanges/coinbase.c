@@ -527,7 +527,7 @@ static int ws_recv(struct exchg_client *cl, struct conn *conn,
 			msg.changes_parsed = true;
 		} else if (json_streq(json, key, "time")) {
 			int us;
-			struct tm tm;
+			struct tm tm = {};
 			if (unlikely(value->type != JSMN_STRING)) {
 				problem = "bad \"time\"";
 				goto bad;
