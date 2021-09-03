@@ -15,6 +15,7 @@
 
 static void usage(const char *comm) {
 	fprintf(stderr, "%s --public-key-file [file] --private-key-file [file] "
+		"(--password-file [file]) "
 		"[exchange] [buy|sell] [amount] [pair]\n", comm);
 	exit(1);
 }
@@ -62,10 +63,12 @@ static int check_intent(const char *exchange, enum exchg_pair pair,
 
 static const int opt_pub_key = 200;
 static const int opt_priv_key = 201;
+static const int opt_pass = 202;
 
 static struct option long_opts[] = {
 	{"public-key-file", required_argument, 0, opt_pub_key},
 	{"private-key-file", required_argument, 0, opt_priv_key},
+	{"password-file", required_argument, 0, opt_pass},
 	{0, 0, 0, 0},
 };
 
@@ -75,8 +78,9 @@ int main(int argc, char **argv) {
 	struct trade_options opts = {
 		.verbose = false,
 	};
-	const char *pub_key = NULL;
-	const char *priv_key = NULL;
+	const char *pub_key_file = NULL;
+	const char *priv_key_file = NULL;
+	const char *password_file = NULL;
 
 	while ((opt = getopt_long(argc, argv, "sv", long_opts, NULL)) != -1) {
 		switch (opt) {
@@ -87,17 +91,20 @@ int main(int argc, char **argv) {
 			opts.verbose = true;
 			break;
 		case opt_pub_key:
-			pub_key = optarg;
+			pub_key_file = optarg;
 			break;
 		case opt_priv_key:
-			priv_key = optarg;
+			priv_key_file = optarg;
+			break;
+		case opt_pass:
+			password_file = optarg;
 			break;
 		case '?':
 			return 1;
 		}
 	}
 
-	if (argc - optind != 4 || !pub_key || !priv_key)
+	if (argc - optind != 4 || !pub_key_file || !priv_key_file)
 		usage(argv[0]);
 
 	if (!strcmp(argv[optind+1], "buy"))
@@ -133,14 +140,22 @@ int main(int argc, char **argv) {
 	int ret = 1;
 	enum exchg_id id = exchange_from_str(argv[optind]);
 	if (id < 0) {
-		printf("unrecognized exchange: %s\n", argv[optind]);
+		fprintf(stderr, "unrecognized exchange: %s\n", argv[optind]);
 		goto free_ctx;
 	}
 	cl = exchg_alloc_client(ctx, id);
 	if (!cl)
 		goto free_ctx;
-	if (set_keys(cl, pub_key, priv_key))
+	if (set_keys(cl, pub_key_file, priv_key_file))
 		goto free_ctx;
+	if (id == EXCHG_COINBASE) {
+		if (!password_file) {
+			fprintf(stderr, "Must give --password-file to trade on Coinbase\n");
+			goto free_ctx;
+		}
+		if (set_pass(cl, password_file))
+			goto free_ctx;
+	}
 
 	if (exchg_private_ws_connect(ctx, id))
 		goto free_ctx;
