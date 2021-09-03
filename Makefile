@@ -69,6 +69,7 @@ examples/print-book/print-book: examples/common.o libexchg.a
 	$(CC) -o $@ $(CFLAGS) $^ $(LIBWEBSOCKETS_LIB) $(LDLIBS) -lncurses
 
 examples/trade/trade.o: $(hdrs) examples/common.h examples/trade/trader.h
+examples/trade/trader.o: $(hdrs) examples/common.h examples/trade/trader.h
 examples/trade/main.o: $(hdrs) examples/common.h examples/trade/trader.h
 examples/trade/test.o: $(hdrs) examples/common.h examples/trade/trader.h
 

@@ -104,11 +104,13 @@ static void time_since(struct timespec *dst, const struct timespec *ts) {
 	dst->tv_sec = now.tv_sec - ts->tv_sec - carry;
 }
 
-static bool book_ready(struct exchg_context *ctx, struct trade_state *state) {
+static bool ready_to_trade(struct exchg_client *cl, struct trade_state *state) {
+	if (!exchg_private_ws_online(cl))
+		return false;
 	if (state->order.side == EXCHG_SIDE_BUY)
-		return exchg_num_asks(ctx, state->order.pair) > 0;
+		return exchg_num_asks(exchg_ctx(cl), state->order.pair) > 0;
 	else
-		return exchg_num_bids(ctx, state->order.pair) > 0;
+		return exchg_num_bids(exchg_ctx(cl), state->order.pair) > 0;
 }
 
 static void on_l2_update(struct exchg_client *cl,
@@ -120,7 +122,7 @@ static void on_l2_update(struct exchg_client *cl,
 	// TODO: or ->stop. maybe cant assume you wont be called back after
 	// exchg_shutdown()
 	if (!state->sent && state->start_balances_recvd) {
-		if (!book_ready(exchg_ctx(cl), state))
+		if (!ready_to_trade(cl, state))
 			return;
 		make_trades(cl, state);
 	}
@@ -261,7 +263,7 @@ static void on_balances(struct exchg_client *cl,
 	if (!state->sent) {
 		state->start_base = balances[base];
 		state->start_counter = balances[counter];
-		if (book_ready(ctx, state)) {
+		if (ready_to_trade(cl, state)) {
 			make_trades(cl, state);
 		}
 	} else {
@@ -292,14 +294,25 @@ static void on_balances(struct exchg_client *cl,
 	}
 }
 
+static void on_event(struct exchg_client *cl, enum exchg_event_type type, void *user) {
+	struct trade_state *state = user;
+
+	if (type == EXCHG_PRIVATE_WS_ONLINE && ready_to_trade(cl, state))
+		make_trades(cl, state);
+}
+
 struct exchg_callbacks trade_callbacks = {
 	.on_l2_update = on_l2_update,
 	.on_order_update = on_order_update,
 	.on_balances_recvd = on_balances,
+	.on_event = on_event,
 };
 
 int trade_run(struct trade_state *s, struct exchg_client *cl) {
 	struct exchg_context *ctx = exchg_ctx(cl);
+
+	if (exchg_private_ws_connect(ctx, exchg_id(cl)))
+		goto err;
 
 	if (exchg_l2_subscribe(ctx, exchg_id(cl), s->order.pair))
 		goto err;
