@@ -168,6 +168,10 @@ char *http_body(struct http_req *req) {
 	return buf_start(&req->body);
 }
 
+size_t http_body_len(struct http_req *req) {
+	return req->body.len;
+}
+
 int http_add_header(struct http_req *req, const unsigned char *name,
 		    const unsigned char *val, size_t len) {
 	if (lws_add_http_header_by_name(req->wsi, name, val, len,

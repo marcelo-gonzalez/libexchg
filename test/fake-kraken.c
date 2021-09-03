@@ -292,7 +292,7 @@ bad:
 static void kraken_ws_destroy(struct websocket *w) {
 	struct kraken_websocket *k = w->priv;
 	free(k);
-	free(w);
+	ws_free(w);
 }
 
 struct websocket *kraken_ws_dial(struct exchg_net_context *ctx,
@@ -335,7 +335,6 @@ static void private_ws_read(struct websocket *ws, struct buf *buf,
 	}
 
 	const char *status;
-	decimal_t cost, fee;
 	char cost_str[30], fee_str[30];
 	char price_str[30], size_str[30];
 	struct exchg_order_info *ack = &msg->data.ack;
@@ -367,16 +366,8 @@ static void private_ws_read(struct websocket *ws, struct buf *buf,
 			return;
 		}
 
-		decimal_multiply(&cost, &ack->filled_size, &ack->order.price);
-		decimal_trunc(&cost, &cost, 6);
-		decimal_inc_bps(&fee, &cost, 26, 6);
-		decimal_subtract(&fee, &fee, &cost);
-
-		decimal_to_str(cost_str, &cost);
-		decimal_to_str(fee_str, &fee);
-		decimal_to_str(price_str, &ack->order.price);
-		decimal_to_str(size_str, &ack->filled_size);
-
+		write_prices(price_str, size_str, cost_str, fee_str,
+			     &ack->order.price, &ack->order.size, 26, 6);
 		buf_xsprintf(buf, "[[{\"OTA3RV-MJC5U-T5FQE2\":{\"status\":\"%s\",\"cost\":\"%s\""
 			     ",\"vol_exec\":\"%s\",\"fee\":\"%s\",\"avg_price\":\"%s\","
 			     "\"lastupdated\":\"1627305317.892973\",\"userref\":%"PRId64"}"
@@ -565,7 +556,7 @@ bad:
 
 static void private_ws_destroy(struct websocket *w) {
 	free(w->priv);
-	free(w);
+	ws_free(w);
 }
 
 struct websocket *kraken_ws_auth_dial(struct exchg_net_context *ctx,

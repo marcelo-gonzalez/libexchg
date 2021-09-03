@@ -25,6 +25,7 @@
 // TODO split into two structs, http vs websocket
 struct conn {
 	enum conn_type type;
+	char *method;
 	char *host;
 	char *path;
 	bool established;
@@ -69,6 +70,10 @@ bool conn_established(struct conn *c) {
 	return c->established;
 }
 
+const char *conn_method(struct conn *c) {
+	return c->method;
+}
+
 const char *conn_host(struct conn *c) {
 	return c->host;
 }
@@ -80,6 +85,7 @@ const char *conn_path(struct conn *c) {
 static void conn_free(struct conn *conn) {
 	if (!conn)
 		return;
+	free(conn->method);
 	free(conn->host);
 	free(conn->path);
 	free(conn->buf);
@@ -353,6 +359,10 @@ char *conn_http_body(struct conn *conn) {
 	return http_body(conn->http.req);
 }
 
+size_t conn_http_body_len(struct conn *conn) {
+	return http_body_len(conn->http.req);
+}
+
 static int http_recv(void *p, char *in, size_t len) {
 	struct conn *conn = p;
 	char *json;
@@ -392,7 +402,7 @@ enum conn_type conn_type(struct conn *c) {
 }
 
 static int conn_init(struct conn *conn, struct exchg_client *cl,
-		     const char *host, const char *path,
+		     const char *method, const char *host, const char *path,
 		     enum conn_type type, struct conn_http *http, struct conn_ws *ws) {
 	if (type == CONN_TYPE_WS) {
 		memset(conn, 0, sizeof(struct conn) + ws->ops->conn_data_size);
@@ -405,6 +415,13 @@ static int conn_init(struct conn *conn, struct exchg_client *cl,
 	exchg_set_up(cl);
 	conn->cl = cl;
 	conn->type = type;
+	if (type == CONN_TYPE_HTTP) {
+		conn->method = strdup(method);
+		if (!conn->method) {
+			exchg_log("%s: OOM\n", __func__);
+			return -1;
+		}
+	}
 	conn->host = strdup(host);
 	if (!conn->host) {
 		exchg_log("%s: OOM\n", __func__);
@@ -443,7 +460,7 @@ static struct conn *exchg_http_dial(const char *host, const char *path,
 		.ops = ops,
 		.req = req,
 	};
-	if (conn_init(conn, cl, host, path, CONN_TYPE_HTTP, &h, NULL)) {
+	if (conn_init(conn, cl, method, host, path, CONN_TYPE_HTTP, &h, NULL)) {
 		// important to note that here, conn was at least
 		// partially initialized by conn_init even though it
 		// failed, so the eventual call to conn_free() will
@@ -484,7 +501,7 @@ struct conn *exchg_websocket_connect(struct exchg_client *cl,
 		.ops = ops,
 		.conn = ws,
 	};
-	if (conn_init(conn, cl, host, path, CONN_TYPE_WS, NULL, &w)) {
+	if (conn_init(conn, cl, NULL, host, path, CONN_TYPE_WS, NULL, &w)) {
 		ws_close(ws);
 		return NULL;
 	}
@@ -515,6 +532,9 @@ const struct exchg_pair_info *exchg_pair_info(struct exchg_client *cl,
 }
 
 int exchg_get_pair_info(struct exchg_client *cl) {
+	// TODO: delete this part. If this is called again, maybe the
+	// user really wants to fetch it again cus it thinks something
+	// may have changed
 	if (cl->pair_info_current)
 		return 0;
 
@@ -962,12 +982,13 @@ int exchg_set_password(struct exchg_client *cl,
 		       size_t len, const char *password) {
 	OPENSSL_cleanse(cl->password, cl->password_len);
 	free(cl->password);
-	cl->password = malloc(len);
+	cl->password = malloc(len+1);
 	if (!cl->password) {
 		exchg_log("%s: OOM\n", __func__);
 		return -1;
 	}
 	memcpy(cl->password, password, len);
+	cl->password[len] = 0;
 	cl->password_len = len;
 	return 0;
 }

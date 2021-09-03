@@ -189,7 +189,7 @@ static void bitstamp_ws_write(struct websocket *w, char *buf, size_t len) {
 
 static void bitstamp_ws_destroy(struct websocket *w) {
 	free(w->priv);
-	free(w);
+	ws_free(w);
 }
 
 struct websocket *bitstamp_ws_dial(struct exchg_net_context *ctx,

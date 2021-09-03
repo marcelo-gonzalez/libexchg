@@ -174,6 +174,7 @@ struct exchg_websocket_ops {
 
 bool conn_disconnecting(struct conn *c);
 bool conn_established(struct conn *c);
+const char *conn_method(struct conn *c);
 const char *conn_host(struct conn *c);
 const char *conn_path(struct conn *c);
 enum conn_type conn_type(struct conn *c);
@@ -188,6 +189,7 @@ int conn_printf(struct conn *conn, const char *fmt, ...)
 int conn_http_body_sprintf(struct conn *conn, const char *fmt, ...)
 	__attribute__((format (printf, 2, 3)));
 char *conn_http_body(struct conn *conn);
+size_t conn_http_body_len(struct conn *conn);
 
 void *conn_private(struct conn *c);
 

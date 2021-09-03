@@ -1340,6 +1340,10 @@ static int64_t kraken_place_order(struct exchg_client *cl, struct exchg_order *o
 	if (!cl->pair_info_current && exchg_get_pair_info(cl))
 		return -1;
 
+	// TODO: here I bet it's faster to use the HTTP POST API
+	// if we haven't previously connected to the private websocket.
+	// Could just make it transparent to the user where placer_order()
+	// will use the private websocket iff we already connected to it.
 	if (kraken_private_ws_connect(cl))
 		return -1;
 

@@ -96,6 +96,10 @@ char *http_body(struct http_req *req) {
 	return req->body.buf;
 }
 
+size_t http_body_len(struct http_req *req) {
+	return req->body.len;
+}
+
 static int ws_matches(struct websocket *ws, struct exchg_test_event *ev) {
 	return ev->type == EXCHG_EVENT_BOOK_UPDATE &&
 		ws->established && ws->id == ev->id &&
@@ -255,10 +259,13 @@ void exchg_test_add_l2_events(struct exchg_net_context *ctx,
 	}
 }
 
+static struct test_event *test_event_container(struct exchg_test_event *event) {
+	return (struct test_event *)((void *)event -
+				     (void *)&((struct test_event *)NULL)->event);
+}
+
 void *test_event_private(struct exchg_test_event *event) {
-	struct test_event *container = (struct test_event *)((void *)event -
-							     (void *)&((struct test_event *)NULL)->event);
-	return container->private;
+	return test_event_container(event)->private;
 }
 
 struct test_event *event_alloc(
@@ -295,6 +302,24 @@ struct exchg_test_event *exchg_fake_queue_ws_event_tail(
 	struct test_event *event = event_alloc(w, type, private_size);
 
 	TAILQ_INSERT_TAIL(&w->ctx->events, event, list);
+	return &event->event;
+}
+
+struct exchg_test_event *exchg_fake_queue_ws_event_before(
+	struct websocket *w, enum exchg_test_event_type type, size_t private_size,
+	struct exchg_test_event *before) {
+	struct test_event *event = event_alloc(w, type, private_size);
+
+	TAILQ_INSERT_BEFORE(test_event_container(before), event, list);
+	return &event->event;
+}
+
+struct exchg_test_event *exchg_fake_queue_ws_event_after(
+	struct websocket *w, enum exchg_test_event_type type, size_t private_size,
+	struct exchg_test_event *after) {
+	struct test_event *event = event_alloc(w, type, private_size);
+
+	TAILQ_INSERT_AFTER(&w->ctx->events, test_event_container(after), event, list);
 	return &event->event;
 }
 
@@ -599,6 +624,21 @@ struct websocket *fake_websocket_alloc(struct exchg_net_context *ctx, void *user
 	return s;
 }
 
+void ws_free(struct websocket *ws) {
+	free(ws->host);
+	free(ws->path);
+	free(ws);
+}
+
+struct websocket *fake_websocket_get(struct exchg_net_context *ctx, const char *host, const char *path) {
+	struct websocket *ws;
+	LIST_FOREACH(ws, &ctx->ws_list, list) {
+		if (!strcmp(ws->host, host) && (!path || !strcmp(ws->path, path)))
+			return ws;
+	}
+	return NULL;
+}
+
 struct websocket *ws_dial(struct exchg_net_context *ctx, const char *host,
 			  const char *path, void *private) {
 	struct websocket *ws;
@@ -633,6 +673,8 @@ struct websocket *ws_dial(struct exchg_net_context *ctx, const char *host,
 	ev->id = exchange;
 	ev->type = EXCHG_EVENT_WS_PREP;
 	TAILQ_INSERT_HEAD(&ctx->events, event, list);
+	ws->host = xstrdup(host);
+	ws->path = xstrdup(path);
 	return ws;
 }
 

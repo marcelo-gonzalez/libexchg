@@ -79,7 +79,7 @@ static void gemini_ws_read(struct websocket *ws, struct buf *buf,
 
 static void gemini_ws_destroy(struct websocket *w) {
 	free(w->priv);
-	free(w);
+	ws_free(w);
 }
 
 static int gemini_ws_matches(struct websocket *w, enum exchg_pair p) {

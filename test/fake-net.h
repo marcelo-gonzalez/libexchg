@@ -35,6 +35,8 @@ struct http_req {
 };
 
 struct websocket {
+	char *host;
+	char *path;
 	bool established;
 	enum exchg_id id;
 	LIST_ENTRY(websocket) list;
@@ -51,14 +53,16 @@ int buf_xsprintf(struct buf *buf, const char *fmt, ...)
 	__attribute__((format (printf, 2, 3)));
 void buf_xcpy(struct buf *buf, void *src, size_t len);
 
-static inline void buf_clear(struct buf *buf) {
-	buf->len = 0;
-}
-
 struct exchg_test_event *exchg_fake_queue_ws_event(
 	struct websocket *w, enum exchg_test_event_type type, size_t private_size);
 struct exchg_test_event *exchg_fake_queue_ws_event_tail(
 	struct websocket *w, enum exchg_test_event_type type, size_t private_size);
+struct exchg_test_event *exchg_fake_queue_ws_event_before(
+	struct websocket *w, enum exchg_test_event_type type, size_t private_size,
+	struct exchg_test_event *event);
+struct exchg_test_event *exchg_fake_queue_ws_event_after(
+	struct websocket *w, enum exchg_test_event_type type, size_t private_size,
+	struct exchg_test_event *event);
 
 void no_ws_write(struct websocket *, char *, size_t);
 
@@ -122,6 +126,9 @@ struct exchg_net_context {
 };
 
 struct websocket *fake_websocket_alloc(struct exchg_net_context *ctx, void *user);
+void ws_free(struct websocket *);
+struct websocket *fake_websocket_get(struct exchg_net_context *ctx, const char *host, const char *path);
+
 struct http_req *fake_http_req_alloc(struct exchg_net_context *ctx, enum exchg_id exchange,
 				     enum exchg_test_event_type type, void *private);
 void fake_http_req_free(struct http_req *);

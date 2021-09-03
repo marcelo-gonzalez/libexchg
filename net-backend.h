@@ -40,6 +40,7 @@ int http_add_header(struct http_req *req, const unsigned char *name,
 
 int http_vsprintf(struct http_req *req, const char *fmt, va_list ap);
 char *http_body(struct http_req *req);
+size_t http_body_len(struct http_req *req);
 
 struct http_req *http_dial(struct exchg_net_context *,
 			   const char *host, const char *path,
