@@ -119,7 +119,7 @@ static void on_l2_update(struct exchg_client *cl,
 
 	// TODO: or ->stop. maybe cant assume you wont be called back after
 	// exchg_shutdown()
-	if (!state->sent && state->balances_recvd) {
+	if (!state->sent && state->start_balances_recvd) {
 		if (!book_ready(exchg_ctx(cl), state))
 			return;
 		make_trades(cl, state);
@@ -133,16 +133,21 @@ static void on_l2_update(struct exchg_client *cl,
 		return;
 	}
 
+	struct timespec diff;
 	char after[50];
 	if (state->acked) {
-		struct timespec diff;
 		time_since(&diff, &state->acked_at);
-		if (diff.tv_sec > 1) {
+		if (state->end_balances_recvd &&
+		    (state->updates_printed > 6 || diff.tv_sec > 1)) {
 			exchg_shutdown(exchg_ctx(cl));
+			return;
 		}
+		if (state->updates_printed > 6)
+			return;
 		sprintf(after, "%ld.%.9ld after order acked", diff.tv_sec, diff.tv_nsec);
 	} else if (state->sent) {
-		struct timespec diff;
+		if (state->updates_printed > 6)
+			return;
 		time_since(&diff, &state->sent_at);
 		sprintf(after, "%ld.%.9ld after order sent", diff.tv_sec, diff.tv_nsec);
 	} else
@@ -168,15 +173,54 @@ static void on_l2_update(struct exchg_client *cl,
 
 		printf("price: %s size: %s\n", p, s);
 	}
+	state->updates_printed++;
 }
 
 static void on_order_update(struct exchg_client *cl,
 			    const struct exchg_order_info *info,
 			    void *user, void *priv) {
 	struct trade_state *state = user;
+	struct timespec elapsed;
+	const char *status;
+
+	time_since(&elapsed, &state->sent_at);
+	if (state->verbose) {
+		switch (info->status) {
+		case EXCHG_ORDER_UNSUBMITTED:
+			status = "UNSUBMITTED";
+			break;
+		case EXCHG_ORDER_SUBMITTED:
+			status = "SUBMITTED";
+			break;
+		case EXCHG_ORDER_PENDING:
+			status = "PENDING";
+			break;
+		case EXCHG_ORDER_OPEN:
+			status = "OPEN";
+			break;
+		case EXCHG_ORDER_FINISHED:
+			status = "FINISHED";
+			break;
+		case EXCHG_ORDER_CANCELED:
+			status = "CANCELED";
+			break;
+		case EXCHG_ORDER_ERROR:
+			status = "ERROR";
+			break;
+		}
+		char filled[30], out_of[30];
+		decimal_to_str(filled, &info->filled_size);
+		decimal_to_str(out_of, &info->order.size);
+
+		printf("=== <Order Update> === status: %s %s "
+		       "filled %s/%s. latency: %ld.%.9ld ===========\n",
+		       status, info->status == EXCHG_ORDER_ERROR ? info->err : "",
+		       filled, out_of, elapsed.tv_sec, elapsed.tv_nsec);
+	}
 
 	if (info->status == EXCHG_ORDER_ERROR) {
-		printf("order error: %s\n", info->err);
+		if (!state->verbose)
+			printf("order error: %s\n", info->err);
 		exchg_shutdown(exchg_ctx(cl));
 		state->error = 1;
 		return;
@@ -195,14 +239,14 @@ static void on_order_update(struct exchg_client *cl,
 
 	decimal_to_str(sz, &info->filled_size);
 
-	struct timespec diff;
-	time_since(&diff, &state->sent_at);
-	printf("%s %s %s. latency: %ld.%.9ld\n",
-	       info->order.side == EXCHG_SIDE_BUY ? "bought" : "sold",
-	       sz, exchg_pair_to_str(info->order.pair), diff.tv_sec, diff.tv_nsec);
+	if (!state->verbose)
+		printf("%s %s %s. latency: %ld.%.9ld\n",
+		       info->order.side == EXCHG_SIDE_BUY ? "bought" : "sold",
+		       sz, exchg_pair_to_str(info->order.pair), elapsed.tv_sec, elapsed.tv_nsec);
 	exchg_get_balances(cl, NULL);
 	clock_gettime(CLOCK_MONOTONIC, &state->acked_at);
 	state->acked = true;
+	state->updates_printed = 0;
 }
 
 static void on_balances(struct exchg_client *cl,
@@ -213,7 +257,7 @@ static void on_balances(struct exchg_client *cl,
 	enum exchg_currency base, counter;
 
 	exchg_pair_split(&base, &counter, state->order.pair);
-	state->balances_recvd = 1;
+	state->start_balances_recvd = true;
 	if (!state->sent) {
 		state->start_base = balances[base];
 		state->start_counter = balances[counter];
@@ -242,6 +286,7 @@ static void on_balances(struct exchg_client *cl,
 		printf("balance changes: %s: %s, %s: %s\n",
 		       exchg_ccy_to_str(base), basestr,
 		       exchg_ccy_to_str(counter), counterstr);
+		state->end_balances_recvd = true;
 		if (!state->verbose)
 			exchg_shutdown(ctx);
 	}

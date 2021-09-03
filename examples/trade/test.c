@@ -36,7 +36,7 @@ int main(void) {
 				events[i].id = id;
 			}
 			struct trade_options opts = {
-				.verbose = false,
+				.verbose = true,
 				.side = side,
 				.pair = EXCHG_PAIR_BTCUSD,
 			};

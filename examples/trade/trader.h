@@ -13,7 +13,8 @@
 // TODO price ceiling
 struct trade_state {
 	int sent;
-	int balances_recvd;
+	bool start_balances_recvd;
+	bool end_balances_recvd;
 	struct exchg_order order;
 	decimal_t left_to_send;
 	decimal_t start_base;
@@ -21,6 +22,7 @@ struct trade_state {
 	struct timespec sent_at;
 	int error;
 	bool verbose;
+	int updates_printed;
 	bool acked;
 	bool first_recvd;
 	struct timespec acked_at;
