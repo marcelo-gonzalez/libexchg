@@ -608,7 +608,7 @@ static int ws_recv(struct exchg_client *cl, struct conn *conn,
 	return 0;
 
 bad:
-	exchg_log("Coinbase gave bad book update: %s:\n", problem);
+	exchg_log("Coinbase gave bad update: %s:\n", problem);
 	json_fprintln(stderr, json, &toks[0]);
 	return -1;
 }
