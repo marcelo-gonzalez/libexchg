@@ -969,6 +969,11 @@ static int64_t bitstamp_place_order(struct exchg_client *cl, struct exchg_order 
 	return info->info.id;
 }
 
+static int bitstamp_cancel_order(struct exchg_client *cl, int64_t id) {
+	printf("sorry dunno how to cancel %s orders\n", exchg_name(cl));
+	return -1;
+}
+
 static void bitstamp_destroy(struct exchg_client *cli) {
 	struct bitstamp_client *bts = cli->priv;
 	free(bts->api_header);
@@ -1028,6 +1033,7 @@ struct exchg_client *alloc_bitstamp_client(struct exchg_context *ctx) {
 	ret->l2_subscribe = bitstamp_l2_subscribe;
 	ret->get_pair_info = bitstamp_get_pair_info;
 	ret->place_order = bitstamp_place_order;
+	ret->cancel_order = bitstamp_cancel_order;
 	ret->priv_ws_connect = bitstamp_priv_ws_connect;
 	ret->priv_ws_online = bitstamp_priv_ws_online;
 	ret->destroy = bitstamp_destroy;

@@ -53,6 +53,7 @@ struct exchg_client {
 	int64_t (*place_order)(struct exchg_client *cl, struct exchg_order *,
 			       struct exchg_place_order_opts *,
 			       void *request_private);
+	int (*cancel_order)(struct exchg_client *cl, int64_t id);
 	int (*new_keypair)(struct exchg_client *cl,
 			   const unsigned char *key, size_t len);
 	int (*priv_ws_connect)(struct exchg_client *cl);

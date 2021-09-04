@@ -617,6 +617,11 @@ static int64_t gemini_place_order(struct exchg_client *cl, struct exchg_order *o
 	return info->info.id;
 }
 
+static int gemini_cancel_order(struct exchg_client *cl, int64_t id) {
+	printf("sorry dunno how to cancel %s orders\n", exchg_name(cl));
+	return -1;
+}
+
 static int gemini_balances_add_headers(struct exchg_client *cl, struct conn *conn) {
 	char request[100];
 	int len = sprintf(request,
@@ -779,6 +784,7 @@ struct exchg_client *alloc_gemini_client(struct exchg_context *ctx) {
 	ret->l2_subscribe = gemini_l2_subscribe;
 	ret->get_pair_info = gemini_get_pair_info;
 	ret->place_order = gemini_place_order;
+	ret->cancel_order = gemini_cancel_order;
 	ret->priv_ws_connect = gemini_priv_ws_connect;
 	ret->priv_ws_online = gemini_priv_ws_online;
 	ret->destroy = gemini_destroy;

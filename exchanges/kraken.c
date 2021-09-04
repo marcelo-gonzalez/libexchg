@@ -1361,6 +1361,11 @@ static int64_t kraken_place_order(struct exchg_client *cl, struct exchg_order *o
 	return info->info.id;
 }
 
+static int kraken_cancel_order(struct exchg_client *cl, int64_t id) {
+	printf("sorry dunno how to cancel %s orders\n", exchg_name(cl));
+	return -1;
+}
+
 static void kraken_destroy(struct exchg_client *cl) {
 	struct kraken_client *kkn = cl->priv;
 	g_hash_table_unref(kkn->channel_mapping);
@@ -1396,6 +1401,7 @@ struct exchg_client *alloc_kraken_client(struct exchg_context *ctx) {
 	ret->get_pair_info = kraken_get_pair_info;
 	ret->get_balances = kraken_get_balances;
 	ret->place_order = kraken_place_order;
+	ret->cancel_order = kraken_cancel_order;
 	ret->priv_ws_connect = kraken_private_ws_connect;
 	ret->priv_ws_online = kraken_private_ws_online;
 	ret->new_keypair = kraken_new_keypair;

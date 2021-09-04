@@ -139,6 +139,10 @@ int exchg_get_balances(struct exchg_client *cl, void *req_private);
 int64_t exchg_place_order(struct exchg_client *cl, struct exchg_order *,
 			  struct exchg_place_order_opts *, void *request_private);
 
+// `id` must be an id previously returned by a call to exchg_place_order() on
+// this struct exchg_client. Returns nonzero on error.
+int exchg_cancel_order(struct exchg_client *cl, int64_t id);
+
 // If available, subscribe to private data feed that will give updates
 // on our orders in the future.
 // pass EXCHG_ALL_EXCHANGES to connect on all previously allocated clients

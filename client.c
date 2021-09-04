@@ -634,6 +634,10 @@ int64_t exchg_place_order(struct exchg_client *cl, struct exchg_order *order,
 	return cl->place_order(cl, order, opts, priv);
 }
 
+int exchg_cancel_order(struct exchg_client *cl, int64_t id) {
+	return cl->cancel_order(cl, id);
+}
+
 int exchg_realloc_order_bufs(struct exchg_client *cl, int n) {
 	struct exchg_limit_order *bids, *asks;
 	bids = realloc(cl->update.bids, n * sizeof(struct exchg_limit_order));

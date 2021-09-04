@@ -1325,6 +1325,11 @@ static int64_t coinbase_place_order(struct exchg_client *cl, struct exchg_order 
 	return info->info.id;
 }
 
+static int coinbase_cancel_order(struct exchg_client *cl, int64_t id) {
+	printf("sorry dunno how to cancel %s orders\n", exchg_name(cl));
+	return -1;
+}
+
 static int coinbase_new_keypair(struct exchg_client *cl,
 				const unsigned char *key, size_t len) {
 	unsigned char *k;
@@ -1392,6 +1397,7 @@ struct exchg_client *alloc_coinbase_client(struct exchg_context *ctx) {
 	ret->get_pair_info = coinbase_get_pair_info;
 	ret->get_balances = coinbase_get_balances;
 	ret->place_order = coinbase_place_order;
+	ret->cancel_order = coinbase_cancel_order;
 	ret->priv_ws_connect = coinbase_priv_ws_connect;
 	ret->priv_ws_online = coinbase_priv_ws_online;
 	ret->new_keypair = coinbase_new_keypair;
