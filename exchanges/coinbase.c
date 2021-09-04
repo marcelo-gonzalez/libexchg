@@ -365,7 +365,10 @@ static int msg_finish(struct exchg_client *cl, struct ws_msg *msg,
 			return 0;
 		}
 		decimal_add(&info->info.filled_size, &info->info.filled_size, &msg->size);
-		info->info.status = EXCHG_ORDER_OPEN;
+		if (info->info.opts.immediate_or_cancel)
+			info->info.status = EXCHG_ORDER_PENDING;
+		else
+			info->info.status = EXCHG_ORDER_OPEN;
 		break;
 	case TYPE_OPEN:
 	case TYPE_DONE:

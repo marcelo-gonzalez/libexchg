@@ -1140,18 +1140,27 @@ static int parse_openorders(struct exchg_client *cl,
 
 		if (upd.got_size)
 			oi->info.filled_size = upd.size;
-		if (upd.status == STATUS_CLOSED)
+
+		switch(upd.status) {
+		case STATUS_CLOSED:
 			oi->info.status = EXCHG_ORDER_FINISHED;
-		else if (upd.status == STATUS_CANCELED) {
+			break;
+		case STATUS_CANCELED:
 			if (upd.cancel_reason)
 				json_strncpy(oi->info.err, json, upd.cancel_reason, EXCHG_ORDER_ERR_SIZE);
-			else
-				strncpy(oi->info.err, "<unknown>", EXCHG_ORDER_ERR_SIZE);
 			oi->info.status = EXCHG_ORDER_CANCELED;
-		} else if (upd.status == STATUS_OPEN)
-			oi->info.status = EXCHG_ORDER_OPEN;
-		else if (upd.status == STATUS_PENDING)
+			break;
+		case STATUS_OPEN:
+			if (oi->info.opts.immediate_or_cancel)
+				oi->info.status = EXCHG_ORDER_PENDING;
+			else
+				oi->info.status = EXCHG_ORDER_OPEN;
+			break;
+		case STATUS_PENDING:
 			oi->info.status = EXCHG_ORDER_PENDING;
+		case NO_STATUS:
+			break;
+		}
 		exchg_order_update(cl, oi);
 	}
 	return 0;
