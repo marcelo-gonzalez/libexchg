@@ -201,7 +201,7 @@ struct http_place_order {
 static void place_order_read(struct http_req *req, struct exchg_test_event *ev,
 			     struct buf *buf) {
 	struct http_place_order *p = req->priv;
-	struct exchg_order_info *ack = &ev->data.ack;
+	struct exchg_order_info *ack = &ev->data.order_ack;
 
 	if (p->auth->hmac_status == AUTH_GOOD) {
 		char price[30];
@@ -219,8 +219,8 @@ static void place_order_read(struct http_req *req, struct exchg_test_event *ev,
 		else
 			is_canceled = "false";
 
-		decimal_to_str(price, &ev->data.ack.order.price);
-		decimal_to_str(size, &ev->data.ack.filled_size);
+		decimal_to_str(price, &ev->data.order_ack.order.price);
+		decimal_to_str(size, &ev->data.order_ack.filled_size);
 		buf_xsprintf(buf,
 			     "{ \"order_id\": \"123\", \"id\": \"123\", \"symbol\": \"%s\", "
 			     "\"exchange\": \"gemini\", \"avg_execution_price\": \"%s\""
@@ -230,8 +230,8 @@ static void place_order_read(struct http_req *req, struct exchg_test_event *ev,
 			     ", \"executed_amount\": \"%s\", \"client_order_id\": \"%"PRId64"\", "
 			     "\"options\": [ \"immediate-or-cancel\" ], \"price\": \"%s\", "
 			     "\"original_amount\": \"%s\", \"remaining_amount\": \"0\" }\n",
-			     exchg_pair_to_str(ev->data.ack.order.pair), price,
-			     ev->data.ack.order.side == EXCHG_SIDE_BUY ? "buy" : "sell",
+			     exchg_pair_to_str(ev->data.order_ack.order.pair), price,
+			     ev->data.order_ack.order.side == EXCHG_SIDE_BUY ? "buy" : "sell",
 			     is_live, is_canceled, size, p->client_oid, price, size);
 	} else if (p->auth->hmac_status == AUTH_BAD) {
 		buf_xsprintf(buf, "{ \"result\": \"error\", \"reason\": \"InvalidSignature\","
@@ -244,7 +244,7 @@ static void place_order_read(struct http_req *req, struct exchg_test_event *ev,
 static void place_order_add_header(struct http_req *req, const unsigned char *name,
 				   const unsigned char *val, size_t len) {
 	struct http_place_order *o = req->priv;
-	struct exchg_order_info *ack = &req->read_event->data.ack;
+	struct exchg_order_info *ack = &req->read_event->data.order_ack;
 
 	auth_add_header(o->auth, name, val, len);
 	if (strcmp((char *)name, "X-GEMINI-PAYLOAD:"))

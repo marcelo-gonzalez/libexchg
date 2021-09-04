@@ -138,7 +138,7 @@ static int coinbase_str_to_pair(enum exchg_pair *dst, const char *json,
 static void orders_read(struct http_req *req, struct exchg_test_event *ev,
 			  struct buf *buf) {
 	char *order_id = req->priv;
-	struct exchg_order_info *ack = &ev->data.ack;
+	struct exchg_order_info *ack = &ev->data.order_ack;
 	char cost_str[30], fee_str[30];
 	char price_str[30], size_str[30];
 
@@ -187,14 +187,14 @@ static void generate_order_acks(struct exchg_net_context *ctx, struct http_req *
 	if (!ws)
 		return;
 	struct coinbase_websocket *cb = ws->priv;
-	struct exchg_order_info *ack = &req->read_event->data.ack;
+	struct exchg_order_info *ack = &req->read_event->data.order_ack;
 	struct exchg_test_event *recvd = exchg_fake_queue_ws_event_before(
 		ws, EXCHG_EVENT_ORDER_ACK, sizeof(struct ack_msg), req->read_event);
 	struct ack_msg *recv_ack = test_event_private(recvd);
 
-	memcpy(&recvd->data.ack, ack, sizeof(*ack));
-	recvd->data.ack.status = EXCHG_ORDER_PENDING;
-	decimal_zero(&recvd->data.ack.filled_size);
+	memcpy(&recvd->data.order_ack, ack, sizeof(*ack));
+	recvd->data.order_ack.status = EXCHG_ORDER_PENDING;
+	decimal_zero(&recvd->data.order_ack.filled_size);
 
 	recv_ack->type = ACK_RECV;
 	if (client_oid && json_strdup(&recv_ack->client_oid, req->body.buf, client_oid)) {
@@ -209,7 +209,7 @@ static void generate_order_acks(struct exchg_net_context *ctx, struct http_req *
 	struct exchg_test_event *done = exchg_fake_queue_ws_event_after(
 		ws, EXCHG_EVENT_ORDER_ACK, sizeof(struct ack_msg), recvd);
 	struct ack_msg *done_ack = test_event_private(done);
-	memcpy(&done->data.ack, ack, sizeof(*ack));
+	memcpy(&done->data.order_ack, ack, sizeof(*ack));
 	done_ack->type = ACK_DONE_OR_OPEN;
 	strcpy(done_ack->id, order_id);
 
@@ -217,8 +217,8 @@ static void generate_order_acks(struct exchg_net_context *ctx, struct http_req *
 		struct exchg_test_event *match = exchg_fake_queue_ws_event_after(
 			ws, EXCHG_EVENT_ORDER_ACK, sizeof(struct ack_msg), recvd);
 		struct ack_msg *match_ack = test_event_private(match);
-		memcpy(&match->data.ack, ack, sizeof(*ack));
-		match->data.ack.status = EXCHG_ORDER_PENDING;
+		memcpy(&match->data.order_ack, ack, sizeof(*ack));
+		match->data.order_ack.status = EXCHG_ORDER_PENDING;
 		match_ack->type = ACK_MATCH;
 		strcpy(match_ack->id, order_id);
 	}
@@ -252,7 +252,7 @@ static void orders_write(struct http_req *req) {
 	const char *problem = "";
 	jsmn_parser parser;
 	jsmntok_t toks[100];
-	struct exchg_order_info *ack = &req->read_event->data.ack;
+	struct exchg_order_info *ack = &req->read_event->data.order_ack;
 
 	if (req->body.len < 1) {
 		fprintf(stderr, "no body given with POST to "
@@ -420,7 +420,7 @@ static void proto_read(struct buf *buf, struct coinbase_proto *p) {
 }
 
 static void ack_read(struct buf *buf, struct exchg_test_event *msg) {
-	struct exchg_order_info *ack = &msg->data.ack;
+	struct exchg_order_info *ack = &msg->data.order_ack;
 	struct ack_msg *coinbase_ack = test_event_private(msg);
 	const char *type_str;
 

@@ -337,7 +337,7 @@ static void private_ws_read(struct websocket *ws, struct buf *buf,
 	const char *status;
 	char cost_str[30], fee_str[30];
 	char price_str[30], size_str[30];
-	struct exchg_order_info *ack = &msg->data.ack;
+	struct exchg_order_info *ack = &msg->data.order_ack;
 	struct ack_msg *ack_msg = test_event_private(msg);
 
 	switch (ack_msg->type) {
@@ -521,16 +521,16 @@ static void private_ws_write(struct websocket *w, char *buf, size_t len) {
 		}
 		struct exchg_test_event *ev = exchg_fake_queue_ws_event_tail(
 			w, EXCHG_EVENT_ORDER_ACK, sizeof(struct ack_msg));
-		ev->data.ack = ack;
-		ev->data.ack.status = EXCHG_ORDER_PENDING;
+		ev->data.order_ack = ack;
+		ev->data.order_ack.status = EXCHG_ORDER_PENDING;
 		struct ack_msg *msg = test_event_private(ev);
 		msg->type = ACK_ADDORDERSTATUS;
 		msg->reqid = reqid;
 		if (pw->openorders_subbed) {
 			ev = exchg_fake_queue_ws_event_tail(
 				w, EXCHG_EVENT_ORDER_ACK, sizeof(struct ack_msg));
-			ev->data.ack = ack;
-			on_order_placed(w->ctx, EXCHG_KRAKEN, &ev->data.ack);
+			ev->data.order_ack = ack;
+			on_order_placed(w->ctx, EXCHG_KRAKEN, &ev->data.order_ack);
 			struct ack_msg *msg = test_event_private(ev);
 			msg->type = ACK_OPENORDERS;
 			msg->reqid = reqid;

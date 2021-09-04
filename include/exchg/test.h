@@ -61,7 +61,7 @@ struct exchg_test_event {
 			int ask_cap;
 		} book;
 		// present in EXCHG_EVENT_ORDER_ACK events
-		struct exchg_order_info ack;
+		struct exchg_order_info order_ack;
 		// present in EXCHG_EVENT_ORDER_PLACED events
 		struct exchg_test_order_placed {
 			const int id;
