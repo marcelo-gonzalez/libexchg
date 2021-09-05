@@ -44,7 +44,7 @@ static void accounts_read(struct http_req *req, struct exchg_test_event *ev,
 	buf_xsprintf(buf, "[");
 	for (enum exchg_currency c = 0; c < EXCHG_NUM_CCYS; c++) {
 		char s[30];
-		decimal_t *balance = &req->ctx->balances[EXCHG_COINBASE][c];
+		decimal_t *balance = &req->ctx->servers[EXCHG_COINBASE].balances[c];
 		decimal_to_str(s, balance);
 		buf_xsprintf(buf, "{\"id\": \"234-abc-def%d\", \"currency\": \"%s\", "
 			     "\"balance\": \"%s\", \"hold\": \"0.00\", \"available\": \"%s\", "
@@ -135,14 +135,19 @@ static int coinbase_str_to_pair(enum exchg_pair *dst, const char *json,
 		return -1;
 }
 
+struct order_ids {
+	char server_oid[37];
+	char client_oid[37];
+};
+
 static void orders_read(struct http_req *req, struct exchg_test_event *ev,
 			  struct buf *buf) {
-	char *order_id = req->priv;
+	struct order_ids *ids = req->priv;
 	struct exchg_order_info *ack = &ev->data.order_ack;
 	char cost_str[30], fee_str[30];
 	char price_str[30], size_str[30];
 
-	if (!order_id)
+	if (!ids->server_oid[0])
 		return;
 
 	write_prices(price_str, size_str, cost_str, fee_str,
@@ -155,20 +160,21 @@ static void orders_read(struct http_req *req, struct exchg_test_event *ev,
 		     "\"fill_fees\": \"0\", \"filled_size\": \"0\", "
 		     "\"executed_value\": \"0\", \"status\": \"pending\", "
 		     "\"settled\": false }",
-		     order_id, price_str, size_str, coinbase_pair_to_str(ack->order.pair),
+		     ids->server_oid, price_str, size_str, coinbase_pair_to_str(ack->order.pair),
 		     ack->order.side == EXCHG_SIDE_BUY ? "buy" : "sell");
 }
 
 enum ack_type {
-	ACK_DONE_OR_OPEN,
+	ACK_DONE,
+	ACK_OPEN,
 	ACK_MATCH,
 	ACK_RECV,
 };
 
 struct ack_msg {
 	enum ack_type type;
-	char id[37];
-	char *client_oid;
+	struct order_ids ids;
+	struct test_order *order;
 };
 
 struct coinbase_websocket {
@@ -181,46 +187,51 @@ struct coinbase_websocket {
 	jsmntok_t toks[100];
 };
 
-static void generate_order_acks(struct exchg_net_context *ctx, struct http_req *req,
-				jsmntok_t *client_oid, char *order_id) {
+static void ack_init(struct exchg_test_event *e, enum ack_type type, struct test_order *o) {
+	struct ack_msg *ack = test_event_private(e);
+	struct order_ids *ids = test_order_private(o);
+
+	memcpy(&e->data.order_ack, &o->info, sizeof(o->info));
+
+	ack->type = type;
+	memcpy(&ack->ids, ids, sizeof(*ids));
+	ack->order = o;
+}
+
+static void generate_order_acks(struct exchg_net_context *ctx, struct exchg_test_event *read_event,
+				struct test_order *o) {
 	struct websocket *ws = fake_websocket_get(ctx, "ws-feed.pro.coinbase.com", NULL);
 	if (!ws)
 		return;
 	struct coinbase_websocket *cb = ws->priv;
-	struct exchg_order_info *ack = &req->read_event->data.order_ack;
 	struct exchg_test_event *recvd = exchg_fake_queue_ws_event_before(
-		ws, EXCHG_EVENT_ORDER_ACK, sizeof(struct ack_msg), req->read_event);
-	struct ack_msg *recv_ack = test_event_private(recvd);
+		ws, EXCHG_EVENT_ORDER_ACK, sizeof(struct ack_msg), read_event);
 
-	memcpy(&recvd->data.order_ack, ack, sizeof(*ack));
+	ack_init(recvd, ACK_RECV, o);
 	recvd->data.order_ack.status = EXCHG_ORDER_PENDING;
 	decimal_zero(&recvd->data.order_ack.filled_size);
 
-	recv_ack->type = ACK_RECV;
-	if (client_oid && json_strdup(&recv_ack->client_oid, req->body.buf, client_oid)) {
-		exchg_log("%s: OOM\n", __func__);
-		exit(1);
-	}
-	strcpy(recv_ack->id, order_id);
-
-	if (!cb->channels[ack->order.pair].user_subbed)
+	if (!cb->channels[o->info.order.pair].user_subbed)
 		return;
 
-	struct exchg_test_event *done = exchg_fake_queue_ws_event_after(
+	struct exchg_test_event *last = exchg_fake_queue_ws_event_after(
 		ws, EXCHG_EVENT_ORDER_ACK, sizeof(struct ack_msg), recvd);
-	struct ack_msg *done_ack = test_event_private(done);
-	memcpy(&done->data.order_ack, ack, sizeof(*ack));
-	done_ack->type = ACK_DONE_OR_OPEN;
-	strcpy(done_ack->id, order_id);
+	if (o->info.status == EXCHG_ORDER_FINISHED ||
+	    o->info.status == EXCHG_ORDER_CANCELED)
+		ack_init(last, ACK_DONE, o);
+	else if (o->info.status == EXCHG_ORDER_OPEN)
+		ack_init(last, ACK_OPEN, o);
+	else {
+		exchg_log("Coinbase test: Don't know how to generate order update with"
+			  " status %d for now\n", o->info.status);
+		exit(1);
+	}
 
-	if (decimal_is_positive(&ack->filled_size)) {
+	if (decimal_is_positive(&o->info.filled_size)) {
 		struct exchg_test_event *match = exchg_fake_queue_ws_event_after(
 			ws, EXCHG_EVENT_ORDER_ACK, sizeof(struct ack_msg), recvd);
-		struct ack_msg *match_ack = test_event_private(match);
-		memcpy(&match->data.order_ack, ack, sizeof(*ack));
+		ack_init(match, ACK_MATCH, o);
 		match->data.order_ack.status = EXCHG_ORDER_PENDING;
-		match_ack->type = ACK_MATCH;
-		strcpy(match_ack->id, order_id);
 	}
 }
 
@@ -315,6 +326,10 @@ static void orders_write(struct http_req *req) {
 				problem = "bad client_oid";
 				goto bad;
 			}
+			if (value->end - value->start != 36) {
+				problem = "bad \"client_oid\"";
+				goto bad;
+			}
 			client_oid = value;
 		} else if (json_streq(req->body.buf, key, "time_in_force")) {
 			if (json_streq(req->body.buf, value, "IOC"))
@@ -341,11 +356,21 @@ static void orders_write(struct http_req *req) {
 		goto bad;
 	}
 
-	on_order_placed(req->ctx, EXCHG_COINBASE, ack);
-	char *order_id = xzalloc(37);
-	write_oid(order_id, ack->id);
-	generate_order_acks(req->ctx, req, client_oid, order_id);
-	req->priv = order_id;
+	struct test_order *o = on_order_placed(req->ctx, EXCHG_COINBASE, ack,
+					       sizeof(struct order_ids));
+	if (!client_oid) {
+		exchg_log("FIXME: Coinbase test code requires a \"client_oid\" to"
+			  " be present for now, but received an order request without one:\n");
+		json_fprintln(stderr, req->body.buf, &toks[0]);
+		exit(1);
+	}
+	struct order_ids *ids = test_order_private(o);
+	memcpy(ids->client_oid, &req->body.buf[client_oid->start], 36);
+	write_oid(ids->server_oid, ack->id);
+
+	struct order_ids *req_ids = req->priv;
+	memcpy(req_ids, ids, sizeof(*ids));
+	generate_order_acks(req->ctx, req->read_event, o);
 	return;
 
 bad:
@@ -360,8 +385,8 @@ static void orders_destroy(struct http_req *req) {
 }
 
 static struct http_req *orders_dial(struct exchg_net_context *ctx,
-				      const char *path, const char *method,
-				      void *private) {
+				    const char *path, const char *method,
+				    void *private) {
 	if (strcmp(method, "POST")) {
 		fprintf(stderr, "Coinbase bad method for %s: %s\n", path, method);
 		return NULL;
@@ -374,6 +399,120 @@ static struct http_req *orders_dial(struct exchg_net_context *ctx,
 	// TODO: check auth stuff
 	req->add_header = no_http_add_header;
 	req->destroy = orders_destroy;
+	req->priv = xzalloc(sizeof(struct order_ids));
+	return req;
+}
+
+struct order_cancel {
+	char client_oid[37];
+	char msg[100];
+};
+
+static void cancel_order_read(struct http_req *req, struct exchg_test_event *ev,
+			      struct buf *buf) {
+	struct order_cancel *cancel = req->priv;
+
+	if (cancel->msg[0]) {
+		buf_xsprintf(buf, "{\"message\": \"%s\"}", cancel->msg);
+	} else {
+		buf_xsprintf(buf, "\"%s\"", cancel->client_oid);
+	}
+}
+
+static void cancel_order_free(struct http_req *req) {
+	free(req->priv);
+	fake_http_req_free(req);
+}
+
+static bool cancel_order(struct exchg_net_context *ctx, struct test_order *o) {
+	if (!on_order_canceled(ctx, EXCHG_COINBASE, o))
+		return false;
+
+	struct test_event *e, *tmp, *last = NULL;
+	bool send_done = true;
+
+	TAILQ_FOREACH_SAFE(e, &ctx->events, list, tmp) {
+		if (e->event.id != EXCHG_COINBASE ||
+		    e->event.type != EXCHG_EVENT_ORDER_ACK ||
+		    e->conn_type != CONN_TYPE_WS)
+			continue;
+
+		struct ack_msg *m = test_event_private(&e->event);
+		if (m->type == ACK_OPEN) {
+			TAILQ_REMOVE(&ctx->events, e, list);
+			free(e);
+		} else if (m->type == ACK_DONE) {
+			send_done = false;
+		} else {
+			last = e;
+		}
+	}
+	if (send_done) {
+		struct websocket *ws = fake_websocket_get(ctx, "ws-feed.pro.coinbase.com", NULL);
+		if (!ws)
+			return true;
+		struct coinbase_websocket *cb = ws->priv;
+
+		if (!cb->channels[o->info.order.pair].user_subbed)
+			return true;
+
+		struct exchg_test_event *cancel;
+		if (last)
+			cancel = exchg_fake_queue_ws_event_after(
+				ws, EXCHG_EVENT_ORDER_ACK, sizeof(struct ack_msg), &last->event);
+		else
+			cancel = exchg_fake_queue_ws_event(
+				ws, EXCHG_EVENT_ORDER_ACK, sizeof(struct ack_msg));
+		ack_init(cancel, ACK_DONE, o);
+		cancel->data.order_ack.status = EXCHG_ORDER_CANCELED;
+	}
+	return true;
+}
+
+static void cancel_order_write(struct http_req *req) {
+	struct order_cancel *cancel = req->priv;
+
+	if (strlen(req->path) < strlen("/orders/client:") + 36) {
+		req->status = 400;
+		snprintf(cancel->msg, sizeof(cancel->msg), "Bad order id");
+		return;
+	}
+
+	struct test_order *o;
+	memcpy(cancel->client_oid, req->path + strlen("/orders/client:"), 36);
+	cancel->client_oid[36] = 0;
+	LIST_FOREACH(o, &req->ctx->servers[EXCHG_COINBASE].order_list, list) {
+		struct order_ids *ids = test_order_private(o);
+		if (!strcmp(cancel->client_oid, ids->client_oid)) {
+			if (!cancel_order(req->ctx, o)) {
+				req->status = 503;
+				snprintf(cancel->msg, sizeof(cancel->msg),
+					 "Service Unavailable");
+			}
+			return;
+		}
+	}
+	req->status = 400;
+	snprintf(cancel->msg, sizeof(cancel->msg), "Unrecognized order id");
+}
+
+static struct http_req *cancel_order_dial(struct exchg_net_context *ctx,
+					  const char *path, const char *method,
+					  void *private) {
+	if (strcmp(method, "DELETE")) {
+		exchg_log("Coinbase bad method for %s: %s\n", path, method);
+		return NULL;
+	}
+
+	struct order_cancel *cancel = xzalloc(sizeof(*cancel));
+	struct http_req *req = fake_http_req_alloc(ctx, EXCHG_COINBASE,
+						   EXCHG_EVENT_ORDER_CANCEL_ACK, private);
+	req->read = cancel_order_read;
+	req->write = cancel_order_write;
+	// TODO: check auth stuff
+	req->add_header = no_http_add_header;
+	req->destroy = cancel_order_free;
+	req->priv = cancel;
 	return req;
 }
 
@@ -386,6 +525,8 @@ struct http_req *coinbase_http_dial(struct exchg_net_context *ctx,
 		return accounts_dial(ctx, path, method, private);
 	else if (!strcmp(path, "/orders"))
 		return orders_dial(ctx, path, method, private);
+	else if (!strncmp(path, "/orders/client:", strlen("/orders/client:")))
+		return cancel_order_dial(ctx, path, method, private);
 	else {
 		exchg_log("Coinbase bad HTTP path: %s\n", path);
 		return NULL;
@@ -428,17 +569,11 @@ static void ack_read(struct buf *buf, struct exchg_test_event *msg) {
 	const char *type_str;
 
 	switch (coinbase_ack->type) {
-	case ACK_DONE_OR_OPEN:
-		if (ack->status == EXCHG_ORDER_FINISHED ||
-		    ack->status == EXCHG_ORDER_CANCELED)
-			type_str = "done";
-		else if (ack->status == EXCHG_ORDER_OPEN)
-			type_str = "open";
-		else {
-			exchg_log("Coinbase test: Don't know how to generate order "
-				  "ack with status %d\n", ack->status);
-			return;
-		}
+	case ACK_DONE:
+		type_str = "done";
+		break;
+	case ACK_OPEN:
+		type_str = "open";
 		break;
 	case ACK_RECV:
 		type_str = "received";
@@ -464,12 +599,13 @@ static void ack_read(struct buf *buf, struct exchg_test_event *msg) {
 		     "",
 		     type_str, ack->order.side == EXCHG_SIDE_BUY ? "buy" : "sell",
 		     coinbase_pair_to_str(ack->order.pair), sequence++);
-	if (coinbase_ack->type == ACK_DONE_OR_OPEN || coinbase_ack->type == ACK_RECV) {
-		buf_xsprintf(buf, "\"order_id\": \"%s\", ", coinbase_ack->id);
+	if (coinbase_ack->type == ACK_DONE || coinbase_ack->type == ACK_OPEN ||
+		coinbase_ack->type == ACK_RECV) {
+		buf_xsprintf(buf, "\"order_id\": \"%s\", ", coinbase_ack->ids.server_oid);
 	} else {
 		buf_xsprintf(buf, "\"trade_id\": \"%"PRId64"\", "
 			     "\"maker_order_id\": \"00000000-abcd-0000-0000-abcdabcdabcd\", "
-			     "\"taker_order_id\": \"%s\", ", ack->id, coinbase_ack->id);
+			     "\"taker_order_id\": \"%s\", ", ack->id, coinbase_ack->ids.server_oid);
 	}
 	if (coinbase_ack->type == ACK_RECV) {
 		buf_xsprintf(buf, "\"order_type\": \"limit\", ");
@@ -483,7 +619,7 @@ static void ack_read(struct buf *buf, struct exchg_test_event *msg) {
 		buf_xsprintf(buf, "\"taker_profile_id\": \"1234-abc\", \"taker_user_id\": \"5678-def\", "
 			     "\"taker_fee_rate\": \"%s\"", fee_str);
 	}
-	if (coinbase_ack->type == ACK_DONE_OR_OPEN) {
+	if (coinbase_ack->type == ACK_DONE || coinbase_ack->type == ACK_OPEN) {
 		if (ack->status == EXCHG_ORDER_FINISHED || ack->status == EXCHG_ORDER_CANCELED) {
 			const char *reason;
 			if (ack->status == EXCHG_ORDER_FINISHED)
@@ -498,9 +634,8 @@ static void ack_read(struct buf *buf, struct exchg_test_event *msg) {
 		decimal_to_str(rem, &remaining);
 		buf_xsprintf(buf, "\"remaining_size\": \"%s\",", rem);
 	}
-	if (coinbase_ack->client_oid) {
-		buf_xsprintf(buf, "\"client_oid\": \"%s\", ", coinbase_ack->client_oid);
-		free(coinbase_ack->client_oid);
+	if (coinbase_ack->type == ACK_RECV) {
+		buf_xsprintf(buf, "\"client_oid\": \"%s\", ", coinbase_ack->ids.client_oid);
 	}
 	buf_xsprintf(buf, "}");
 

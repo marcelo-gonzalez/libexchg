@@ -236,7 +236,7 @@ static void bitstamp_balance_read(struct http_req *req, struct exchg_test_event 
 	buf_xsprintf(buf, "{ ");
 	for (enum exchg_currency c = 0; c < EXCHG_NUM_CCYS; c++) {
 		char s[30];
-		decimal_to_str(s, &req->ctx->balances[EXCHG_BITSTAMP][c]);
+		decimal_to_str(s, &req->ctx->servers[EXCHG_BITSTAMP].balances[c]);
 		buf_xsprintf(buf, "\"%s_available\": \"%s\", ",
 			     exchg_ccy_to_str(c), s);
 		// TODO: other fields too

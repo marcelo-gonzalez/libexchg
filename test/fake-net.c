@@ -17,13 +17,6 @@
 #include "fake-kraken.h"
 #include "fake-coinbase.h"
 
-#ifndef TAILQ_FOREACH_SAFE
-#define	TAILQ_FOREACH_SAFE(var, head, field, tmp)		\
-	for ((var) = ((head)->tqh_first);			\
-	     (var) && ((tmp) = (var)->field.tqe_next, 1);	\
-	     (var) = (tmp))
-#endif
-
 static int buf_init(struct buf *buf, size_t size) {
 	buf->buf = malloc(size);
 	if (!buf->buf) {
@@ -129,8 +122,14 @@ void exchg_test_event_print(struct exchg_test_event *ev) {
 	case EXCHG_EVENT_ORDER_PLACED:
 		type = "ORDER_PLACED";
 		break;
+	case EXCHG_EVENT_ORDER_CANCELED:
+		type = "ORDER_CANCELED";
+		break;
 	case EXCHG_EVENT_ORDER_ACK:
 		type = "ORDER_ACK";
+		break;
+	case EXCHG_EVENT_ORDER_CANCEL_ACK:
+		type = "ORDER_CANCEL_ACK";
 		break;
 	case EXCHG_EVENT_PAIRS_DATA:
 		type = "PAIRS_DATA";
@@ -341,17 +340,31 @@ static void free_event(struct exchg_net_context *ctx, struct test_event *ev) {
 	if (ev->event.type == EXCHG_EVENT_BOOK_UPDATE) {
 		free(ev->event.data.book.bids);
 		free(ev->event.data.book.asks);
+	} else if (ev->event.type == EXCHG_EVENT_ORDER_ACK) {
+		struct exchg_order_info *info = &ev->event.data.order_ack;
+		struct test_order *o, *tmp;
+		if (info->status == EXCHG_ORDER_ERROR ||
+		    info->status == EXCHG_ORDER_FINISHED ||
+		    info->status == EXCHG_ORDER_CANCELED) {
+			LIST_FOREACH_SAFE(o, &ctx->servers[ev->event.id].order_list, list, tmp) {
+				if (o->info.id == info->id) {
+					LIST_REMOVE(o, list);
+					free(o);
+					break;
+				}
+			}
+		}
 	}
 	free(ev);
 }
 
-void on_order_placed(struct exchg_net_context *ctx, enum exchg_id id,
-		     struct exchg_order_info *ack) {
+struct test_order *on_order_placed(struct exchg_net_context *ctx, enum exchg_id id,
+				   struct exchg_order_info *ack, size_t private_size) {
 	struct exchg_test_event event = {
 		.id = id,
 		.type = EXCHG_EVENT_ORDER_PLACED,
 		.data.order_placed = {
-			.id = ctx->next_order_id++,
+			.id = ++ctx->next_order_id,
 			.order = ack->order,
 			.opts = ack->opts,
 			.fill_size = ack->order.size,
@@ -370,6 +383,26 @@ void on_order_placed(struct exchg_net_context *ctx, enum exchg_id id,
 		ack->status = EXCHG_ORDER_OPEN;
 	ack->filled_size = placed->fill_size;
 	ack->id = placed->id;
+
+	struct test_order *t = xzalloc(sizeof(*t) + private_size);
+	t->info = *ack;
+	LIST_INSERT_HEAD(&ctx->servers[id].order_list, t, list);
+	return t;
+}
+
+bool on_order_canceled(struct exchg_net_context *ctx, enum exchg_id id,
+		       struct test_order *o) {
+	struct exchg_test_event event = {
+		.id = id,
+		.type = EXCHG_EVENT_ORDER_CANCELED,
+		.data.order_canceled = {
+			.info = o->info,
+			.succeed = true,
+		}
+	};
+	if (ctx->callback)
+		ctx->callback(ctx, &event, ctx->cb_private);
+	return event.data.order_canceled.succeed;
 }
 
 int net_service(struct exchg_net_context *ctx) {
@@ -481,6 +514,13 @@ void net_destroy(struct exchg_net_context *ctx) {
 	TAILQ_FOREACH_SAFE(e, &ctx->events, list, tmp) {
 		free_event(ctx, e);
 	}
+	struct test_order *o, *otmp;
+	for (enum exchg_id id = 0; id < EXCHG_ALL_EXCHANGES; id++) {
+		LIST_FOREACH_SAFE(o, &ctx->servers[id].order_list, list, otmp) {
+			LIST_REMOVE(o, list);
+			free(o);
+		}
+	}
 	free(ctx);
 }
 
@@ -498,6 +538,8 @@ int http_add_header(struct http_req *req, const unsigned char *name,
 }
 
 void fake_http_req_free(struct http_req *req) {
+	free(req->host);
+	free(req->path);
 	free(req->body.buf);
 	free(req);
 }
@@ -553,6 +595,8 @@ struct http_req *http_dial(struct exchg_net_context *ctx,
 	if (!http)
 		return NULL;
 
+	http->host = xstrdup(host);
+	http->path = xstrdup(path);
 	return http;
 }
 
@@ -686,7 +730,7 @@ struct websocket *ws_dial(struct exchg_net_context *ctx, const char *host,
 }
 
 decimal_t *exchg_test_balances(struct exchg_net_context *ctx, enum exchg_id id) {
-	return ctx->balances[id];
+	return ctx->servers[id].balances;
 }
 
 struct auth_check *auth_check_alloc(size_t public_len, const unsigned char *public,

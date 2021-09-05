@@ -32,7 +32,12 @@ enum exchg_test_event_type {
 	order_placed.fill_size and order_placed.error to affect
 	what will happen immediately to the order */
 	EXCHG_EVENT_ORDER_PLACED,
+	/* The code under test has just tried canceling an order, with details
+	in the event's order_canceled field. You can write to
+	order_canceled.succeed to tell whether the cancelation should succeed */
+	EXCHG_EVENT_ORDER_CANCELED,
 	EXCHG_EVENT_ORDER_ACK,
+	EXCHG_EVENT_ORDER_CANCEL_ACK,
 	EXCHG_EVENT_PAIRS_DATA,
 	EXCHG_EVENT_BALANCES,
 	EXCHG_EVENT_WS_PROTOCOL,
@@ -70,6 +75,10 @@ struct exchg_test_event {
 			decimal_t fill_size;
 			bool error;
 		} order_placed;
+		struct exchg_test_order_canceled {
+			const struct exchg_order_info info;
+			bool succeed;
+		} order_canceled;
 	} data;
 };
 

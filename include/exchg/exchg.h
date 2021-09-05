@@ -76,6 +76,7 @@ struct exchg_order_info {
 	struct exchg_order order;
 	struct exchg_place_order_opts opts;
 	enum exchg_order_status status;
+	bool cancelation_failed;
 	decimal_t filled_size;
 	decimal_t avg_price;
 	// Will contain a non-empty string if status is CANCELED or ERROR
@@ -140,7 +141,10 @@ int64_t exchg_place_order(struct exchg_client *cl, struct exchg_order *,
 			  struct exchg_place_order_opts *, void *request_private);
 
 // `id` must be an id previously returned by a call to exchg_place_order() on
-// this struct exchg_client. Returns nonzero on error.
+// this struct exchg_client. Returns nonzero on error. If successful, the order
+// isn't guaranteed to have been canceled until the on_order_update() callback
+// gives EXCHG_ORDER_CANCELED. If we later find that the cancelation was
+// not successful, an order update will be given with cancelation_failed=true
 int exchg_cancel_order(struct exchg_client *cl, int64_t id);
 
 // If available, subscribe to private data feed that will give updates

@@ -127,7 +127,7 @@ static void balances_read(struct http_req *req, struct exchg_test_event *ev,
 	if (a->hmac_status == AUTH_GOOD) {
 		buf_xsprintf(buf, "[");
 		for (enum exchg_currency c = 0; c < EXCHG_NUM_CCYS; c++) {
-			decimal_t *balance = &req->ctx->balances[EXCHG_GEMINI][c];
+			decimal_t *balance = &req->ctx->servers[EXCHG_GEMINI].balances[c];
 			if (!decimal_is_positive(balance))
 				continue;
 			char s[30];
@@ -348,7 +348,7 @@ static void place_order_add_header(struct http_req *req, const unsigned char *na
 		sprintf(problem, "no side given");
 		goto bad;
 	}
-	on_order_placed(req->ctx, EXCHG_GEMINI, ack);
+	on_order_placed(req->ctx, EXCHG_GEMINI, ack, 0);
 	g_free(json);
 	return;
 

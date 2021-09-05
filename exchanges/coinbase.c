@@ -1325,9 +1325,62 @@ static int64_t coinbase_place_order(struct exchg_client *cl, struct exchg_order 
 	return info->info.id;
 }
 
+static int cancel_order_recv(struct exchg_client *cl, struct conn *conn,
+			     int status, char *json, int num_toks, jsmntok_t *toks) {
+	if (num_toks > 1) {
+		struct http_data *data = conn_private(conn);
+		struct order_info *oi = exchg_order_lookup(cl, data->id);
+
+		if (oi) {
+			oi->info.cancelation_failed = true;
+			exchg_order_update(cl, oi);
+		}
+		exchg_log("Cancelation of order %"PRId64" failed:\n", data->id);
+		json_fprintln(stderr, json, &toks[0]);
+	}
+	return 0;
+}
+
+static struct exchg_http_ops cancel_order_ops = {
+	.recv = cancel_order_recv,
+	.add_headers = private_add_headers,
+	.conn_data_size = sizeof(struct http_data),
+};
+
 static int coinbase_cancel_order(struct exchg_client *cl, int64_t id) {
-	printf("sorry dunno how to cancel %s orders\n", exchg_name(cl));
-	return -1;
+	struct coinbase_client *cb = cl->priv;
+	struct order_info *info = exchg_order_lookup(cl, id);
+
+	if (unlikely(!info)) {
+		exchg_log("Can't cancel coinbase order %"PRId64". ID unrecognized\n", id);
+		return -1;
+	}
+	if (unlikely(info->info.status == EXCHG_ORDER_UNSUBMITTED)) {
+		remove_work(cl, place_order_work, info);
+		info->info.status = EXCHG_ORDER_CANCELED;
+		exchg_order_update(cl, info);
+		return 0;
+	}
+
+	char path[strlen("/orders/client:") + 36 + strlen("?product_id=") + 10];
+	sprintf(path, "/orders/client:");
+	write_oid(&path[strlen("/orders/client:")], id);
+	// note that since the order status is not UNSUBMITTED, cl->pair_info_current
+	// is true and cb->pair_info[pair].id is valid
+	sprintf(&path[strlen("/orders/client:")+36],
+		"?product_id=%s", cb->pair_info[info->info.order.pair].id);
+
+	struct conn *http = exchg_http_delete("api.pro.coinbase.com", path,
+					      &cancel_order_ops, cl);
+	if (!http)
+		return -1;
+	struct http_data *data = conn_private(http);
+	if (coinbase_conn_auth(&data->auth, cl->hmac_ctx, http)) {
+		conn_close(http);
+		return -1;
+	}
+	data->id = id;
+	return 0;
 }
 
 static int coinbase_new_keypair(struct exchg_client *cl,

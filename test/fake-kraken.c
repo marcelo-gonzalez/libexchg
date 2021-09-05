@@ -533,7 +533,7 @@ static void private_ws_write(struct websocket *w, char *buf, size_t len) {
 			ev = exchg_fake_queue_ws_event_tail(
 				w, EXCHG_EVENT_ORDER_ACK, sizeof(struct ack_msg));
 			ev->data.order_ack = ack;
-			on_order_placed(w->ctx, EXCHG_KRAKEN, &ev->data.order_ack);
+			on_order_placed(w->ctx, EXCHG_KRAKEN, &ev->data.order_ack, 0);
 			struct ack_msg *msg = test_event_private(ev);
 			msg->type = ACK_OPENORDERS;
 			msg->reqid = reqid;
@@ -619,7 +619,7 @@ static void balances_read(struct http_req *req, struct exchg_test_event *ev,
 	buf_xsprintf(buf, "{\"error\": [], \"result\": {");
 	for (enum exchg_currency c = 0; c < EXCHG_NUM_CCYS; c++) {
 		char s[30];
-		decimal_t *balance = &req->ctx->balances[EXCHG_KRAKEN][c];
+		decimal_t *balance = &req->ctx->servers[EXCHG_KRAKEN].balances[c];
 		if (!decimal_is_positive(balance))
 			continue;
 		decimal_to_str(s, balance);

@@ -29,6 +29,8 @@ struct work {
 	LIST_ENTRY(work) list;
 };
 
+void remove_work(struct exchg_client *,
+		 bool (*f)(struct exchg_client *, void *), void *p);
 int queue_work(struct exchg_client *,
 	       bool (*f)(struct exchg_client *, void *), void *p);
 int queue_work_exclusive(struct exchg_client *,
@@ -225,6 +227,9 @@ struct conn *exchg_http_get(const char *host, const char *path,
 struct conn *exchg_http_post(const char *host, const char *path,
 			     const struct exchg_http_ops *ops,
 			     struct exchg_client *cl);
+struct conn *exchg_http_delete(const char *host, const char *path,
+			       const struct exchg_http_ops *ops,
+			       struct exchg_client *cl);
 
 void conn_close(struct conn *);
 

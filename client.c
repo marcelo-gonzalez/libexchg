@@ -483,6 +483,12 @@ struct conn *exchg_http_post(const char *host, const char *path,
 	return exchg_http_dial(host, path, ops, cl, "POST");
 }
 
+struct conn *exchg_http_delete(const char *host, const char *path,
+			       const struct exchg_http_ops *ops,
+			       struct exchg_client *cl) {
+	return exchg_http_dial(host, path, ops, cl, "DELETE");
+}
+
 struct conn *exchg_websocket_connect(struct exchg_client *cl,
 				     const char *host, const char *path,
 				     const struct exchg_websocket_ops *ops) {
@@ -579,6 +585,7 @@ struct order_info *__exchg_new_order(struct exchg_client *cl, struct exchg_order
 	else
 		memset(&info->info.opts, 0, sizeof(info->info.opts));
 	info->info.status = EXCHG_ORDER_UNSUBMITTED;
+	info->info.cancelation_failed = false;
 	memset(&info->info.filled_size, 0, sizeof(decimal_t));
 	memset(&info->info.avg_price, 0, sizeof(decimal_t));
 	info->info.err[0] = 0;
@@ -1064,6 +1071,17 @@ void exchg_do_work(struct exchg_client *cl) {
 
 	LIST_FOREACH_SAFE(w, &cl->work, list, tmp) {
 		if (w->f(w->cl, w->p)) {
+			LIST_REMOVE(w, list);
+			free(w);
+		}
+	}
+}
+
+void remove_work(struct exchg_client *cl,
+		 bool (*f)(struct exchg_client *, void *), void *p) {
+	struct work *w, *tmp;
+	LIST_FOREACH_SAFE(w, &cl->work, list, tmp) {
+		if (w->f == f && w->p == p) {
 			LIST_REMOVE(w, list);
 			free(w);
 		}

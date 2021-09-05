@@ -13,6 +13,20 @@
 #include "exchg/exchg.h"
 #include "exchg/test.h"
 
+#ifndef TAILQ_FOREACH_SAFE
+#define	TAILQ_FOREACH_SAFE(var, head, field, tmp)		\
+	for ((var) = ((head)->tqh_first);			\
+	     (var) && ((tmp) = (var)->field.tqe_next, 1);	\
+	     (var) = (tmp))
+#endif
+
+#ifndef LIST_FOREACH_SAFE
+#define	LIST_FOREACH_SAFE(var, head, field, tmp)		\
+	for ((var) = ((head)->lh_first);			\
+	     (var) && ((tmp) = (var)->field.le_next, 1);	\
+	     (var) = (tmp))
+#endif
+
 struct buf {
 	char *buf;
 	size_t len;
@@ -20,6 +34,8 @@ struct buf {
 };
 
 struct http_req {
+	char *host;
+	char *path;
 	int status;
 	enum exchg_id id;
 	void *user;
@@ -114,11 +130,24 @@ struct test_event {
 
 void *test_event_private(struct exchg_test_event *event);
 
+struct test_order {
+	struct exchg_order_info info;
+	LIST_ENTRY(test_order) list;
+	char priv[];
+};
+
+static inline void *test_order_private(struct test_order *o) {
+	return o->priv;
+}
+
 struct exchg_net_context {
 	struct net_callbacks *callbacks;
 	LIST_HEAD(ws_list, websocket) ws_list;
 	TAILQ_HEAD(events, test_event) events;
-	decimal_t balances[EXCHG_ALL_EXCHANGES][EXCHG_NUM_CCYS];
+	struct {
+		decimal_t balances[EXCHG_NUM_CCYS];
+		LIST_HEAD(order_list, test_order) order_list;
+	} servers[EXCHG_ALL_EXCHANGES];
 	int next_order_id;
 	exchg_test_callback_t callback;
 	void *cb_private;
@@ -133,7 +162,9 @@ struct http_req *fake_http_req_alloc(struct exchg_net_context *ctx, enum exchg_i
 				     enum exchg_test_event_type type, void *private);
 void fake_http_req_free(struct http_req *);
 
-void on_order_placed(struct exchg_net_context *ctx, enum exchg_id id,
-		     struct exchg_order_info *ack);
+struct test_order *on_order_placed(struct exchg_net_context *ctx, enum exchg_id id,
+				   struct exchg_order_info *ack, size_t private_size);
+bool on_order_canceled(struct exchg_net_context *ctx, enum exchg_id id,
+		       struct test_order *o);
 
 #endif
