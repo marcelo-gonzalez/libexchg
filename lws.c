@@ -8,7 +8,7 @@
 
 struct websocket {
 	struct lws *wsi;
-	const char *host;
+	char *host;
 	char *path;
 	void *user;
 };
@@ -113,6 +113,7 @@ static int websocket_callback(struct lws *wsi, enum lws_callback_reasons reason,
 		lwsl_err("Websocket Connection Error: %s%s: %s\n",
 			 ws->host, ws->path, in ? (char *)in : "(null)");
 		ops->on_error(ws->user);
+		free(ws->host);
 		free(ws->path);
 		free(ws);
 		break;
@@ -126,6 +127,7 @@ static int websocket_callback(struct lws *wsi, enum lws_callback_reasons reason,
 		break;
 	case LWS_CALLBACK_CLIENT_CLOSED:
 		ops->on_closed(ws->user);
+		free(ws->host);
 		free(ws->path);
 		free(ws);
 		return 0;
@@ -144,8 +146,8 @@ static int prepare_http_client_read(struct lws *wsi) {
 
 struct http_req {
 	struct lws *wsi;
-	const char *host;
-	const char *path;
+	char *host;
+	char *path;
 	int status;
 	unsigned char **headers_start;
 	unsigned char *headers_end;
@@ -199,6 +201,8 @@ static int http_callback(struct lws *wsi, enum lws_callback_reasons reason,
 			 req->host, req->path, in ? (char *)in : "(null)");
 		http->on_error(req->user, (char *)in);
 		free(req->body.buf);
+		free(req->host);
+		free(req->path);
 		free(req);
 		break;
 	case LWS_CALLBACK_ESTABLISHED_CLIENT_HTTP:
@@ -234,6 +238,8 @@ static int http_callback(struct lws *wsi, enum lws_callback_reasons reason,
 	case LWS_CALLBACK_CLOSED_CLIENT_HTTP:
 		http->on_closed(req->user);
 		free(req->body.buf);
+		free(req->host);
+		free(req->path);
 		free(req);
 		break;
 	default:
@@ -281,10 +287,16 @@ struct http_req *http_dial(struct exchg_net_context *ctx,
 		.userdata = req,
 		.pwsi = &req->wsi,
 	};
-	req->host = host;
-	req->path = path;
+	req->host = strdup(host);
+	req->path = strdup(path);
 	req->user = private;
-
+	if (!req->host || !req->path) {
+		fprintf(stderr, "OOM: %s\n", __func__);
+		free(req->host);
+		free(req->path);
+		free(req);
+		return NULL;
+	}
 	if (!lws_client_connect_via_info(&info)) {
 		fprintf(stderr, "lws_client_connect_via_info() error connecting to %s%s\n", host, path);
 		free(req);
@@ -319,10 +331,12 @@ struct websocket *ws_dial(struct exchg_net_context *ctx, const char *host,
 		return NULL;
 	}
 	ws->user = private;
-	ws->host = host;
+	ws->host = strdup(host);
 	ws->path = strdup(path);
-	if (!ws->path) {
+	if (!ws->host || !ws->path) {
 		fprintf(stderr, "OOM: %s\n", __func__);
+		free(ws->host);
+		free(ws->path);
 		free(ws);
 		return NULL;
 	}
