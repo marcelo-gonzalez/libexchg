@@ -367,7 +367,7 @@ static void private_ws_read(struct websocket *ws, struct buf *buf,
 		}
 
 		write_prices(price_str, size_str, cost_str, fee_str,
-			     &ack->order.price, &ack->order.size, 26, 6);
+			     &ack->order.price, &ack->filled_size, 26, 6);
 		buf_xsprintf(buf, "[[{\"OTA3RV-MJC5U-T5FQE2\":{\"status\":\"%s\",\"cost\":\"%s\""
 			     ",\"vol_exec\":\"%s\",\"fee\":\"%s\",\"avg_price\":\"%s\","
 			     "\"lastupdated\":\"1627305317.892973\",\"userref\":%"PRId64"}"
