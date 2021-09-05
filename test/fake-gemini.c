@@ -311,6 +311,18 @@ static void place_order_add_header(struct http_req *req, const unsigned char *na
 			}
 			got_side = true;
 			key_idx += 2;
+		} else if (json_streq(json, key, "options")) {
+			if (val->type != JSMN_ARRAY) {
+				sprintf(problem, "bad options");
+				goto bad;
+			}
+			for (int j = 1; j <= val->size; j++) {
+				jsmntok_t *option = val + j;
+				if (json_streq(json, option, "immediate-or-cancel")) {
+					ack->opts.immediate_or_cancel = true;
+					break;
+				}
+			}
 		} else {
 			// TODO: also parse immediate-or-cancel option
 			key_idx = json_skip(n, o->toks, key_idx+1);

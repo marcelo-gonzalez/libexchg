@@ -490,6 +490,9 @@ static void private_ws_write(struct websocket *w, char *buf, size_t len) {
 				goto bad;
 			}
 			got_id = true;
+		} else if (json_streq(buf, key, "timeinforce")) {
+			if (json_streq(buf, value, "IOC"))
+				ack.opts.immediate_or_cancel = true;
 		}
 		key_idx = json_skip(r, pw->toks, key_idx+1);
 	}

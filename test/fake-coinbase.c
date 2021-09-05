@@ -316,6 +316,9 @@ static void orders_write(struct http_req *req) {
 				goto bad;
 			}
 			client_oid = value;
+		} else if (json_streq(req->body.buf, key, "time_in_force")) {
+			if (json_streq(req->body.buf, value, "IOC"))
+				ack->opts.immediate_or_cancel = true;
 		}
 
 		key_idx = json_skip(num_toks, toks, key_idx + 1);
