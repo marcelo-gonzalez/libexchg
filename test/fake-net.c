@@ -355,14 +355,21 @@ void on_order_placed(struct exchg_net_context *ctx, enum exchg_id id,
 			.order = ack->order,
 			.opts = ack->opts,
 			.fill_size = ack->order.size,
-			.status = EXCHG_ORDER_FINISHED,
 		},
 	};
+	struct exchg_test_order_placed *placed = &event.data.order_placed;
 	if (ctx->callback)
 		ctx->callback(ctx, &event, ctx->cb_private);
-	ack->filled_size = event.data.order_placed.fill_size;
-	ack->status = event.data.order_placed.status;
-	ack->id = event.data.order_placed.id;
+	if (placed->error)
+		ack->status = EXCHG_ORDER_ERROR;
+	else if (decimal_cmp(&placed->fill_size, &ack->order.size) >= 0)
+		ack->status = EXCHG_ORDER_FINISHED;
+	else if (ack->opts.immediate_or_cancel)
+		ack->status = EXCHG_ORDER_CANCELED;
+	else
+		ack->status = EXCHG_ORDER_OPEN;
+	ack->filled_size = placed->fill_size;
+	ack->id = placed->id;
 }
 
 int net_service(struct exchg_net_context *ctx) {

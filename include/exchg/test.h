@@ -29,7 +29,7 @@ enum exchg_test_event_type {
 	EXCHG_EVENT_BOOK_UPDATE,
 	/* The code under test has just placed an order, with details
 	in the event's order_placed field. You can write to
-	order_placed.fill_size and order_placed.status to affect
+	order_placed.fill_size and order_placed.error to affect
 	what will happen immediately to the order */
 	EXCHG_EVENT_ORDER_PLACED,
 	EXCHG_EVENT_ORDER_ACK,
@@ -68,7 +68,7 @@ struct exchg_test_event {
 			const struct exchg_order order;
 			const struct exchg_place_order_opts opts;
 			decimal_t fill_size;
-			enum exchg_order_status status;
+			bool error;
 		} order_placed;
 	} data;
 };
