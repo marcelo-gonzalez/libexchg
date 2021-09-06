@@ -717,6 +717,9 @@ struct websocket *ws_dial(struct exchg_net_context *ctx, const char *host,
 		return NULL;
 	}
 
+	if (!ws)
+		return NULL;
+
 	struct test_event *event = xzalloc(sizeof(*event));
 	struct exchg_test_event *ev = &event->event;
 	event->conn_type = CONN_TYPE_WS;
