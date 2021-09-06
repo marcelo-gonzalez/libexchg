@@ -375,33 +375,46 @@ static int gemini_l2_subscribe(struct exchg_client *cl,
 	return gemini_connect(cl, pair);
 }
 
-static int add_headers(struct exchg_client *cl, struct conn *conn,
-		       const char *json, size_t len) {
+struct http_data {
+	char *payload;
+	int payload_len;
+	char hmac[HMAC_SHA384_HEX_LEN];
+	int hmac_len;
+	void *private;
+};
+
+static int http_add_headers(struct exchg_client *cl, struct conn *conn) {
+	struct http_data *data = conn_private(conn);
+
 	if (conn_add_header(conn, (unsigned char *)"X-GEMINI-APIKEY:",
 			    cl->apikey_public, cl->apikey_public_len))
 		return 1;
-
-	char *encoded;
-	int encoded_len = base64_encode((unsigned char *)json, len, &encoded);
-	if (encoded_len < 0)
-		return 1;
 	if (conn_add_header(conn, (unsigned char *)"X-GEMINI-PAYLOAD:",
-			    (unsigned char *)encoded, encoded_len)) {
-		free(encoded);
+			    (unsigned char *)data->payload, data->payload_len))
 		return 1;
-	}
 
-	char hmac[HMAC_SHA384_HEX_LEN];
-	int hmac_len = hmac_hex(cl->hmac_ctx, (unsigned char *)encoded,
-				encoded_len, hmac, HEX_LOWER);
-	if (hmac_len < 0) {
-		free(encoded);
-		return 1;
+	return conn_add_header(conn, (unsigned char *)"X-GEMINI-SIGNATURE:",
+			       (unsigned char *)data->hmac, data->hmac_len);
+}
+
+static void http_on_closed(struct exchg_client *cl, struct conn *conn) {
+	struct http_data *data = conn_private(conn);
+
+	free(data->payload);
+}
+
+static int gemini_conn_auth(struct http_data *data, HMAC_CTX *hmac_ctx,
+			    const char *request, size_t len) {
+	data->payload_len = base64_encode((unsigned char *)request, len, &data->payload);
+	if (data->payload_len < 0)
+		return -1;
+	data->hmac_len = hmac_hex(hmac_ctx, (unsigned char *)data->payload,
+				  data->payload_len, data->hmac, HEX_LOWER);
+	if (data->hmac_len < 0) {
+		free(data->payload);
+		return -1;
 	}
-	int ret = conn_add_header(conn, (unsigned char *)"X-GEMINI-SIGNATURE:",
-				  (unsigned char *)hmac, hmac_len);
-	free(encoded);
-	return ret;
+	return 0;
 }
 
 static int place_order_err_status(struct exchg_client *cl, int status,
@@ -452,15 +465,11 @@ struct order_update {
 	jsmntok_t *reason;
 };
 
-static struct order_info *conn_priv_order_info(struct conn *conn) {
-	struct order_info **p = conn_private(conn);
-	return *p;
-}
-
 static int place_order_recv(struct exchg_client *cl, struct conn *conn,
 			    int status, char *json, int num_toks, jsmntok_t *toks) {
 	const char *problem;
-	struct order_info *oi = conn_priv_order_info(conn);
+	struct http_data *data = conn_private(conn);
+	struct order_info *oi = data->private;
 	struct exchg_order_info *info = &oi->info;
 
 	struct order_update msg = {
@@ -554,35 +563,11 @@ bad:
 	return 0;
 }
 
-static int place_order_add_headers(struct exchg_client *cl, struct conn *conn) {
-	struct order_info *oi = conn_priv_order_info(conn);
-	struct exchg_order_info *info = &oi->info;
-	char size_str[30], price_str[30];
-	const char *options = info->opts.immediate_or_cancel ?
-		", \"options\": [\"immediate-or-cancel\"]" : "";
-	const char *side = info->order.side == EXCHG_SIDE_BUY ? "buy" : "sell";
-
-	decimal_to_str(size_str, &info->order.size);
-	decimal_to_str(price_str, &info->order.price);
-
-	char request[300];
-	int len = sprintf(request,
-			  "{ \"nonce\": %lu, \"request\": \"/v1/order/new\", "
-			  "\"client_order_id\": \"%" PRId64 "\", \"symbol\": \"%s\", "
-			  "\"amount\": \"%s\", \"price\": \"%s\", \"side\": \"%s\", "
-			  "\"type\": \"exchange limit\"%s}",
-			  current_micros(), info->id, exchg_pair_to_str(info->order.pair),
-			  size_str, price_str, side, options);
-	if (!add_headers(cl, conn, request, len)) {
-		info->status = EXCHG_ORDER_PENDING;
-		return 0;
-	}
-	return -1;
-}
-
 static void place_order_on_err(struct exchg_client *cl, struct conn *conn,
 			       const char *err) {
-	struct order_info *info = conn_priv_order_info(conn);
+	struct http_data *data = conn_private(conn);
+	struct order_info *info = data->private;
+
 	info->info.status = EXCHG_ORDER_ERROR;
 	if (err)
 		strncpy(info->info.err, err, EXCHG_ORDER_ERR_SIZE);
@@ -593,9 +578,10 @@ static void place_order_on_err(struct exchg_client *cl, struct conn *conn,
 
 const static struct exchg_http_ops trade_http_ops = {
 	.recv = place_order_recv,
-	.add_headers = place_order_add_headers,
+	.add_headers = http_add_headers,
+	.on_closed = http_on_closed,
 	.on_error = place_order_on_err,
-	.conn_data_size = sizeof(void *),
+	.conn_data_size = sizeof(struct http_data),
 };
 
 static int64_t gemini_place_order(struct exchg_client *cl, struct exchg_order *order,
@@ -608,27 +594,44 @@ static int64_t gemini_place_order(struct exchg_client *cl, struct exchg_order *o
 	struct conn *conn = exchg_http_post(host, "/v1/order/new", &trade_http_ops, cl);
 	if (!conn)
 		return -1;
-	struct order_info *info = exchg_new_order(cl, order, opts, private);
-	if (!info)
+	struct order_info *oi = exchg_new_order(cl, order, opts, private);
+	if (!oi) {
+		conn_close(conn);
 		return -ENOMEM;
-	struct order_info **p = conn_private(conn);
-	*p = info;
-	info->info.status = EXCHG_ORDER_SUBMITTED;
-	return info->info.id;
+	}
+	struct exchg_order_info *info = &oi->info;
+
+	char request[300];
+	char size_str[30], price_str[30];
+	const char *options = info->opts.immediate_or_cancel ?
+		", \"options\": [\"immediate-or-cancel\"]" : "";
+	const char *side = info->order.side == EXCHG_SIDE_BUY ? "buy" : "sell";
+
+	decimal_to_str(size_str, &info->order.size);
+	decimal_to_str(price_str, &info->order.price);
+
+	int len = sprintf(request,
+			  "{ \"nonce\": %lu, \"request\": \"/v1/order/new\", "
+			  "\"client_order_id\": \"%" PRId64 "\", \"symbol\": \"%s\", "
+			  "\"amount\": \"%s\", \"price\": \"%s\", \"side\": \"%s\", "
+			  "\"type\": \"exchange limit\"%s}",
+			  current_micros(), info->id, exchg_pair_to_str(info->order.pair),
+			  size_str, price_str, side, options);
+
+	struct http_data *data = conn_private(conn);
+	if (gemini_conn_auth(data, cl->hmac_ctx, request, len)) {
+		conn_close(conn);
+		order_info_free(cl, oi);
+		return -1;
+	}
+	data->private = oi;
+	info->status = EXCHG_ORDER_SUBMITTED;
+	return info->id;
 }
 
 static int gemini_cancel_order(struct exchg_client *cl, int64_t id) {
 	printf("sorry dunno how to cancel %s orders\n", exchg_name(cl));
 	return -1;
-}
-
-static int gemini_balances_add_headers(struct exchg_client *cl, struct conn *conn) {
-	char request[100];
-	int len = sprintf(request,
-			  "{ \"nonce\": %lu, \"request\": \"/v1/balances\" }",
-			  current_micros());
-
-	return add_headers(cl, conn, request, len);
 }
 
 static int gemini_balances_recv(struct exchg_client *cl, struct conn *conn, int status,
@@ -710,8 +713,8 @@ static int gemini_balances_recv(struct exchg_client *cl, struct conn *conn, int 
 		key_idx = json_skip(num_toks, toks, data_idx);
 	}
 
-	void **p = conn_private(conn);
-	exchg_on_balances(cl, balances, *p);
+	struct http_data *data = conn_private(conn);
+	exchg_on_balances(cl, balances, data->private);
 	// TODO: make this a separate BALANCES_OK
 	cl->state |= EXCH_MAY_TRADE;
 	return 0;
@@ -721,8 +724,9 @@ static int gemini_get_pair_info(struct exchg_client *cl) { return 0; }
 
 const static struct exchg_http_ops balances_http_ops = {
 	.recv = gemini_balances_recv,
-	.add_headers = gemini_balances_add_headers,
-	.conn_data_size = sizeof(void *),
+	.add_headers = http_add_headers,
+	.on_closed = http_on_closed,
+	.conn_data_size = sizeof(struct http_data),
 };
 
 static int gemini_get_balances(struct exchg_client *cl, void *req_private) {
@@ -734,7 +738,16 @@ static int gemini_get_balances(struct exchg_client *cl, void *req_private) {
 	struct conn *c = exchg_http_post(host, "/v1/balances", &balances_http_ops, cl);
 	if (!c)
 		return -1;
-	*(void **)conn_private(c) = req_private;
+	struct http_data *data = conn_private(c);
+	char request[100];
+
+	int len = sprintf(request, "{ \"nonce\": %lu, \"request\": \"/v1/balances\" }",
+			  current_micros());
+	if (gemini_conn_auth(data, cl->hmac_ctx, request, len)) {
+		conn_close(c);
+		return -1;
+	}
+	data->private = req_private;
 	return 0;
 }
 
