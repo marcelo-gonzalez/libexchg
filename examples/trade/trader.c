@@ -105,7 +105,9 @@ static void time_since(struct timespec *dst, const struct timespec *ts) {
 }
 
 static bool ready_to_trade(struct exchg_client *cl, struct trade_state *state) {
-	if (!exchg_private_ws_online(cl))
+	// TODO: or ->stop. maybe cant assume you wont be called back after
+	// exchg_shutdown()
+	if (state->sent || !exchg_private_ws_online(cl) || !state->start_balances_recvd)
 		return false;
 	if (state->order.side == EXCHG_SIDE_BUY)
 		return exchg_num_asks(exchg_ctx(cl), state->order.pair) > 0;
@@ -119,15 +121,10 @@ static void on_l2_update(struct exchg_client *cl,
 			 void *user) {
 	struct trade_state *state = user;
 
-	// TODO: or ->stop. maybe cant assume you wont be called back after
-	// exchg_shutdown()
-	if (!state->sent && state->start_balances_recvd) {
-		if (!ready_to_trade(cl, state))
-			return;
+	if (ready_to_trade(cl, state))
 		make_trades(cl, state);
-	}
 
-	if (!state->verbose)
+	if (!state->sent || !state->verbose)
 		return;
 
 	if (!state->first_recvd) {
