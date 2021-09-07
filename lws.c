@@ -11,6 +11,8 @@ struct websocket {
 	char *host;
 	char *path;
 	void *user;
+	unsigned char **headers_start;
+	unsigned char *headers_end;
 };
 
 struct buf {
@@ -97,6 +99,16 @@ int ws_vprintf(struct websocket *ws, const char *fmt, va_list ap) {
 	}
 }
 
+int ws_add_header(struct websocket *ws, const unsigned char *name,
+		  const unsigned char *val, size_t len) {
+	if (lws_add_http_header_by_name(ws->wsi, name, val, len,
+					ws->headers_start, ws->headers_end)) {
+		fprintf(stderr, "lws_add_http_header_by_name() error\n");
+		return -1;
+	}
+	return 0;
+}
+
 void ws_close(struct websocket *ws) {
 	lws_set_timeout(ws->wsi, PENDING_TIMEOUT_USER_OK,
 			LWS_TO_KILL_ASYNC);
@@ -120,6 +132,10 @@ static int websocket_callback(struct lws *wsi, enum lws_callback_reasons reason,
 	case LWS_CALLBACK_CLIENT_ESTABLISHED:
 		ops->on_established(ws->user);
 		break;
+	case LWS_CALLBACK_CLIENT_APPEND_HANDSHAKE_HEADER:
+		ws->headers_start = (unsigned char **)in;
+		ws->headers_end = *ws->headers_start + len;
+		return ops->add_headers(ws->user, ws);
 	case LWS_CALLBACK_CLIENT_RECEIVE:
 		return ops->recv(ws->user, in, len);
 	case LWS_CALLBACK_WS_PEER_INITIATED_CLOSE:

@@ -19,9 +19,12 @@ struct http_callbacks {
 	void (*on_closed)(void *p);
 };
 
+struct websocket;
+
 struct websocket_callbacks {
 	void (*on_error)(void *p);
 	void (*on_established)(void *p);
+	int (*add_headers)(void *p, struct websocket *);
 	int (*recv)(void *p, char *in, size_t len);
 	void (*on_closed)(void *p);
 };
@@ -49,9 +52,10 @@ int http_status(struct http_req *);
 
 void http_close(struct http_req *req);
 
-struct websocket;
-
 extern int ws_vprintf(struct websocket *, const char *fmt, va_list ap);
+
+int ws_add_header(struct websocket *req, const unsigned char *name,
+		  const unsigned char *val, size_t len);
 
 void ws_close(struct websocket *ws);
 

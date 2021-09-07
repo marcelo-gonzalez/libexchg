@@ -230,7 +230,8 @@ static void ws_on_error(void *p) {
 	exchg_log("wss://%s%s error\n", conn->host, conn->path);
 	conn->established = false;
 	conn->reconnect_seconds = -1;
-	conn->ws.ops->on_disconnect(conn->cl, conn, -1);
+	if (conn->ws.ops->on_disconnect)
+		conn->ws.ops->on_disconnect(conn->cl, conn, -1);
 	conn_offline(conn);
 }
 
@@ -240,7 +241,15 @@ static void ws_on_established(void *p) {
 	exchg_log("wss://%s%s established\n", conn->host, conn->path);
 	conn->established = true;
 	conn_json_init(conn);
-	conn->ws.ops->on_conn_established(conn->cl, conn);
+	if (conn->ws.ops->on_conn_established)
+		conn->ws.ops->on_conn_established(conn->cl, conn);
+}
+
+static int ws_add_headers(void *p, struct websocket *ws) {
+	struct conn *conn = p;
+	if (conn->ws.ops->add_headers)
+		return conn->ws.ops->add_headers(conn->cl, conn);
+	return 0;
 }
 
 static int ws_recv(void *p, char *in, size_t len) {
@@ -287,7 +296,8 @@ static void ws_on_closed(void *p) {
 	conn->established = false;
 	if (conn->reconnect_seconds < 0)
 		conn->disconnecting = true;
-	conn->ws.ops->on_disconnect(conn->cl, conn, conn->reconnect_seconds);
+	if (conn->ws.ops->on_disconnect)
+		conn->ws.ops->on_disconnect(conn->cl, conn, conn->reconnect_seconds);
 
 	if (conn->reconnect_seconds >= 0) {
 		struct timespec now;
@@ -302,7 +312,8 @@ static void ws_on_closed(void *p) {
 		} else {
 			// TODO: try again later
 			conn->disconnecting = true;
-			conn->ws.ops->on_disconnect(conn->cl, conn, -1);
+			if (conn->ws.ops->on_disconnect)
+				conn->ws.ops->on_disconnect(conn->cl, conn, -1);
 			conn_offline(conn);
 		}
 	} else {
@@ -312,7 +323,10 @@ static void ws_on_closed(void *p) {
 
 int conn_add_header(struct conn *conn, const unsigned char *name,
 		    const unsigned char *val, size_t len) {
-	return http_add_header(conn->http.req, name, val, len);
+	if (conn->type == CONN_TYPE_HTTP)
+		return http_add_header(conn->http.req, name, val, len);
+	else
+		return ws_add_header(conn->ws.conn, name, val, len);
 }
 
 static void http_on_error(void *p, const char *err) {
@@ -889,6 +903,7 @@ static struct net_callbacks net_callbacks = {
 	{
 		.on_error = ws_on_error,
 		.on_established = ws_on_established,
+		.add_headers = ws_add_headers,
 		.recv = ws_recv,
 		.on_closed = ws_on_closed,
 	},

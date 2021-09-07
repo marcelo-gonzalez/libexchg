@@ -96,15 +96,13 @@ static inline int json_get_decimal(decimal_t *dst, const char *json, jsmntok_t *
 	return decimal_from_str_n(dst, &json[tok->start], tok->end - tok->start);
 }
 
-static inline int json_strncpy(char *dst, const char *json, jsmntok_t *tok,
+static inline void json_strncpy(char *dst, const char *json, jsmntok_t *tok,
 			       size_t len) {
 	size_t sz = tok->end - tok->start;
 	if (sz + 1 > len)
 		sz = len - 1;
 	memcpy(dst, &json[tok->start], sz);
 	dst[sz] = 0;
-	// consistent w/ the real strncpy()
-	return tok->end-tok->start;
 }
 
 static inline int json_strdup(char **dst, const char *json, jsmntok_t *tok) {

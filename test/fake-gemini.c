@@ -87,8 +87,94 @@ static int gemini_ws_matches(struct websocket *w, enum exchg_pair p) {
 	return g->pair == p;
 }
 
+enum order_event_type {
+	ORDER_ACCEPTED,
+	ORDER_REJECTED,
+	ORDER_BOOKED,
+	ORDER_FILL,
+	ORDER_CANCELLED,
+	ORDER_CLOSED,
+};
+
+struct gemini_ack {
+	enum order_event_type type;
+	int64_t client_oid;
+};
+
+static void events_read(struct websocket *ws, struct buf *buf,
+			struct exchg_test_event *msg) {
+	if (msg->type == EXCHG_EVENT_WS_PROTOCOL) {
+		// there are more fields but we just parse this for now so whatever
+		buf_xsprintf(buf, "{\"type\": \"subscription_ack\"}");
+		return;
+	}
+	if (msg->type != EXCHG_EVENT_ORDER_ACK) {
+		exchg_log("Gemini test: don't know what to do with order event type %d"
+			  " on order events websocket", msg->type);
+		return;
+	}
+
+	struct exchg_order_info *ack = &msg->data.order_ack;
+	struct gemini_ack *g = test_event_private(msg);
+	const char *type;
+	const char *is_live;
+	const char *reason = "";
+
+	switch (g->type) {
+	case ORDER_ACCEPTED:
+		type = "accepted";
+		is_live = "true";
+		break;
+	case ORDER_REJECTED:
+		type = "rejected";
+		is_live = "false";
+		reason = "\"reason\": \"TestErrorBadThingHappened\"";
+		break;
+	case ORDER_BOOKED:
+		type = "booked";
+		is_live = "true";
+		break;
+	case ORDER_FILL:
+		type = "fill";
+		is_live = "true";
+		break;
+	case ORDER_CANCELLED:
+		type = "cancelled";
+		is_live = "false";
+		break;
+	case ORDER_CLOSED:
+		type = "closed";
+		is_live = "false";
+		break;
+	}
+	char size[30];
+
+	decimal_to_str(size, &ack->filled_size);
+	buf_xsprintf(buf, "[{\"type\": \"%s\", \"executed_amount\": \"%s\", "
+		     "\"client_order_id\": %"PRId64", \"is_live\": %s, %s}]",
+		     type, size, g->client_oid, is_live, reason);
+}
+
+static int events_matches(struct websocket *w, enum exchg_pair p) {
+	return 0;
+}
+
+struct websocket *order_events_dial(struct exchg_net_context *ctx, void *private) {
+	struct websocket *s = fake_websocket_alloc(ctx, private);
+	s->id = EXCHG_GEMINI;
+	s->read = events_read;
+	s->write = no_ws_write;
+	s->matches = events_matches;
+	s->destroy = ws_free;
+	exchg_fake_queue_ws_event(s, EXCHG_EVENT_WS_PROTOCOL, 0);
+	return s;
+}
+
 struct websocket *gemini_ws_dial(struct exchg_net_context *ctx,
 				 const char *path, void *private) {
+	if (!strcmp(path, "/v1/order/events"))
+		return order_events_dial(ctx, private);
+
 	if (strncmp(path, "/v1/marketdata/", strlen("/v1/marketdata/"))) {
 		// TODO helper
 		fprintf(stderr, "Gemini bad path: %s\n", path);
@@ -205,7 +291,10 @@ static void place_order_read(struct http_req *req, struct exchg_test_event *ev,
 
 	if (p->auth->hmac_status == AUTH_GOOD) {
 		char price[30];
-		char size[30];
+		char original_size[30];
+		char remaining_size[30];
+		char filled_size[30];
+		decimal_t remaining;
 		const char *is_live, *is_canceled;
 
 		// TODO: EXCHG_ORDER_ERROR
@@ -220,7 +309,10 @@ static void place_order_read(struct http_req *req, struct exchg_test_event *ev,
 			is_canceled = "false";
 
 		decimal_to_str(price, &ev->data.order_ack.order.price);
-		decimal_to_str(size, &ev->data.order_ack.filled_size);
+		decimal_to_str(original_size, &ev->data.order_ack.order.size);
+		decimal_to_str(filled_size, &ev->data.order_ack.filled_size);
+		decimal_subtract(&remaining, &ev->data.order_ack.order.size, &ev->data.order_ack.filled_size);
+		decimal_to_str(remaining_size, &remaining);
 		buf_xsprintf(buf,
 			     "{ \"order_id\": \"123\", \"id\": \"123\", \"symbol\": \"%s\", "
 			     "\"exchange\": \"gemini\", \"avg_execution_price\": \"%s\""
@@ -229,15 +321,42 @@ static void place_order_read(struct http_req *req, struct exchg_test_event *ev,
 			     "s_cancelled\": %s, \"is_hidden\": false, \"was_forced\": false"
 			     ", \"executed_amount\": \"%s\", \"client_order_id\": \"%"PRId64"\", "
 			     "\"options\": [ \"immediate-or-cancel\" ], \"price\": \"%s\", "
-			     "\"original_amount\": \"%s\", \"remaining_amount\": \"0\" }\n",
+			     "\"original_amount\": \"%s\", \"remaining_amount\": \"%s\" }\n",
 			     exchg_pair_to_str(ev->data.order_ack.order.pair), price,
 			     ev->data.order_ack.order.side == EXCHG_SIDE_BUY ? "buy" : "sell",
-			     is_live, is_canceled, size, p->client_oid, price, size);
+			     is_live, is_canceled, filled_size, p->client_oid, price, original_size, remaining_size);
 	} else if (p->auth->hmac_status == AUTH_BAD) {
 		buf_xsprintf(buf, "{ \"result\": \"error\", \"reason\": \"InvalidSignature\","
 				      "\"message\": \"InvalidSignature\" }");
 	} else {
 		buf_xsprintf(buf, "{}");
+	}
+}
+
+static void ack_init(struct exchg_test_event *ev, enum order_event_type type,
+		     struct test_order *order, int64_t client_oid) {
+	struct exchg_order_info *ack = &ev->data.order_ack;
+	struct gemini_ack *g = test_event_private(ev);
+	memcpy(ack, &order->info, sizeof(order->info));
+
+	g->type = type;
+	g->client_oid = client_oid;
+
+	switch (type) {
+	case ORDER_ACCEPTED:
+		decimal_zero(&ack->filled_size);
+		ack->status = EXCHG_ORDER_PENDING;
+		break;
+	case ORDER_REJECTED:
+		decimal_zero(&ack->filled_size);
+		ack->status = EXCHG_ORDER_ERROR;
+		break;
+	case ORDER_BOOKED:
+	case ORDER_FILL:
+		ack->status = EXCHG_ORDER_PENDING;
+	case ORDER_CANCELLED:
+	case ORDER_CLOSED:
+		break;
 	}
 }
 
@@ -328,7 +447,7 @@ static void place_order_add_header(struct http_req *req, const unsigned char *na
 			key_idx = json_skip(n, o->toks, key_idx+1);
 		}
 	}
-	if (ack->id == -1) {
+	if (o->client_oid == -1) {
 		sprintf(problem, "no client_order_id given");
 		goto bad;
 	}
@@ -348,8 +467,37 @@ static void place_order_add_header(struct http_req *req, const unsigned char *na
 		sprintf(problem, "no side given");
 		goto bad;
 	}
-	on_order_placed(req->ctx, EXCHG_GEMINI, ack, 0);
 	g_free(json);
+
+	struct test_order *order = on_order_placed(req->ctx, EXCHG_GEMINI, ack, 0);
+	struct websocket *ws = fake_websocket_get(req->ctx, "api.gemini.com", "/v1/order/events");
+	if (!ws)
+		return;
+
+	struct exchg_test_event *accepted = exchg_fake_queue_ws_event(
+		ws, EXCHG_EVENT_ORDER_ACK, sizeof(struct gemini_ack));
+	struct exchg_test_event *last = exchg_fake_queue_ws_event_after(
+		ws, EXCHG_EVENT_ORDER_ACK, sizeof(struct gemini_ack), accepted);
+
+	ack_init(accepted, ORDER_ACCEPTED, order, o->client_oid);
+	if (ack->status == EXCHG_ORDER_FINISHED)
+		ack_init(last, ORDER_CLOSED, order, o->client_oid);
+	else if (ack->status == EXCHG_ORDER_CANCELED)
+		ack_init(last, ORDER_CANCELLED, order, o->client_oid);
+	else if (ack->status == EXCHG_ORDER_ERROR)
+		ack_init(last, ORDER_REJECTED, order, o->client_oid);
+	else if (ack->status == EXCHG_ORDER_OPEN)
+		ack_init(last, ORDER_BOOKED, order, o->client_oid);
+	else {
+		exchg_log("gemini test internal error: unexpected order status %d\n", ack->status);
+		exit(1);
+	}
+	if (ack->status != EXCHG_ORDER_ERROR &&
+	    decimal_is_positive(&ack->filled_size)) {
+		struct exchg_test_event *fill = exchg_fake_queue_ws_event_after(
+			ws, EXCHG_EVENT_ORDER_ACK, sizeof(struct gemini_ack), accepted);
+		ack_init(fill, ORDER_FILL, order, o->client_oid);
+	}
 	return;
 
 bad:

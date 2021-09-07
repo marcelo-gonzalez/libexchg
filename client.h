@@ -15,6 +15,7 @@
 #include "exchg/decimal.h"
 #include "exchg/currency.h"
 #include "exchg/exchg.h"
+#include "json-helpers.h"
 #include "net-backend.h"
 #include "order-book.h"
 
@@ -89,6 +90,13 @@ struct order_info {
 	struct exchg_order_info info;
 	void *private;
 };
+
+static inline void order_err_cpy(struct exchg_order_info *info, const char *json, jsmntok_t *tok) {
+	if (tok)
+		json_strncpy(info->err, json, tok, EXCHG_ORDER_ERR_SIZE);
+	else
+		strncpy(info->err, "<unknown>", EXCHG_ORDER_ERR_SIZE);
+}
 
 struct order_info *__exchg_new_order(struct exchg_client *cl, struct exchg_order *order,
 				     struct exchg_place_order_opts *opts,
@@ -168,6 +176,7 @@ static inline void exchg_set_up(struct exchg_client *cl) {
 
 struct exchg_websocket_ops {
 	int (*on_conn_established)(struct exchg_client *, struct conn *);
+	int (*add_headers)(struct exchg_client *, struct conn *);
 	void (*on_disconnect)(struct exchg_client *, struct conn *,
 			      int reconnect_seconds);
 	int (*recv)(struct exchg_client *, struct conn *,

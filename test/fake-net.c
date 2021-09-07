@@ -648,6 +648,12 @@ int ws_vprintf(struct websocket *ws, const char *fmt, va_list ap) {
 	}
 }
 
+int ws_add_header(struct websocket *req, const unsigned char *name,
+		  const unsigned char *val, size_t len) {
+	// TODO
+	return 0;
+}
+
 void ws_close(struct websocket *ws) {
 	struct test_event *event;
 	struct exchg_test_event *ev;
