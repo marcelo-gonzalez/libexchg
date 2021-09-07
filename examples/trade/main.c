@@ -157,9 +157,6 @@ int main(int argc, char **argv) {
 			goto free_ctx;
 	}
 
-	if (exchg_private_ws_connect(ctx, id))
-		goto free_ctx;
-
 	if (!check_intent(argv[optind], state.order.pair, state.order.side,
 			  argv[optind+2], sandbox))
 		return 1;
