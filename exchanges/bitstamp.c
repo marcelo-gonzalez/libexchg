@@ -948,7 +948,7 @@ static int64_t bitstamp_place_order(struct exchg_client *cl, struct exchg_order 
 	decimal_to_str(amount, &order->size);
 	decimal_to_str(price, &order->price);
 
-	struct order_info *info = exchg_new_order(cl, order, opts, private);
+	struct order_info *info = exchg_new_order(cl, order, opts, private, 0);
 	if (!info) {
 		conn_close(conn);
 		return -ENOMEM;
@@ -969,7 +969,7 @@ static int64_t bitstamp_place_order(struct exchg_client *cl, struct exchg_order 
 	return info->info.id;
 }
 
-static int bitstamp_cancel_order(struct exchg_client *cl, int64_t id) {
+static int bitstamp_cancel_order(struct exchg_client *cl, struct order_info *info) {
 	printf("sorry dunno how to cancel %s orders\n", exchg_name(cl));
 	return -1;
 }

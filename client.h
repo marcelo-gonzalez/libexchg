@@ -45,6 +45,16 @@ enum conn_type {
 	CONN_TYPE_WS,
 };
 
+struct order_info {
+	struct exchg_order_info info;
+	void *req_private;
+	char private[];
+};
+
+static inline void *order_info_private(struct order_info *o) {
+	return o->private;
+}
+
 struct exchg_client {
 	enum exchg_id id;
 	const char *name;
@@ -56,7 +66,7 @@ struct exchg_client {
 	int64_t (*place_order)(struct exchg_client *cl, struct exchg_order *,
 			       struct exchg_place_order_opts *,
 			       void *request_private);
-	int (*cancel_order)(struct exchg_client *cl, int64_t id);
+	int (*cancel_order)(struct exchg_client *cl, struct order_info *info);
 	int (*new_keypair)(struct exchg_client *cl,
 			   const unsigned char *key, size_t len);
 	int (*priv_ws_connect)(struct exchg_client *cl);
@@ -86,11 +96,6 @@ static inline void exchg_update_init(struct exchg_client *cl) {
 
 int exchg_realloc_order_bufs(struct exchg_client *cl, int n);
 
-struct order_info {
-	struct exchg_order_info info;
-	void *private;
-};
-
 static inline void order_err_cpy(struct exchg_order_info *info, const char *json, jsmntok_t *tok) {
 	if (tok)
 		json_strncpy(info->err, json, tok, EXCHG_ORDER_ERR_SIZE);
@@ -100,9 +105,10 @@ static inline void order_err_cpy(struct exchg_order_info *info, const char *json
 
 struct order_info *__exchg_new_order(struct exchg_client *cl, struct exchg_order *order,
 				     struct exchg_place_order_opts *opts,
-				     void *private, int64_t id);
+				     void *req_private, size_t private_size, int64_t id);
 struct order_info *exchg_new_order(struct exchg_client *cl, struct exchg_order *order,
-				   struct exchg_place_order_opts *opts, void *private);
+				   struct exchg_place_order_opts *opts, void *req_private,
+				   size_t private_size);
 void order_info_free(struct exchg_client *cl, struct order_info *info);
 void exchg_order_update(struct exchg_client *cl, struct order_info *info);
 struct order_info *exchg_order_lookup(struct exchg_client *cl, int64_t id);

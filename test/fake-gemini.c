@@ -151,8 +151,8 @@ static void events_read(struct websocket *ws, struct buf *buf,
 
 	decimal_to_str(size, &ack->filled_size);
 	buf_xsprintf(buf, "[{\"type\": \"%s\", \"executed_amount\": \"%s\", "
-		     "\"client_order_id\": %"PRId64", \"is_live\": %s, %s}]",
-		     type, size, g->client_oid, is_live, reason);
+		     "\"client_order_id\": %"PRId64", \"order_id\": \"%"PRId64"\", \"is_live\": %s, %s}]",
+		     type, size, g->client_oid, ack->id, is_live, reason);
 }
 
 static int events_matches(struct websocket *w, enum exchg_pair p) {
@@ -308,13 +308,13 @@ static void place_order_read(struct http_req *req, struct exchg_test_event *ev,
 		else
 			is_canceled = "false";
 
-		decimal_to_str(price, &ev->data.order_ack.order.price);
-		decimal_to_str(original_size, &ev->data.order_ack.order.size);
-		decimal_to_str(filled_size, &ev->data.order_ack.filled_size);
-		decimal_subtract(&remaining, &ev->data.order_ack.order.size, &ev->data.order_ack.filled_size);
+		decimal_to_str(price, &ack->order.price);
+		decimal_to_str(original_size, &ack->order.size);
+		decimal_to_str(filled_size, &ack->filled_size);
+		decimal_subtract(&remaining, &ack->order.size, &ack->filled_size);
 		decimal_to_str(remaining_size, &remaining);
 		buf_xsprintf(buf,
-			     "{ \"order_id\": \"123\", \"id\": \"123\", \"symbol\": \"%s\", "
+			     "{ \"order_id\": \"%"PRId64"\", \"id\": \"%"PRId64"\", \"symbol\": \"%s\", "
 			     "\"exchange\": \"gemini\", \"avg_execution_price\": \"%s\""
 			     ", \"side\": \"%s\", \"type\": \"exchange limit\", \"timestamp\": \"161"
 			     "1872750\", \"timestampms\": 1611872750275, \"is_live\": %s, \"i"
@@ -322,8 +322,8 @@ static void place_order_read(struct http_req *req, struct exchg_test_event *ev,
 			     ", \"executed_amount\": \"%s\", \"client_order_id\": \"%"PRId64"\", "
 			     "\"options\": [ \"immediate-or-cancel\" ], \"price\": \"%s\", "
 			     "\"original_amount\": \"%s\", \"remaining_amount\": \"%s\" }\n",
-			     exchg_pair_to_str(ev->data.order_ack.order.pair), price,
-			     ev->data.order_ack.order.side == EXCHG_SIDE_BUY ? "buy" : "sell",
+			     ack->id, ack->id, exchg_pair_to_str(ack->order.pair), price,
+			     ack->order.side == EXCHG_SIDE_BUY ? "buy" : "sell",
 			     is_live, is_canceled, filled_size, p->client_oid, price, original_size, remaining_size);
 	} else if (p->auth->hmac_status == AUTH_BAD) {
 		buf_xsprintf(buf, "{ \"result\": \"error\", \"reason\": \"InvalidSignature\","
@@ -469,7 +469,9 @@ static void place_order_add_header(struct http_req *req, const unsigned char *na
 	}
 	g_free(json);
 
-	struct test_order *order = on_order_placed(req->ctx, EXCHG_GEMINI, ack, 0);
+	struct test_order *order = on_order_placed(req->ctx, EXCHG_GEMINI, ack, sizeof(int64_t));
+	*(int64_t *)test_order_private(order) = o->client_oid;
+
 	struct websocket *ws = fake_websocket_get(req->ctx, "api.gemini.com", "/v1/order/events");
 	if (!ws)
 		return;
@@ -501,7 +503,9 @@ static void place_order_add_header(struct http_req *req, const unsigned char *na
 	return;
 
 bad:
-	fprintf(stderr, "%s: %s\n", __func__, problem);
+	fprintf(stderr, "%s: %s:\n", __func__, problem);
+	fwrite(json, 1, len, stderr);
+	fputc('\n', stderr);
 	g_free(json);
 }
 
@@ -537,6 +541,138 @@ static struct http_req *place_order_dial(struct exchg_net_context *ctx,
 	return req;
 }
 
+struct cancel_order {
+	struct auth_check *auth;
+	char err[100];
+};
+
+static void cancel_order_read(struct http_req *req, struct exchg_test_event *ev,
+			      struct buf *buf) {
+	struct cancel_order *c = req->priv;
+	if (c->auth->hmac_status == AUTH_GOOD) {
+		if (c->err[0])
+			buf_xsprintf(buf, "{\"result\": \"error\", \"reason\": \"%s\","
+				     " \"message\": \"%s\"}", c->err, c->err);
+		else
+			buf_xsprintf(buf, "{\"is_cancelled\":\"true\"}");
+	} else if (c->auth->hmac_status == AUTH_BAD) {
+		buf_xsprintf(buf, "{ \"result\": \"error\", \"reason\": \"InvalidSignature\","
+			     "\"message\": \"InvalidSignature\" }");
+	} else {
+		buf_xsprintf(buf, "{}");
+	}
+}
+
+static void cancel_order_add_header(struct http_req *req, const unsigned char *name,
+				    const unsigned char *val, size_t len) {
+	struct cancel_order *cancel = req->priv;
+	auth_add_header(cancel->auth, name, val, len);
+	if (strcmp((char *)name, "X-GEMINI-PAYLOAD:"))
+		return;
+
+	const char *problem = "";
+	jsmn_parser parser;
+	jsmntok_t toks[100];
+	char *json = (char *)g_base64_decode((char *)val, &len);
+
+	jsmn_init(&parser);
+	int n = jsmn_parse(&parser, json, len, toks, ARRAY_SIZE(toks));
+	if (n < 1) {
+		problem = "JSON parsing error";
+		goto bad;
+	}
+	if (toks[0].type != JSMN_OBJECT) {
+		problem = "non-object json";
+		goto bad;
+	}
+
+	int64_t order_id = -1;
+	int key_idx = 1;
+	for (int i = 0; i < toks[0].size; i++) {
+		jsmntok_t *key = &toks[key_idx];
+		jsmntok_t *val = key + 1;
+
+		if (json_streq(json, key, "order_id")) {
+			if (json_get_int64(&order_id, json, val)) {
+				problem = "bad order_id";
+				goto bad;
+			}
+		}
+
+		key_idx = json_skip(n, toks, key_idx+1);
+	}
+
+	struct test_order *o;
+	LIST_FOREACH(o, &req->ctx->servers[EXCHG_GEMINI].order_list, list) {
+		if (o->info.id == order_id) {
+			if (!on_order_canceled(req->ctx, EXCHG_GEMINI, o)) {
+				req->status = 503;
+				snprintf(cancel->err, sizeof(cancel->err),
+					 "Service Unavailable");
+			} else {
+				if (o->info.status == EXCHG_ORDER_OPEN) {
+					o->info.status = EXCHG_ORDER_CANCELED;
+				}
+				struct websocket *ws = fake_websocket_get(req->ctx, "api.gemini.com", "/v1/order/events");
+				if (!ws)
+					return;
+				// TODO: here we just send a cancel event no matter what, and in fake-coinbase.c we
+				// remove existing OPEN events. should pick one and implement it in a common place
+				struct exchg_test_event *cancel = exchg_fake_queue_ws_event(
+					ws, EXCHG_EVENT_ORDER_ACK, sizeof(struct gemini_ack));
+				ack_init(cancel, ORDER_CANCELLED, o, *(int64_t *)test_order_private(o));
+				decimal_zero(&cancel->data.order_ack.filled_size);
+			}
+			g_free(json);
+			return;
+		}
+	}
+
+	g_free(json);
+	snprintf(cancel->err, sizeof(cancel->err),
+		 "order id %"PRId64" not recognized", order_id);
+	req->status = 404;
+	return;
+
+bad:
+	fprintf(stderr, "%s: %s:\n", __func__, problem);
+	fwrite(json, 1, len, stderr);
+	fputc('\n', stderr);
+	g_free(json);
+}
+
+static void cancel_order_free(struct http_req *req) {
+	struct cancel_order *c = req->priv;
+
+	auth_check_free(c->auth);
+	free(c);
+	fake_http_req_free(req);
+}
+
+static struct http_req *cancel_order_dial(struct exchg_net_context *ctx,
+					  const char *path, const char *method,
+					  void *private) {
+	if (strcmp(method, "POST")) {
+		fprintf(stderr, "Gemini bad method for %s: %s\n", path, method);
+		return NULL;
+	}
+
+	struct http_req *req = fake_http_req_alloc(ctx, EXCHG_GEMINI,
+						   EXCHG_EVENT_ORDER_CANCEL_ACK, private);
+	req->read = cancel_order_read;
+	req->add_header = cancel_order_add_header;
+	req->write = no_http_write;
+	req->destroy = cancel_order_free;
+	struct cancel_order *c = xzalloc(sizeof(*c));
+	c->auth = auth_check_alloc(strlen(exchg_test_gemini_public),
+				   (unsigned char *)exchg_test_gemini_public,
+				   strlen(exchg_test_gemini_private),
+				   (unsigned char *)exchg_test_gemini_private,
+				   1, HEX_LOWER, EVP_sha384());
+	req->priv = c;
+	return req;
+}
+
 struct http_req *gemini_http_dial(struct exchg_net_context *ctx,
 				  const char *path, const char *method,
 				  void *private) {
@@ -544,6 +680,8 @@ struct http_req *gemini_http_dial(struct exchg_net_context *ctx,
 		return balances_dial(ctx, path, method, private);
 	if (!strcmp(path, "/v1/order/new"))
 		return place_order_dial(ctx, path, method, private);
+	if (!strcmp(path, "/v1/order/cancel"))
+		return cancel_order_dial(ctx, path, method, private);
 	fprintf(stderr, "Gemini bad path: %s\n", path);
 	return NULL;
 

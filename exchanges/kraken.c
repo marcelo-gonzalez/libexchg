@@ -1336,7 +1336,7 @@ static int64_t kraken_place_order(struct exchg_client *cl, struct exchg_order *o
 	struct kraken_client *kkn = cl->priv;
 
 	struct order_info *info = __exchg_new_order(cl, order, opts, request_private,
-						    kkn->next_order_id++);
+						    0, kkn->next_order_id++);
 	if (!info)
 		return -ENOMEM;
 
@@ -1361,7 +1361,7 @@ static int64_t kraken_place_order(struct exchg_client *cl, struct exchg_order *o
 	return info->info.id;
 }
 
-static int kraken_cancel_order(struct exchg_client *cl, int64_t id) {
+static int kraken_cancel_order(struct exchg_client *cl, struct order_info *info) {
 	printf("sorry dunno how to cancel %s orders\n", exchg_name(cl));
 	return -1;
 }

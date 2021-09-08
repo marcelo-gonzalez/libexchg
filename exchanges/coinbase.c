@@ -1297,7 +1297,7 @@ static int64_t coinbase_place_order(struct exchg_client *cl, struct exchg_order 
 						    &place_order_ops, cl);
 		if (!http)
 			return -1;
-		info = exchg_new_order(cl, order, opts, private);
+		info = exchg_new_order(cl, order, opts, private, 0);
 		if (!info) {
 			conn_close(http);
 			return -1;
@@ -1314,7 +1314,7 @@ static int64_t coinbase_place_order(struct exchg_client *cl, struct exchg_order 
 		if (cl->priv_ws_connect(cl))
 			return -1;
 
-		info = exchg_new_order(cl, order, opts, private);
+		info = exchg_new_order(cl, order, opts, private, 0);
 		if (!info)
 			return -1;
 		if (queue_work(cl, place_order_work, info)) {
@@ -1328,6 +1328,8 @@ static int64_t coinbase_place_order(struct exchg_client *cl, struct exchg_order 
 static int cancel_order_recv(struct exchg_client *cl, struct conn *conn,
 			     int status, char *json, int num_toks, jsmntok_t *toks) {
 	if (num_toks > 1) {
+		// TODO: retry if we sent the cancel very soon after sending the
+		// order and the requests might have raced
 		struct http_data *data = conn_private(conn);
 		struct order_info *oi = exchg_order_lookup(cl, data->id);
 
@@ -1347,14 +1349,8 @@ static struct exchg_http_ops cancel_order_ops = {
 	.conn_data_size = sizeof(struct http_data),
 };
 
-static int coinbase_cancel_order(struct exchg_client *cl, int64_t id) {
+static int coinbase_cancel_order(struct exchg_client *cl, struct order_info *info) {
 	struct coinbase_client *cb = cl->priv;
-	struct order_info *info = exchg_order_lookup(cl, id);
-
-	if (unlikely(!info)) {
-		exchg_log("Can't cancel coinbase order %"PRId64". ID unrecognized\n", id);
-		return -1;
-	}
 	if (unlikely(info->info.status == EXCHG_ORDER_UNSUBMITTED)) {
 		remove_work(cl, place_order_work, info);
 		info->info.status = EXCHG_ORDER_CANCELED;
@@ -1364,7 +1360,7 @@ static int coinbase_cancel_order(struct exchg_client *cl, int64_t id) {
 
 	char path[strlen("/orders/client:") + 36 + strlen("?product_id=") + 10];
 	sprintf(path, "/orders/client:");
-	write_oid(&path[strlen("/orders/client:")], id);
+	write_oid(&path[strlen("/orders/client:")], info->info.id);
 	// note that since the order status is not UNSUBMITTED, cl->pair_info_current
 	// is true and cb->pair_info[pair].id is valid
 	sprintf(&path[strlen("/orders/client:")+36],
@@ -1379,7 +1375,7 @@ static int coinbase_cancel_order(struct exchg_client *cl, int64_t id) {
 		conn_close(http);
 		return -1;
 	}
-	data->id = id;
+	data->id = info->info.id;
 	return 0;
 }
 

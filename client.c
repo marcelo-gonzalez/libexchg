@@ -585,13 +585,13 @@ void *conn_private(struct conn *c) {
 
 struct order_info *__exchg_new_order(struct exchg_client *cl, struct exchg_order *order,
 				     struct exchg_place_order_opts *opts,
-				     void *private, int64_t id) {
-	struct order_info *info = malloc(sizeof(*info));
+				     void *req_private, size_t private_size, int64_t id) {
+	struct order_info *info = malloc(sizeof(*info) + private_size);
 	if (!info) {
 		exchg_log("%s: OOM\n", __func__);
 		return NULL;
 	}
-	info->private = private;
+	info->req_private = req_private;
 	info->info.id = id;
 	memcpy(&info->info.order, order, sizeof(*order));
 	if (opts)
@@ -608,8 +608,12 @@ struct order_info *__exchg_new_order(struct exchg_client *cl, struct exchg_order
 }
 
 struct order_info *exchg_new_order(struct exchg_client *cl, struct exchg_order *order,
-				   struct exchg_place_order_opts *opts, void *private) {
-	return __exchg_new_order(cl, order, opts, private, current_micros());
+				   struct exchg_place_order_opts *opts, void *req_private,
+				   size_t private_size) {
+	// TODO: current_micros() is fine for now but a collision is not absolutely
+	// out of the question. should fix that
+	return __exchg_new_order(cl, order, opts, req_private,
+				 private_size, current_micros());
 }
 
 struct order_info *exchg_order_lookup(struct exchg_client *cl, int64_t id) {
@@ -633,7 +637,7 @@ void exchg_order_update(struct exchg_client *cl,
 
 int64_t exchg_place_order(struct exchg_client *cl, struct exchg_order *order,
 			  struct exchg_place_order_opts *opts, void *priv) {
-	if (cl->ctx->opts.dry_run) {
+	if (unlikely(cl->ctx->opts.dry_run)) {
 		const char *action;
 		const char *atfor;
 		char sz[30], px[30];
@@ -656,7 +660,21 @@ int64_t exchg_place_order(struct exchg_client *cl, struct exchg_order *order,
 }
 
 int exchg_cancel_order(struct exchg_client *cl, int64_t id) {
-	return cl->cancel_order(cl, id);
+	if (unlikely(cl->ctx->opts.dry_run)) {
+		// kind of tough, but what should dry run do? remember
+		// the orders placed and remove them here? maybe not worth it...
+		printf("CANCEL order\n");
+		return 0;
+	}
+
+	struct order_info *info = exchg_order_lookup(cl, id);
+
+	if (unlikely(!info)) {
+		exchg_log("Can't cancel %s order %"PRId64". ID not recognized\n",
+			  cl->name, id);
+		return -1;
+	}
+	return cl->cancel_order(cl, info);
 }
 
 int exchg_realloc_order_bufs(struct exchg_client *cl, int n) {

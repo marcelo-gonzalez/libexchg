@@ -16,6 +16,7 @@
 #include "auth.h"
 #include "exchg/currency.h"
 #include "client.h"
+#include "compiler.h"
 #include "gemini.h"
 #include "json-helpers.h"
 #include "time-helpers.h"
@@ -305,17 +306,18 @@ static const struct exchg_websocket_ops websocket_ops = {
 	.conn_data_size = sizeof(struct gemini_conn_info),
 };
 
-static int gemini_connect(struct exchg_client *cl, enum exchg_pair pair) {
-	const char *host;
-	char path[50];
-
-	sprintf(path, "/v1/marketdata/%s?heartbeat=true", exchg_pair_to_str(pair));
-	if (cl->ctx->opts.sandbox)
-		host = "api.sandbox.gemini.com";
+static inline const char *gemini_host(struct exchg_client *cl) {
+	if (likely(!cl->ctx->opts.sandbox))
+		return "api.gemini.com";
 	else
-		host = "api.gemini.com";
+		return "api.sandbox.gemini.com";
+}
 
-	struct conn *c = exchg_websocket_connect(cl, host, path, &websocket_ops);
+static int gemini_connect(struct exchg_client *cl, enum exchg_pair pair) {
+	char path[50];
+	sprintf(path, "/v1/marketdata/%s?heartbeat=true", exchg_pair_to_str(pair));
+
+	struct conn *c = exchg_websocket_connect(cl, gemini_host(cl), path, &websocket_ops);
 	if (!c)
 		return -1;
 
@@ -428,6 +430,7 @@ static int gemini_conn_auth(struct http_data *data, HMAC_CTX *hmac_ctx,
 
 struct gemini_order_update {
 	int64_t client_oid;
+	int64_t server_oid;
 	bool got_is_live;
 	bool is_live;
 	bool is_cancelled;
@@ -437,6 +440,13 @@ struct gemini_order_update {
 	jsmntok_t *message;
 };
 
+struct gemini_order {
+	int64_t server_oid;
+	bool want_cancel;
+};
+
+static int send_order_cancel(struct exchg_client *cl, struct order_info *info);
+
 // We get order updates on the websocket and the HTTP request placing
 // the order.  So only give an order update if it seems that the new
 // message has more recent info than what was has been gotten so far
@@ -444,6 +454,7 @@ static void order_update(struct exchg_client *cl, struct order_info *oi,
 			 enum exchg_order_status new_status, decimal_t *new_size,
 			 bool cancel_rejected) {
 	struct exchg_order_info *info = &oi->info;
+	struct gemini_order *g = order_info_private(oi);
 	bool update = false;
 
 	if (info->opts.immediate_or_cancel && new_status == EXCHG_ORDER_OPEN)
@@ -468,7 +479,7 @@ static void order_update(struct exchg_client *cl, struct order_info *oi,
 	if (update)
 		info->status = new_status;
 
-	if (decimal_cmp(&info->filled_size, new_size) < 0) {
+	if (new_size && decimal_cmp(&info->filled_size, new_size) < 0) {
 		update = true;
 		info->filled_size = *new_size;
 	}
@@ -477,6 +488,10 @@ static void order_update(struct exchg_client *cl, struct order_info *oi,
 		info->cancelation_failed = true;
 	}
 
+	if (g->want_cancel && g->server_oid != -1 &&
+	    new_status != EXCHG_ORDER_FINISHED && new_status != EXCHG_ORDER_CANCELED &&
+	    new_status != EXCHG_ORDER_ERROR)
+		send_order_cancel(cl, oi);
 	if (update)
 		exchg_order_update(cl, oi);
 }
@@ -490,6 +505,12 @@ static int parse_order_update_field(struct gemini_order_update *msg, const char 
 	if (json_streq(json, key, "client_order_id")) {
 		if (json_get_int64(&msg->client_oid, json, value)) {
 			*problem = "bad \"client_order_id\"";
+			return -1;
+		}
+		return key_idx + 2;
+	} else if (json_streq(json, key, "order_id")) {
+		if (json_get_int64(&msg->server_oid, json, value)) {
+			*problem = "bad \"order_id\"";
 			return -1;
 		}
 		return key_idx + 2;
@@ -521,6 +542,91 @@ static int parse_order_update_field(struct gemini_order_update *msg, const char 
 	return json_skip(num_toks, toks, key_idx+1);
 }
 
+static int cancel_order_recv(struct exchg_client *cl, struct conn *conn,
+			     int status, char *json, int num_toks, jsmntok_t *toks) {
+	const char *problem = "";
+	struct http_data *data = conn_private(conn);
+	int64_t id = *(int64_t *)http_data_private(data);
+	struct order_info *oi = exchg_order_lookup(cl, id);
+
+	if (!oi)
+		return 0;
+
+	if (status != 200) {
+		order_update(cl, oi, EXCHG_ORDER_PENDING, NULL, true);
+		exchg_log("Gemini order cancelation error:\n");
+		json_fprintln(stderr, json, &toks[0]);
+		return 0;
+	}
+
+	if (toks[0].type != JSMN_OBJECT) {
+		problem = "not an object";
+		goto bad;
+	}
+
+	struct gemini_order_update msg = {
+		.client_oid = -1,
+		.server_oid = -1,
+	};
+	int key_idx = 1;
+	for (int i = 0; i < toks[0].size; i++) {
+		key_idx = parse_order_update_field(&msg, json, num_toks, toks, key_idx, &problem);
+		if (key_idx < 0)
+			goto bad;
+	}
+	if (msg.is_cancelled)
+		order_update(cl, oi, EXCHG_ORDER_CANCELED, &msg.size, false);
+	else {
+		order_update(cl, oi, EXCHG_ORDER_PENDING, &msg.size, false);
+		exchg_log("%s%s sent update that doesn't indicate is_cancelled=true:\n",
+			  conn_host(conn), conn_path(conn));
+		json_fprintln(stderr, json, &toks[0]);
+	}
+	return 0;
+bad:
+	exchg_log("%s%s sent bad data: %s:\n", conn_host(conn), conn_path(conn), problem);
+	json_fprintln(stderr, json, &toks[0]);
+	return 0;
+}
+
+const static struct exchg_http_ops cancel_http_ops = {
+	.recv = cancel_order_recv,
+	.add_headers = http_add_headers,
+	.on_closed = http_on_closed,
+	.conn_data_size = sizeof(struct http_data) + sizeof(int64_t),
+};
+
+static int send_order_cancel(struct exchg_client *cl, struct order_info *info) {
+	struct gemini_order *g = order_info_private(info);
+	struct conn *conn = exchg_http_post(gemini_host(cl), "/v1/order/cancel", &cancel_http_ops, cl);
+	if (!conn)
+		return -1;
+
+	char request[100];
+	int len = sprintf(request, "{\"nonce\": %"PRId64", \"order_id\": %"PRId64
+			  ", \"request\": \"/v1/order/cancel\"}",
+			  current_micros(), g->server_oid);
+
+	struct http_data *data = conn_private(conn);
+	if (gemini_conn_auth(data, cl->hmac_ctx, request, len)) {
+		conn_close(conn);
+		return -1;
+	}
+	*(int64_t *)http_data_private(data) = info->info.id;
+	g->want_cancel = false;
+	return 0;
+}
+
+static int gemini_cancel_order(struct exchg_client *cl, struct order_info *info) {
+	struct gemini_order *g = order_info_private(info);
+	if (likely(g->server_oid != -1))
+		return send_order_cancel(cl, info);
+	else {
+		g->want_cancel = true;
+		return 0;
+	}
+}
+
 static int place_order_recv(struct exchg_client *cl, struct conn *conn,
 			    int status, char *json, int num_toks, jsmntok_t *toks) {
 	const char *problem;
@@ -528,9 +634,11 @@ static int place_order_recv(struct exchg_client *cl, struct conn *conn,
 	int64_t id = *(int64_t *)http_data_private(data);
 	struct order_info *oi = exchg_order_lookup(cl, id);
 	struct exchg_order_info *info = &oi->info;
+	struct gemini_order *g = order_info_private(oi);
 
 	struct gemini_order_update msg = {
 		.client_oid = -1,
+		.server_oid = -1,
 	};
 
 	if (!oi)
@@ -561,6 +669,11 @@ static int place_order_recv(struct exchg_client *cl, struct conn *conn,
 				  conn_host(conn), conn_path(conn), id, msg.client_oid);
 			return -1;
 		}
+		if (msg.server_oid == -1) {
+			problem = "missing \"order_id\"";
+			goto bad;
+		} else if (g->server_oid == -1)
+			g->server_oid = msg.server_oid;
 		if (!msg.got_is_live) {
 			problem = "missing \"is_live\"";
 			goto bad;
@@ -620,15 +733,10 @@ const static struct exchg_http_ops trade_http_ops = {
 
 static int64_t gemini_place_order(struct exchg_client *cl, struct exchg_order *order,
 				  struct exchg_place_order_opts *opts, void *private) {
-	const char *host;
-	if (cl->ctx->opts.sandbox)
-		host = "api.sandbox.gemini.com";
-	else
-		host = "api.gemini.com";
-	struct conn *conn = exchg_http_post(host, "/v1/order/new", &trade_http_ops, cl);
+	struct conn *conn = exchg_http_post(gemini_host(cl), "/v1/order/new", &trade_http_ops, cl);
 	if (!conn)
 		return -1;
-	struct order_info *oi = exchg_new_order(cl, order, opts, private);
+	struct order_info *oi = exchg_new_order(cl, order, opts, private, sizeof(struct gemini_order));
 	if (!oi) {
 		conn_close(conn);
 		return -ENOMEM;
@@ -660,12 +768,10 @@ static int64_t gemini_place_order(struct exchg_client *cl, struct exchg_order *o
 	}
 	*(int64_t *)http_data_private(data) = info->id;
 	info->status = EXCHG_ORDER_SUBMITTED;
+	struct gemini_order *o = order_info_private(oi);
+	o->server_oid = -1;
+	o->want_cancel = false;
 	return info->id;
-}
-
-static int gemini_cancel_order(struct exchg_client *cl, int64_t id) {
-	printf("sorry dunno how to cancel %s orders\n", exchg_name(cl));
-	return -1;
 }
 
 static int gemini_balances_recv(struct exchg_client *cl, struct conn *conn, int status,
@@ -764,12 +870,7 @@ const static struct exchg_http_ops balances_http_ops = {
 };
 
 static int gemini_get_balances(struct exchg_client *cl, void *req_private) {
-	const char *host;
-	if (cl->ctx->opts.sandbox)
-		host = "api.sandbox.gemini.com";
-	else
-		host = "api.gemini.com";
-	struct conn *c = exchg_http_post(host, "/v1/balances", &balances_http_ops, cl);
+	struct conn *c = exchg_http_post(gemini_host(cl), "/v1/balances", &balances_http_ops, cl);
 	if (!c)
 		return -1;
 	struct http_data *data = conn_private(c);
@@ -856,6 +957,7 @@ static int order_events_recv(struct exchg_client *cl, struct conn *conn,
 			.type = ORDER_UNKNOWN,
 			.update = {
 				.client_oid = -1,
+				.server_oid = -1,
 			},
 		};
 		int key_idx = obj_idx + 1;
@@ -895,7 +997,14 @@ static int order_events_recv(struct exchg_client *cl, struct conn *conn,
 		struct order_info *oi = exchg_order_lookup(cl, event.update.client_oid);
 		if (!oi)
 			goto skip;
+		struct gemini_order *g = order_info_private(oi);
 		struct exchg_order_info *info = &oi->info;
+
+		if (unlikely(event.update.server_oid == -1)) {
+			exchg_log("Gemini gave order update with no \"order_id\":\n");
+			json_fprintln(stderr, json, &toks[obj_idx]);
+		} else if (g->server_oid == -1)
+			g->server_oid = event.update.server_oid;
 
 		switch (event.type) {
 		case ORDER_UNKNOWN:
@@ -972,13 +1081,6 @@ static const struct exchg_websocket_ops order_events_ops = {
 	.on_disconnect = order_events_on_disconnect,
 	.conn_data_size = sizeof(struct http_data),
 };
-
-static const char *gemini_host(struct exchg_client *cl) {
-	if (cl->ctx->opts.sandbox)
-		return "api.sandbox.gemini.com";
-	else
-		return "api.gemini.com";
-}
 
 static int gemini_priv_ws_connect(struct exchg_client *cl) {
 	struct gemini_client *g = cl->priv;
