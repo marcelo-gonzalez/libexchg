@@ -291,12 +291,13 @@ static int gemini_conn_established(struct exchg_client *cl,
 	return 0;
 }
 
-static void gemini_on_disconnect(struct exchg_client *cl,
-				 struct conn *conn, int reconnect_seconds) {
+static int gemini_on_disconnect(struct exchg_client *cl,
+				struct conn *conn, int reconnect_seconds) {
 	struct gemini_conn_info *gc = conn_private(conn);
 	exchg_book_clear(cl, gc->pair);
 	gc->last_socket_sequence = -1;
 	exchg_data_disconnect(cl, conn, 1, &gc->pair);
+	return 0;
 }
 
 static const struct exchg_websocket_ops websocket_ops = {
@@ -1064,15 +1065,25 @@ bad:
 	return -1;
 }
 
-static void order_events_on_disconnect(struct exchg_client *cl,
-				       struct conn *conn, int reconnect_seconds) {
+static int order_events_on_disconnect(struct exchg_client *cl,
+				      struct conn *conn, int reconnect_seconds) {
 	struct http_data *data = conn_private(conn);
 	struct gemini_client *g = cl->priv;
 
 	free(data->payload);
 	g->order_events_sub_acked = false;
-	if (reconnect_seconds < 0)
+	if (reconnect_seconds >= 0) {
+		char request[100];
+		int len = sprintf(request, "{ \"nonce\": %lu, \"request\": \"/v1/order/events\" }",
+				  current_micros());
+		if (gemini_conn_auth(data, cl->hmac_ctx, request, len)) {
+			g->priv_ws_connected = false;
+			return -1;
+		}
+	} else {
 		g->priv_ws_connected = false;
+	}
+	return 0;
 }
 
 static const struct exchg_websocket_ops order_events_ops = {

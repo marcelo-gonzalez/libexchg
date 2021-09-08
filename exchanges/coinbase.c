@@ -711,9 +711,9 @@ static int ws_on_established(struct exchg_client *cl,
 		return channel_sub(cl);
 }
 
-static void ws_on_disconnect(struct exchg_client *cl,
-			     struct conn *conn,
-			     int reconnect_seconds) {
+static int ws_on_disconnect(struct exchg_client *cl,
+			    struct conn *conn,
+			    int reconnect_seconds) {
 	struct coinbase_client *cb = cl->priv;
 	int num_pairs_gone = 0;
 	enum exchg_pair pairs_gone[EXCHG_NUM_PAIRS];
@@ -731,6 +731,7 @@ static void ws_on_disconnect(struct exchg_client *cl,
 	cb->user_chan_subbed = false;
 	cb->sub_acked = false;
 	exchg_data_disconnect(cl, conn, num_pairs_gone, pairs_gone);
+	return 0;
 }
 
 static const struct exchg_websocket_ops ws_ops = {

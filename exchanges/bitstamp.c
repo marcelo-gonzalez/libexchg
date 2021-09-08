@@ -424,8 +424,8 @@ static int bitstamp_conn_established(struct exchg_client *cl,
 		return book_sub(cl);
 }
 
-static void bitstamp_on_disconnect(struct exchg_client *cl,
-				   struct conn *conn, int reconnect_seconds) {
+static int bitstamp_on_disconnect(struct exchg_client *cl,
+				  struct conn *conn, int reconnect_seconds) {
 	struct bitstamp_client *bts = cl->priv;
 	int num_pairs_gone = 0;
 	enum exchg_pair pairs_gone[EXCHG_NUM_PAIRS];
@@ -445,6 +445,7 @@ static void bitstamp_on_disconnect(struct exchg_client *cl,
 		bpi->state &= BTS_ACTIVE;
 	}
 	exchg_data_disconnect(cl, conn, num_pairs_gone, pairs_gone);
+	return 0;
 }
 
 static const struct exchg_websocket_ops websocket_ops = {

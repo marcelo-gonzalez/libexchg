@@ -456,7 +456,7 @@ static int kraken_conn_established(struct exchg_client *cl,
 		return book_sub(cl);
 }
 
-static void kraken_on_disconnect(struct exchg_client *cl, struct conn *conn,
+static int kraken_on_disconnect(struct exchg_client *cl, struct conn *conn,
 				 int reconnect_seconds) {
 	struct kraken_client *kkn = cl->priv;
 	int num_pairs_gone = 0;
@@ -473,6 +473,7 @@ static void kraken_on_disconnect(struct exchg_client *cl, struct conn *conn,
 		kpi->subbed = false;
 	}
 	exchg_data_disconnect(cl, conn, num_pairs_gone, pairs_gone);
+	return 0;
 }
 
 static const struct exchg_websocket_ops websocket_ops = {
@@ -1234,13 +1235,14 @@ static int private_ws_on_established(struct exchg_client *cl,
 	return 0;
 }
 
-static void private_ws_on_disconnect(struct exchg_client *cl,
-				     struct conn *conn,
-				     int reconnect_seconds) {
+static int private_ws_on_disconnect(struct exchg_client *cl,
+				    struct conn *conn,
+				    int reconnect_seconds) {
 	struct kraken_client *kkn = cl->priv;
 	if (reconnect_seconds < 0)
 		kkn->private_ws = NULL;
 	kkn->openorders_recvd = false;
+	return 0;
 }
 
 static const struct exchg_websocket_ops private_ws_ops = {

@@ -296,10 +296,11 @@ static void ws_on_closed(void *p) {
 	conn->established = false;
 	if (conn->reconnect_seconds < 0)
 		conn->disconnecting = true;
-	if (conn->ws.ops->on_disconnect)
-		conn->ws.ops->on_disconnect(conn->cl, conn, conn->reconnect_seconds);
+	if (conn->ws.ops->on_disconnect &&
+	    conn->ws.ops->on_disconnect(conn->cl, conn, conn->reconnect_seconds))
+		conn->disconnecting = true;
 
-	if (conn->reconnect_seconds >= 0) {
+	if (!conn->disconnecting) {
 		struct timespec now;
 
 		if (!ws_reconnect(conn)) {

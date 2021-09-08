@@ -183,8 +183,8 @@ static inline void exchg_set_up(struct exchg_client *cl) {
 struct exchg_websocket_ops {
 	int (*on_conn_established)(struct exchg_client *, struct conn *);
 	int (*add_headers)(struct exchg_client *, struct conn *);
-	void (*on_disconnect)(struct exchg_client *, struct conn *,
-			      int reconnect_seconds);
+	int (*on_disconnect)(struct exchg_client *, struct conn *,
+			     int reconnect_seconds);
 	int (*recv)(struct exchg_client *, struct conn *,
 		    char *js, int num_toks, jsmntok_t *toks);
 	size_t conn_data_size;
