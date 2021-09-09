@@ -137,8 +137,8 @@ int exchg_get_balances(struct exchg_client *cl, void *req_private);
 // Returns < 0 on error, otherwise an ID that will match the ID in the struct
 // order_info passed in the on_order_update() callback.
 // Pass NULL options for defaults.
-int64_t exchg_place_order(struct exchg_client *cl, struct exchg_order *,
-			  struct exchg_place_order_opts *, void *request_private);
+int64_t exchg_place_order(struct exchg_client *cl, const struct exchg_order *,
+			  const struct exchg_place_order_opts *, void *request_private);
 
 // `id` must be an id previously returned by a call to exchg_place_order() on
 // this struct exchg_client. Returns nonzero on error. If successful, the order

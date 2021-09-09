@@ -931,8 +931,8 @@ const static struct exchg_http_ops place_order_ops = {
 	.conn_data_size = sizeof(struct http_data),
 };
 
-static int64_t bitstamp_place_order(struct exchg_client *cl, struct exchg_order *order,
-				    struct exchg_place_order_opts *opts, void *private) {
+static int64_t bitstamp_place_order(struct exchg_client *cl, const struct exchg_order *order,
+				    const struct exchg_place_order_opts *opts, void *private) {
 	char amount[30], price[30];
 	char path[50];
 

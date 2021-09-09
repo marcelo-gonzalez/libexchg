@@ -1319,8 +1319,8 @@ static bool place_order_work(struct exchg_client *cl, void *p) {
 	return true;
 }
 
-static int64_t kraken_place_order(struct exchg_client *cl, struct exchg_order *order,
-				  struct exchg_place_order_opts *opts,
+static int64_t kraken_place_order(struct exchg_client *cl, const struct exchg_order *order,
+				  const struct exchg_place_order_opts *opts,
 				  void *request_private) {
 	struct kraken_client *kkn = client_private(cl);
 

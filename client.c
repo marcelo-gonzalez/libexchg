@@ -584,8 +584,8 @@ void *conn_private(struct conn *c) {
 	return c->private;
 }
 
-struct order_info *__exchg_new_order(struct exchg_client *cl, struct exchg_order *order,
-				     struct exchg_place_order_opts *opts,
+struct order_info *__exchg_new_order(struct exchg_client *cl, const struct exchg_order *order,
+				     const struct exchg_place_order_opts *opts,
 				     void *req_private, size_t private_size, int64_t id) {
 	struct order_info *info = malloc(sizeof(*info) + private_size);
 	if (!info) {
@@ -608,8 +608,8 @@ struct order_info *__exchg_new_order(struct exchg_client *cl, struct exchg_order
 	return info;
 }
 
-struct order_info *exchg_new_order(struct exchg_client *cl, struct exchg_order *order,
-				   struct exchg_place_order_opts *opts, void *req_private,
+struct order_info *exchg_new_order(struct exchg_client *cl, const struct exchg_order *order,
+				   const struct exchg_place_order_opts *opts, void *req_private,
 				   size_t private_size) {
 	// TODO: current_micros() is fine for now but a collision is not absolutely
 	// out of the question. should fix that
@@ -670,8 +670,8 @@ void exchg_order_update(struct exchg_client *cl, struct order_info *oi,
 		order_info_free(cl, oi);
 }
 
-int64_t exchg_place_order(struct exchg_client *cl, struct exchg_order *order,
-			  struct exchg_place_order_opts *opts, void *priv) {
+int64_t exchg_place_order(struct exchg_client *cl, const struct exchg_order *order,
+			  const struct exchg_place_order_opts *opts, void *priv) {
 	if (unlikely(cl->ctx->opts.dry_run)) {
 		const char *action;
 		const char *atfor;

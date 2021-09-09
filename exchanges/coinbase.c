@@ -1333,8 +1333,8 @@ static bool place_order_work(struct exchg_client *cl, void *p) {
 	return true;
 }
 
-static struct order_info *new_order(struct exchg_client *cl, struct exchg_order *order,
-				    struct exchg_place_order_opts *opts, void *private) {
+static struct order_info *new_order(struct exchg_client *cl, const struct exchg_order *order,
+				    const struct exchg_place_order_opts *opts, void *private) {
 	struct order_info *oi = exchg_new_order(cl, order, opts, private, sizeof(char *));
 	if (!oi)
 		return NULL;
@@ -1342,8 +1342,8 @@ static struct order_info *new_order(struct exchg_client *cl, struct exchg_order 
 	return oi;
 }
 
-static int64_t coinbase_place_order(struct exchg_client *cl, struct exchg_order *order,
-				    struct exchg_place_order_opts *opts, void *private) {
+static int64_t coinbase_place_order(struct exchg_client *cl, const struct exchg_order *order,
+				    const struct exchg_place_order_opts *opts, void *private) {
 	struct order_info *info;
 
 	if (likely(cl->pair_info_current)) {

@@ -691,8 +691,8 @@ const static struct exchg_http_ops trade_http_ops = {
 	.conn_data_size = sizeof(struct http_data) + sizeof(int64_t),
 };
 
-static int64_t gemini_place_order(struct exchg_client *cl, struct exchg_order *order,
-				  struct exchg_place_order_opts *opts, void *private) {
+static int64_t gemini_place_order(struct exchg_client *cl, const struct exchg_order *order,
+				  const struct exchg_place_order_opts *opts, void *private) {
 	struct conn *conn = exchg_http_post(gemini_host(cl), "/v1/order/new", &trade_http_ops, cl);
 	if (!conn)
 		return -1;
