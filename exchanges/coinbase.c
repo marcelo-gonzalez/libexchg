@@ -279,6 +279,33 @@ static int64_t parse_oid(const char *json, jsmntok_t *tok) {
 	return n;
 }
 
+static int set_order_id(struct coinbase_client *cb, struct order_info *info,
+			char *json, jsmntok_t *order_id) {
+	json[order_id->end] = 0;
+	if (g_hash_table_lookup(cb->orders, &json[order_id->start])) {
+		json[order_id->end] = '\"';
+		return 0;
+	}
+	json[order_id->end] = '\"';
+
+	char **id = order_info_private(info);
+	if (json_strdup(id, json, order_id))
+		return -1;
+	g_hash_table_insert(cb->orders, *id, info);
+	return 0;
+}
+
+static void order_update(struct exchg_client *cl, struct order_info *oi,
+			 enum exchg_order_status new_status, const decimal_t *new_size,
+			 bool cancel_failed) {
+	struct coinbase_client *cb = client_private(cl);
+	char **id = order_info_private(oi);
+
+	if (order_status_done(new_status) && *id)
+		g_hash_table_remove(cb->orders, *id);
+	exchg_order_update(cl, oi, new_status, new_size, cancel_failed);
+}
+
 static int msg_finish(struct exchg_client *cl, struct ws_msg *msg,
 		      char *json, jsmntok_t *first_tok, const char **problem) {
 	struct coinbase_client *cb = client_private(cl);
@@ -323,12 +350,10 @@ static int msg_finish(struct exchg_client *cl, struct ws_msg *msg,
 		info = exchg_order_lookup(cl, client_oid);
 		if (!info)
 			return 0;
-		char *id;
-		if (json_strdup(&id, json, msg->order_id)) {
+		if (set_order_id(cb, info, json, msg->order_id)) {
 			*problem = "OOM copying order id";
 			return -1;
 		}
-		g_hash_table_insert(cb->orders, id, info);
 		break;
 	case TYPE_MATCH:
 		if (!msg->maker_oid) {
@@ -397,14 +422,13 @@ static int msg_finish(struct exchg_client *cl, struct ws_msg *msg,
 				json_fprintln(stderr, json, first_tok);
 				status = EXCHG_ORDER_FINISHED;
 			}
-			g_hash_table_remove(cb->orders, &json[msg->order_id->start]);
 		}
 		break;
 	}
 	if (msg->type == TYPE_L2UPDATE || msg->type == TYPE_SNAPSHOT)
 		do_l2_update(cl, msg);
 	else
-		exchg_order_update(cl, info, status, &filled_size, false);
+		order_update(cl, info, status, &filled_size, false);
 	return 0;
 }
 
@@ -1120,8 +1144,16 @@ static int coinbase_get_balances(struct exchg_client *cl, void *req_private) {
 	return 0;
 }
 
+struct order_ack {
+	jsmntok_t *order_id;
+	decimal_t size;
+	enum exchg_order_status status;
+	jsmntok_t *message;
+};
+
 static int orders_recv(struct exchg_client *cl, struct conn *conn,
 		       int status, char *json, int num_toks, jsmntok_t *toks) {
+	const char *problem = "";
 	struct http_data *data = conn_private(conn);
 	struct order_info *info = exchg_order_lookup(cl, data->id);
 
@@ -1130,31 +1162,70 @@ static int orders_recv(struct exchg_client *cl, struct conn *conn,
 		return 0;
 
 	if (toks[0].type != JSMN_OBJECT) {
-		exchg_log("Received non-object data from %s%s:\n",
-			  conn_host(conn), conn_path(conn));
-		json_fprintln(stderr, json, &toks[0]);
-		return -1;
+		problem = "non-object data";
+		goto bad;
 	}
 
+	struct order_ack ack = {
+		.status = EXCHG_ORDER_PENDING,
+	};
 	int key_idx = 1;
 	for (int i = 0; i < toks[0].size; i++) {
 		jsmntok_t *key = &toks[key_idx];
 		jsmntok_t *value = key + 1;
 
-		// We just get all updates on the websocket for now. usually those come
-		// faster, anyway. Is is possible to get an error message here after
-		// having gotten a normal \"received\" message on the websocket?
-		// Would guess no but if so, then we need to remove the order from
-		// the hash table in struct coinbase_client
-		if (json_streq(json, key, "message")) {
-			order_err_cpy(&info->info, json, value);
-			exchg_order_update(cl, info, EXCHG_ORDER_ERROR, NULL, false);
-			return 0;
-		} else {
-			key_idx = json_skip(num_toks, toks, key_idx + 1);
+		if (json_streq(json, key, "status")) {
+			if (json_streq(json, value, "pending")) {
+				ack.status = EXCHG_ORDER_PENDING;
+			} else if (json_streq(json, value, "open")) {
+				ack.status = EXCHG_ORDER_OPEN;
+			} else if (json_streq(json, value, "active")) {
+				ack.status = EXCHG_ORDER_OPEN;
+			} else if (json_streq(json, value, "done")) {
+				ack.status = EXCHG_ORDER_FINISHED;
+			} else if (json_streq(json, value, "rejected")) {
+				ack.status = EXCHG_ORDER_ERROR;
+			} else {
+				exchg_log("Coinbase received order ack with unrecognized \"type\":\n");
+				json_fprintln(stderr, json, &toks[0]);
+				ack.status = EXCHG_ORDER_PENDING;
+			}
+		} else if (json_streq(json, key, "id")) {
+			ack.order_id = value;
+		} else if (json_streq(json, key, "message")) {
+			ack.message = value;
+		} else if (json_streq(json, key, "filled_size")) {
+			if (json_get_decimal(&ack.size, json, value)) {
+				problem = "bad \"filled_size\"";
+				goto bad;
+			}
 		}
+		key_idx = json_skip(num_toks, toks, key_idx + 1);
 	}
-	exchg_order_update(cl, info, EXCHG_ORDER_PENDING, NULL, false);
+
+	if (status != 200)
+		ack.status = EXCHG_ORDER_ERROR;
+	else {
+		if (!ack.order_id) {
+			exchg_log("Coinbase sent order upate with no \"id\":\n");
+			json_fprintln(stderr, json, &toks[0]);
+		} else if (set_order_id(client_private(cl), info, json, ack.order_id))
+			exchg_log("Coinbase OOM copying order ID\n");
+	}
+	if (ack.status == EXCHG_ORDER_ERROR) {
+		order_err_cpy(&info->info, json, ack.message);
+		exchg_log("Coinbase order error:\n");
+		json_fprintln(stderr, json, &toks[0]);
+	}
+	order_update(cl, info, ack.status, &ack.size, false);
+	return 0;
+
+bad:
+	exchg_log("Received bad update from %s%s: %s:\n",
+		  conn_host(conn), conn_path(conn), problem);
+	json_fprintln(stderr, json, &toks[0]);
+	strncpy(info->info.err, "bad update from Coinbase", EXCHG_ORDER_ERR_SIZE);
+	order_update(cl, info, EXCHG_ORDER_ERROR, NULL, false);
 	return 0;
 }
 
@@ -1210,7 +1281,7 @@ static int place_order(struct exchg_client *cl, struct conn *http,
 			snprintf(info->err, EXCHG_ORDER_ERR_SIZE,
 				 "%s not available on Coinbase",
 				 exchg_pair_to_str(info->order.pair));
-			exchg_order_update(cl, oi, EXCHG_ORDER_ERROR, NULL, false);
+			order_update(cl, oi, EXCHG_ORDER_ERROR, NULL, false);
 		}
 		return -1;
 	}
@@ -1229,7 +1300,7 @@ static int place_order(struct exchg_client *cl, struct conn *http,
 				   info->opts.immediate_or_cancel ? "IOC" : "GTC") < 0) {
 		if (update_on_err) {
 			snprintf(info->err, EXCHG_ORDER_ERR_SIZE, "Out-Of-Memory");
-			exchg_order_update(cl, oi, EXCHG_ORDER_ERROR, NULL, false);
+			order_update(cl, oi, EXCHG_ORDER_ERROR, NULL, false);
 		}
 		return -1;
 	}
@@ -1239,7 +1310,7 @@ static int place_order(struct exchg_client *cl, struct conn *http,
 		info->status = EXCHG_ORDER_SUBMITTED;
 	} else if (ret && update_on_err) {
 		snprintf(info->err, EXCHG_ORDER_ERR_SIZE, "error computing request HMAC");
-		exchg_order_update(cl, oi, EXCHG_ORDER_ERROR, NULL, false);
+		order_update(cl, oi, EXCHG_ORDER_ERROR, NULL, false);
 	}
 	return ret;
 }
@@ -1254,12 +1325,21 @@ static bool place_order_work(struct exchg_client *cl, void *p) {
 					    &place_order_ops, cl);
 	if (!http) {
 		strncpy(info->info.err, "HTTP POST failed", EXCHG_ORDER_ERR_SIZE);
-		exchg_order_update(cl, info, EXCHG_ORDER_ERROR, NULL, false);
+		order_update(cl, info, EXCHG_ORDER_ERROR, NULL, false);
 		return true;
 	}
 	if (place_order(cl, http, info, true))
 		conn_close(http);
 	return true;
+}
+
+static struct order_info *new_order(struct exchg_client *cl, struct exchg_order *order,
+				    struct exchg_place_order_opts *opts, void *private) {
+	struct order_info *oi = exchg_new_order(cl, order, opts, private, sizeof(char *));
+	if (!oi)
+		return NULL;
+	*(char **)order_info_private(oi) = NULL;
+	return oi;
 }
 
 static int64_t coinbase_place_order(struct exchg_client *cl, struct exchg_order *order,
@@ -1271,7 +1351,7 @@ static int64_t coinbase_place_order(struct exchg_client *cl, struct exchg_order 
 						    &place_order_ops, cl);
 		if (!http)
 			return -1;
-		info = exchg_new_order(cl, order, opts, private, 0);
+		info = new_order(cl, order, opts, private);
 		if (!info) {
 			conn_close(http);
 			return -1;
@@ -1281,14 +1361,10 @@ static int64_t coinbase_place_order(struct exchg_client *cl, struct exchg_order 
 			conn_close(http);
 			return -1;
 		}
-		// TODO: if not already connected, we might miss updates, so
-		// we should actively fetch updates in that case.
-		cl->priv_ws_connect(cl);
 	} else {
-		if (cl->priv_ws_connect(cl))
+		if (exchg_get_pair_info(cl))
 			return -1;
-
-		info = exchg_new_order(cl, order, opts, private, 0);
+		info = new_order(cl, order, opts, private);
 		if (!info)
 			return -1;
 		if (queue_work(cl, place_order_work, info)) {
@@ -1308,7 +1384,7 @@ static int cancel_order_recv(struct exchg_client *cl, struct conn *conn,
 		struct order_info *oi = exchg_order_lookup(cl, data->id);
 
 		if (oi) {
-			exchg_order_update(cl, oi, EXCHG_ORDER_PENDING, NULL, true);
+			order_update(cl, oi, EXCHG_ORDER_PENDING, NULL, true);
 		}
 		exchg_log("Cancelation of order %"PRId64" failed:\n", data->id);
 		json_fprintln(stderr, json, &toks[0]);
@@ -1326,7 +1402,7 @@ static int coinbase_cancel_order(struct exchg_client *cl, struct order_info *inf
 	struct coinbase_client *cb = client_private(cl);
 	if (unlikely(info->info.status == EXCHG_ORDER_UNSUBMITTED)) {
 		remove_work(cl, place_order_work, info);
-		exchg_order_update(cl, info, EXCHG_ORDER_CANCELED, NULL, false);
+		order_update(cl, info, EXCHG_ORDER_CANCELED, NULL, false);
 		return 0;
 	}
 
