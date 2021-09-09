@@ -770,7 +770,6 @@ static int kraken_get_pair_info(struct exchg_client *cl) {
 
 struct http_data {
 	size_t to_hash_len;
-	size_t body_len;
 	char *body;
 	char to_hash[256];
 	size_t hmac_len;
@@ -794,7 +793,7 @@ static int private_http_add_headers(struct exchg_client *cl, struct conn *conn) 
 			    strlen("application/x-www-form-urlencoded")))
 		return 1;
 	char l[16];
-	size_t len = sprintf(l, "%zu", h->body_len);
+	size_t len = sprintf(l, "%zu", conn_http_body_len(conn));
 	if (conn_add_header(conn, (unsigned char *)"Content-Length:",
 			    (unsigned char *)l, len))
 		return 1;
@@ -895,13 +894,12 @@ static int private_http_post(struct exchg_client *cl, const char *path,
 	int64_t nonce = current_micros();
 	h->to_hash_len = sprintf(h->to_hash, "%"PRId64, nonce);
 	h->body = h->to_hash + h->to_hash_len;
-	h->body_len = conn_http_body_sprintf(http, "nonce=%"PRId64, nonce);
-	if (h->body_len < 0) {
+	if (conn_http_body_sprintf(http, "nonce=%"PRId64, nonce) < 0) {
 		conn_close(http);
 		return -1;
 	}
-	memcpy(h->body, conn_http_body(http), h->body_len);
-	h->to_hash_len += h->body_len;
+	memcpy(h->body, conn_http_body(http), conn_http_body_len(http));
+	h->to_hash_len += conn_http_body_len(http);
 
 	unsigned char to_auth[200+SHA256_DIGEST_LENGTH];
 	size_t path_len = strlen(path);
