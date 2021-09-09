@@ -769,9 +769,6 @@ static int kraken_get_pair_info(struct exchg_client *cl) {
 }
 
 struct http_data {
-	size_t to_hash_len;
-	char *body;
-	char to_hash[256];
 	size_t hmac_len;
 	char hmac[HMAC_SHA512_B64_LEN];
 	void *request_private;
@@ -891,15 +888,25 @@ static int private_http_post(struct exchg_client *cl, const char *path,
 	struct http_data *h = conn_private(http);
 	h->request_private = req_private;
 
-	int64_t nonce = current_micros();
-	h->to_hash_len = sprintf(h->to_hash, "%"PRId64, nonce);
-	h->body = h->to_hash + h->to_hash_len;
-	if (conn_http_body_sprintf(http, "nonce=%"PRId64, nonce) < 0) {
+	// 123456{body}&nonce=123456
+	char *to_hash = malloc(20 + conn_http_body_len(http) + 27);
+	if (!to_hash) {
+		fprintf(stderr, "%s: OOM\n", __func__);
 		conn_close(http);
 		return -1;
 	}
-	memcpy(h->body, conn_http_body(http), conn_http_body_len(http));
-	h->to_hash_len += conn_http_body_len(http);
+	char *p = to_hash;
+	int64_t nonce = current_micros();
+
+	if (conn_http_body_sprintf(http, "%snonce=%"PRId64,
+				   conn_http_body_len(http) > 0 ? "&" : "", nonce) < 0) {
+		conn_close(http);
+		free(to_hash);
+		return -1;
+	}
+	p += sprintf(p, "%"PRId64, nonce);
+	memcpy(p, conn_http_body(http), conn_http_body_len(http));
+	p += conn_http_body_len(http);
 
 	unsigned char to_auth[200+SHA256_DIGEST_LENGTH];
 	size_t path_len = strlen(path);
@@ -908,17 +915,17 @@ static int private_http_post(struct exchg_client *cl, const char *path,
 	memcpy(to_auth, path, path_len);
 
 	SHA256_Init(&k->sha_ctx);
-	SHA256_Update(&k->sha_ctx, h->to_hash, h->to_hash_len);
+	SHA256_Update(&k->sha_ctx, to_hash, p-to_hash);
 	SHA256_Final(hash, &k->sha_ctx);
 
-	h->hmac_len = hmac_b64(cl->hmac_ctx,
-			       to_auth,
-			       path_len +
-			       SHA256_DIGEST_LENGTH, h->hmac);
+	h->hmac_len = hmac_b64(cl->hmac_ctx, to_auth,
+			       path_len + SHA256_DIGEST_LENGTH, h->hmac);
 	if (h->hmac_len < 0) {
 		conn_close(http);
+		free(to_hash);
 		return -1;
 	}
+	free(to_hash);
 	return 0;
 }
 
