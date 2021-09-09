@@ -895,7 +895,7 @@ static int place_order_recv(struct exchg_client *cl, struct conn *conn,
 
 	// TODO: maybe provide a way to check https://www.bitstamp.net/api/v2/order_status/
 	if (!is_err)
-		info->status = EXCHG_ORDER_FINISHED;
+		info->status = EXCHG_ORDER_PENDING;
 	else
 		info->status = EXCHG_ORDER_ERROR;
 	exchg_order_update(cl, oi);

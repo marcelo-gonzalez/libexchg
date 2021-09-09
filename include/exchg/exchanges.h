@@ -9,6 +9,7 @@ extern "C" {
 #endif
 
 enum exchg_id {
+	// Bitstamp order placement not fully implemented/tested
 	EXCHG_BITSTAMP = 0,
 	EXCHG_GEMINI,
 	EXCHG_KRAKEN,
