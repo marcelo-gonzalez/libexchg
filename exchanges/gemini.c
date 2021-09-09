@@ -448,53 +448,14 @@ struct gemini_order {
 
 static int send_order_cancel(struct exchg_client *cl, struct order_info *info);
 
-// We get order updates on the websocket and the HTTP request placing
-// the order.  So only give an order update if it seems that the new
-// message has more recent info than what was has been gotten so far
 static void order_update(struct exchg_client *cl, struct order_info *oi,
 			 enum exchg_order_status new_status, decimal_t *new_size,
 			 bool cancel_rejected) {
-	struct exchg_order_info *info = &oi->info;
 	struct gemini_order *g = order_info_private(oi);
-	bool update = false;
 
-	if (info->opts.immediate_or_cancel && new_status == EXCHG_ORDER_OPEN)
-		new_status = EXCHG_ORDER_PENDING;
-
-	switch (info->status) {
-	case EXCHG_ORDER_FINISHED:
-	case EXCHG_ORDER_CANCELED:
-	case EXCHG_ORDER_ERROR:
-		return;
-	case EXCHG_ORDER_UNSUBMITTED:
-		update |= new_status == EXCHG_ORDER_SUBMITTED;
-	case EXCHG_ORDER_SUBMITTED:
-		update |= new_status == EXCHG_ORDER_PENDING;
-	case EXCHG_ORDER_PENDING:
-		update |= new_status == EXCHG_ORDER_OPEN;
-	case EXCHG_ORDER_OPEN:
-		update |= new_status == EXCHG_ORDER_FINISHED ||
-			new_status == EXCHG_ORDER_CANCELED ||
-			new_status == EXCHG_ORDER_ERROR;
-	}
-	if (update)
-		info->status = new_status;
-
-	if (new_size && decimal_cmp(&info->filled_size, new_size) < 0) {
-		update = true;
-		info->filled_size = *new_size;
-	}
-	if (!info->cancelation_failed && cancel_rejected) {
-		update = true;
-		info->cancelation_failed = true;
-	}
-
-	if (g->want_cancel && g->server_oid != -1 &&
-	    new_status != EXCHG_ORDER_FINISHED && new_status != EXCHG_ORDER_CANCELED &&
-	    new_status != EXCHG_ORDER_ERROR)
+	if (g->want_cancel && g->server_oid != -1 && !order_status_done(new_status))
 		send_order_cancel(cl, oi);
-	if (update)
-		exchg_order_update(cl, oi);
+	exchg_order_update(cl, oi, new_status, new_size, cancel_rejected);
 }
 
 static int parse_order_update_field(struct gemini_order_update *msg, const char *json,
@@ -703,8 +664,7 @@ bad:
 	snprintf(info->err, EXCHG_ORDER_ERR_SIZE, "Gemini sent bad update");
 	exchg_log("%s: %s:\n", info->err, problem);
 	json_fprintln(stderr, json, &toks[0]);
-	info->status = EXCHG_ORDER_ERROR;
-	exchg_order_update(cl, oi);
+	exchg_order_update(cl, oi, EXCHG_ORDER_ERROR, NULL, false);
 	return 0;
 }
 
@@ -716,12 +676,11 @@ static void place_order_on_err(struct exchg_client *cl, struct conn *conn,
 
 	if (!info)
 		return;
-	info->info.status = EXCHG_ORDER_ERROR;
 	if (err)
 		strncpy(info->info.err, err, EXCHG_ORDER_ERR_SIZE);
 	else
 		strncpy(info->info.err, "<unknown>", EXCHG_ORDER_ERR_SIZE);
-	exchg_order_update(cl, info);
+	exchg_order_update(cl, info, EXCHG_ORDER_ERROR, NULL, false);
 }
 
 const static struct exchg_http_ops trade_http_ops = {

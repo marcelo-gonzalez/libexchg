@@ -283,6 +283,8 @@ static int msg_finish(struct exchg_client *cl, struct ws_msg *msg,
 		      char *json, jsmntok_t *first_tok, const char **problem) {
 	struct coinbase_client *cb = cl->priv;
 	struct order_info *info;
+	enum exchg_order_status status = EXCHG_ORDER_PENDING;
+	decimal_t filled_size = {};
 
 	if (msg->pair == INVALID_PAIR) {
 		*problem = "no \"product_ids\"";
@@ -327,7 +329,6 @@ static int msg_finish(struct exchg_client *cl, struct ws_msg *msg,
 			return -1;
 		}
 		g_hash_table_insert(cb->orders, id, info);
-		info->info.status = EXCHG_ORDER_PENDING;
 		break;
 	case TYPE_MATCH:
 		if (!msg->maker_oid) {
@@ -350,11 +351,8 @@ static int msg_finish(struct exchg_client *cl, struct ws_msg *msg,
 		}
 		if (!info)
 			return 0;
-		decimal_add(&info->info.filled_size, &info->info.filled_size, &msg->size);
-		if (info->info.opts.immediate_or_cancel)
-			info->info.status = EXCHG_ORDER_PENDING;
-		else
-			info->info.status = EXCHG_ORDER_OPEN;
+		decimal_add(&filled_size, &info->info.filled_size, &msg->size);
+		status = EXCHG_ORDER_OPEN;
 		break;
 	case TYPE_OPEN:
 	case TYPE_DONE:
@@ -370,34 +368,34 @@ static int msg_finish(struct exchg_client *cl, struct ws_msg *msg,
 		info = g_hash_table_lookup(cb->orders, &json[msg->order_id->start]);
 		if (!info)
 			return 0;
-		decimal_subtract(&info->info.filled_size, &info->info.order.size,
+		decimal_subtract(&filled_size, &info->info.order.size,
 				 &msg->remaining_size);
-		if (decimal_is_negative(&info->info.filled_size)) {
+		if (decimal_is_negative(&filled_size)) {
 			char original[30], remaining[30];
 			decimal_to_str(original, &info->info.order.size);
 			decimal_to_str(remaining, &msg->remaining_size);
 			exchg_log("Coinbase indicates %s remaining for order %"PRId64
 				  ". This is greater than the original full size: %s\n",
 				  remaining, info->info.id, original);
-			decimal_zero(&info->info.filled_size);
+			decimal_zero(&filled_size);
 		}
 		if (msg->type == TYPE_OPEN) {
-			info->info.status = EXCHG_ORDER_OPEN;
+			status = EXCHG_ORDER_OPEN;
 		} else {
 			if (!msg->reason) {
 				exchg_log("Coinbase sent \"done\" message with no \"reason\":");
 				json[msg->order_id->end] = '\"';
 				json_fprintln(stderr, json, first_tok);
-				info->info.status = EXCHG_ORDER_FINISHED;
+				status = EXCHG_ORDER_FINISHED;
 			} else if (json_streq(json, msg->reason, "filled"))
-				info->info.status = EXCHG_ORDER_FINISHED;
+				status = EXCHG_ORDER_FINISHED;
 			else if (json_streq(json, msg->reason, "canceled"))
-				info->info.status = EXCHG_ORDER_CANCELED;
+				status = EXCHG_ORDER_CANCELED;
 			else {
 				exchg_log("Coinbase sent \"done\" message with unrecognized \"reason\":");
 				json[msg->order_id->end] = '\"';
 				json_fprintln(stderr, json, first_tok);
-				info->info.status = EXCHG_ORDER_FINISHED;
+				status = EXCHG_ORDER_FINISHED;
 			}
 			g_hash_table_remove(cb->orders, &json[msg->order_id->start]);
 		}
@@ -406,7 +404,7 @@ static int msg_finish(struct exchg_client *cl, struct ws_msg *msg,
 	if (msg->type == TYPE_L2UPDATE || msg->type == TYPE_SNAPSHOT)
 		do_l2_update(cl, msg);
 	else
-		exchg_order_update(cl, info);
+		exchg_order_update(cl, info, status, &filled_size, false);
 	return 0;
 }
 
@@ -1149,17 +1147,14 @@ static int orders_recv(struct exchg_client *cl, struct conn *conn,
 		// Would guess no but if so, then we need to remove the order from
 		// the hash table in struct coinbase_client
 		if (json_streq(json, key, "message")) {
-			info->info.status = EXCHG_ORDER_ERROR;
-			json_strncpy(info->info.err, json, value, EXCHG_ORDER_ERR_SIZE);
-			exchg_order_update(cl, info);
+			order_err_cpy(&info->info, json, value);
+			exchg_order_update(cl, info, EXCHG_ORDER_ERROR, NULL, false);
 			return 0;
 		} else {
 			key_idx = json_skip(num_toks, toks, key_idx + 1);
 		}
 	}
-	if (info->info.status == EXCHG_ORDER_SUBMITTED)
-		info->info.status = EXCHG_ORDER_PENDING;
-	exchg_order_update(cl, info);
+	exchg_order_update(cl, info, EXCHG_ORDER_PENDING, NULL, false);
 	return 0;
 }
 
@@ -1215,8 +1210,7 @@ static int place_order(struct exchg_client *cl, struct conn *http,
 			snprintf(info->err, EXCHG_ORDER_ERR_SIZE,
 				 "%s not available on Coinbase",
 				 exchg_pair_to_str(info->order.pair));
-			info->status = EXCHG_ORDER_ERROR;
-			exchg_order_update(cl, oi);
+			exchg_order_update(cl, oi, EXCHG_ORDER_ERROR, NULL, false);
 		}
 		return -1;
 	}
@@ -1235,8 +1229,7 @@ static int place_order(struct exchg_client *cl, struct conn *http,
 				   info->opts.immediate_or_cancel ? "IOC" : "GTC") < 0) {
 		if (update_on_err) {
 			snprintf(info->err, EXCHG_ORDER_ERR_SIZE, "Out-Of-Memory");
-			info->status = EXCHG_ORDER_ERROR;
-			exchg_order_update(cl, oi);
+			exchg_order_update(cl, oi, EXCHG_ORDER_ERROR, NULL, false);
 		}
 		return -1;
 	}
@@ -1246,8 +1239,7 @@ static int place_order(struct exchg_client *cl, struct conn *http,
 		info->status = EXCHG_ORDER_SUBMITTED;
 	} else if (ret && update_on_err) {
 		snprintf(info->err, EXCHG_ORDER_ERR_SIZE, "error computing request HMAC");
-		info->status = EXCHG_ORDER_ERROR;
-		exchg_order_update(cl, oi);
+		exchg_order_update(cl, oi, EXCHG_ORDER_ERROR, NULL, false);
 	}
 	return ret;
 }
@@ -1261,9 +1253,8 @@ static bool place_order_work(struct exchg_client *cl, void *p) {
 	struct conn *http = exchg_http_post("api.pro.coinbase.com", "/orders",
 					    &place_order_ops, cl);
 	if (!http) {
-		info->info.status = EXCHG_ORDER_ERROR;
 		strncpy(info->info.err, "HTTP POST failed", EXCHG_ORDER_ERR_SIZE);
-		exchg_order_update(cl, info);
+		exchg_order_update(cl, info, EXCHG_ORDER_ERROR, NULL, false);
 		return true;
 	}
 	if (place_order(cl, http, info, true))
@@ -1317,8 +1308,7 @@ static int cancel_order_recv(struct exchg_client *cl, struct conn *conn,
 		struct order_info *oi = exchg_order_lookup(cl, data->id);
 
 		if (oi) {
-			oi->info.cancelation_failed = true;
-			exchg_order_update(cl, oi);
+			exchg_order_update(cl, oi, EXCHG_ORDER_PENDING, NULL, true);
 		}
 		exchg_log("Cancelation of order %"PRId64" failed:\n", data->id);
 		json_fprintln(stderr, json, &toks[0]);
@@ -1336,8 +1326,7 @@ static int coinbase_cancel_order(struct exchg_client *cl, struct order_info *inf
 	struct coinbase_client *cb = cl->priv;
 	if (unlikely(info->info.status == EXCHG_ORDER_UNSUBMITTED)) {
 		remove_work(cl, place_order_work, info);
-		info->info.status = EXCHG_ORDER_CANCELED;
-		exchg_order_update(cl, info);
+		exchg_order_update(cl, info, EXCHG_ORDER_CANCELED, NULL, false);
 		return 0;
 	}
 

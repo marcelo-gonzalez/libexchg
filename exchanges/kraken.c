@@ -228,18 +228,14 @@ static int parse_event(struct exchg_client *cl, struct conn *conn,
 			json_fprintln(stderr, json, &toks[0]);
 			return 0;
 		}
+		enum exchg_order_status new_status;
 		if (status.status_ok) {
-			oi->info.status = EXCHG_ORDER_PENDING;
-			exchg_order_update(cl, oi);
+			new_status = EXCHG_ORDER_PENDING;
 		} else {
-			oi->info.status = EXCHG_ORDER_ERROR;
-			if (status.error_msg)
-				json_strncpy(oi->info.err, json,
-					     status.error_msg, EXCHG_ORDER_ERR_SIZE);
-			else
-				strncpy(oi->info.err, "<unknown>", EXCHG_ORDER_ERR_SIZE);
-			exchg_order_update(cl, oi);
+			new_status = EXCHG_ORDER_ERROR;
+			order_err_cpy(&oi->info, json, status.error_msg);
 		}
+		exchg_order_update(cl, oi, new_status, NULL, false);
 	}
 	return 0;
 
@@ -1054,7 +1050,6 @@ enum openorders_status {
 
 struct openorders_update {
 	enum openorders_status status;
-	bool got_size;
 	decimal_t size;
 	int64_t id;
 	jsmntok_t *cancel_reason;
@@ -1115,7 +1110,6 @@ static int parse_openorders(struct exchg_client *cl,
 					goto bad;
 				}
 			} else if (json_streq(json, key, "vol_exec")) {
-				upd.got_size = true;
 				if (json_get_decimal(&upd.size, json, value)) {
 					problem = "bad \"vol_exec\" field";
 					goto bad;
@@ -1139,30 +1133,24 @@ static int parse_openorders(struct exchg_client *cl,
 			continue;
 		}
 
-		if (upd.got_size)
-			oi->info.filled_size = upd.size;
+		enum exchg_order_status status;
 
-		switch(upd.status) {
+		switch (upd.status) {
 		case STATUS_CLOSED:
-			oi->info.status = EXCHG_ORDER_FINISHED;
+			status = EXCHG_ORDER_FINISHED;
 			break;
 		case STATUS_CANCELED:
-			if (upd.cancel_reason)
-				json_strncpy(oi->info.err, json, upd.cancel_reason, EXCHG_ORDER_ERR_SIZE);
-			oi->info.status = EXCHG_ORDER_CANCELED;
+			order_err_cpy(&oi->info, json, upd.cancel_reason);
+			status = EXCHG_ORDER_CANCELED;
 			break;
 		case STATUS_OPEN:
-			if (oi->info.opts.immediate_or_cancel)
-				oi->info.status = EXCHG_ORDER_PENDING;
-			else
-				oi->info.status = EXCHG_ORDER_OPEN;
-			break;
+			status = EXCHG_ORDER_OPEN;
 		case STATUS_PENDING:
-			oi->info.status = EXCHG_ORDER_PENDING;
 		case NO_STATUS:
+			status = EXCHG_ORDER_PENDING;
 			break;
 		}
-		exchg_order_update(cl, oi);
+		exchg_order_update(cl, oi, status, &upd.size, false);
 	}
 	return 0;
 

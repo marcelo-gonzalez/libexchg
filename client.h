@@ -109,8 +109,15 @@ struct order_info *__exchg_new_order(struct exchg_client *cl, struct exchg_order
 struct order_info *exchg_new_order(struct exchg_client *cl, struct exchg_order *order,
 				   struct exchg_place_order_opts *opts, void *req_private,
 				   size_t private_size);
+
+static inline bool order_status_done(enum exchg_order_status status) {
+	return status == EXCHG_ORDER_FINISHED || status == EXCHG_ORDER_CANCELED ||
+		status == EXCHG_ORDER_ERROR;
+}
+
 void order_info_free(struct exchg_client *cl, struct order_info *info);
-void exchg_order_update(struct exchg_client *cl, struct order_info *info);
+void exchg_order_update(struct exchg_client *cl, struct order_info *oi,
+			enum exchg_order_status new_status, const decimal_t *new_size, bool cancel_failed);
 struct order_info *exchg_order_lookup(struct exchg_client *cl, int64_t id);
 
 struct exchg_context {

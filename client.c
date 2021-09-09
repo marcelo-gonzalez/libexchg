@@ -625,15 +625,49 @@ void order_info_free(struct exchg_client *cl, struct order_info *info) {
 	g_hash_table_remove(cl->orders, &info->info.id);
 }
 
-void exchg_order_update(struct exchg_client *cl,
-			struct order_info *info) {
-	if (cl->ctx->callbacks.on_order_update)
-		cl->ctx->callbacks.on_order_update(cl, &info->info, cl->ctx->user,
-						   info->private);
-	if (info->info.status == EXCHG_ORDER_FINISHED ||
-	    info->info.status == EXCHG_ORDER_CANCELED ||
-	    info->info.status == EXCHG_ORDER_ERROR)
-		g_hash_table_remove(cl->orders, &info->info.id);
+// We get order updates possibly on several channels.
+// So only give an order update if it seems that the new
+// message has more recent info than what was has been gotten so far
+void exchg_order_update(struct exchg_client *cl, struct order_info *oi,
+			enum exchg_order_status new_status, const decimal_t *new_size, bool cancel_failed) {
+	struct exchg_order_info *info = &oi->info;
+	bool update = false;
+
+	if (info->opts.immediate_or_cancel && new_status == EXCHG_ORDER_OPEN)
+		new_status = EXCHG_ORDER_PENDING;
+
+	switch (info->status) {
+	case EXCHG_ORDER_FINISHED:
+	case EXCHG_ORDER_CANCELED:
+	case EXCHG_ORDER_ERROR:
+		return;
+	case EXCHG_ORDER_UNSUBMITTED:
+		update |= new_status == EXCHG_ORDER_SUBMITTED;
+	case EXCHG_ORDER_SUBMITTED:
+		update |= new_status == EXCHG_ORDER_PENDING;
+	case EXCHG_ORDER_PENDING:
+		update |= new_status == EXCHG_ORDER_OPEN;
+	case EXCHG_ORDER_OPEN:
+		update |= new_status == EXCHG_ORDER_FINISHED ||
+			new_status == EXCHG_ORDER_CANCELED ||
+			new_status == EXCHG_ORDER_ERROR;
+	}
+	if (update)
+		info->status = new_status;
+
+	if (new_size && decimal_cmp(&info->filled_size, new_size) < 0) {
+		update = true;
+		info->filled_size = *new_size;
+	}
+	if (!info->cancelation_failed && cancel_failed) {
+		update = true;
+		info->cancelation_failed = true;
+	}
+
+	if (likely(update && cl->ctx->callbacks.on_order_update))
+		cl->ctx->callbacks.on_order_update(cl, info, cl->ctx->user, oi->private);
+	if (order_status_done(info->status))
+		order_info_free(cl, oi);
 }
 
 int64_t exchg_place_order(struct exchg_client *cl, struct exchg_order *order,

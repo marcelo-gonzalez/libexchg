@@ -827,6 +827,7 @@ static int place_order_recv(struct exchg_client *cl, struct conn *conn,
 		goto bad;
 	}
 
+	decimal_t size;
 	bool got_size = false;
 	bool is_err = false;
 	int64_t id = -1;
@@ -871,7 +872,7 @@ static int place_order_recv(struct exchg_client *cl, struct conn *conn,
 			}
 			key_idx += 2;
 		} else if (json_streq(json, key, "size")) {
-			if (json_get_decimal(&info->filled_size, json, value)) {
+			if (json_get_decimal(&size, json, value)) {
 				problem = "bad \"size\"";
 				goto bad;
 			}
@@ -893,20 +894,20 @@ static int place_order_recv(struct exchg_client *cl, struct conn *conn,
 	if (is_err && !*info->err)
 		strncpy(info->err, "<unknown>", EXCHG_ORDER_ERR_SIZE);
 
+	enum exchg_order_status new_status;
 	// TODO: maybe provide a way to check https://www.bitstamp.net/api/v2/order_status/
 	if (!is_err)
-		info->status = EXCHG_ORDER_PENDING;
+		new_status = EXCHG_ORDER_PENDING;
 	else
-		info->status = EXCHG_ORDER_ERROR;
-	exchg_order_update(cl, oi);
+		new_status = EXCHG_ORDER_ERROR;
+	exchg_order_update(cl, oi, new_status, &size, false);
 	return 0;
 
 bad:
 	snprintf(info->err, EXCHG_ORDER_ERR_SIZE, "Bitstamp sent bad update");
 	exchg_log("%s: %s:\n", info->err, problem);
 	json_fprintln(stderr, json, &toks[0]);
-	info->status = EXCHG_ORDER_ERROR;
-	exchg_order_update(cl, oi);
+	exchg_order_update(cl, oi, EXCHG_ORDER_ERROR, NULL, false);
 	return 0;
 }
 
@@ -916,12 +917,11 @@ static void place_order_on_err(struct exchg_client *cl, struct conn *conn,
 	struct order_info *oi = h->p;
 	struct exchg_order_info *info = &oi->info;
 
-	info->status = EXCHG_ORDER_ERROR;
 	if (err)
 		strncpy(info->err, err, EXCHG_ORDER_ERR_SIZE);
 	else
 		strncpy(info->err, "<unknown>", EXCHG_ORDER_ERR_SIZE);
-	exchg_order_update(cl, oi);
+	exchg_order_update(cl, oi, EXCHG_ORDER_ERROR, NULL, false);
 }
 
 const static struct exchg_http_ops place_order_ops = {
