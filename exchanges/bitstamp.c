@@ -233,7 +233,7 @@ static void do_update(struct exchg_client *cl, struct bitstamp_msg *msg) {
 
 static int msg_complete(struct exchg_client *cl, struct conn *conn,
 			struct bitstamp_msg *msg) {
-	struct bitstamp_client *bts = cl->priv;
+	struct bitstamp_client *bts = client_private(cl);
 	struct bts_pair_info *pi;
 
 	switch (msg->ev_type) {
@@ -387,7 +387,7 @@ bad:
 }
 
 static int book_sub(struct exchg_client *cl) {
-	struct bitstamp_client *bts = cl->priv;
+	struct bitstamp_client *bts = client_private(cl);
 	for (enum exchg_pair pair = 0; pair < EXCHG_NUM_PAIRS; pair++) {
 		struct bts_pair_info *bpi = &bts->pair_info[pair];
 		struct exchg_pair_info *pi = &cl->pair_info[pair];
@@ -407,7 +407,7 @@ static int book_sub(struct exchg_client *cl) {
 }
 
 static bool book_sub_work(struct exchg_client *cl, void *p) {
-	struct bitstamp_client *bts = cl->priv;
+	struct bitstamp_client *bts = client_private(cl);
 
 	if (!cl->pair_info_current || !conn_established(bts->conn))
 		return false;
@@ -426,7 +426,7 @@ static int bitstamp_conn_established(struct exchg_client *cl,
 
 static int bitstamp_on_disconnect(struct exchg_client *cl,
 				  struct conn *conn, int reconnect_seconds) {
-	struct bitstamp_client *bts = cl->priv;
+	struct bitstamp_client *bts = client_private(cl);
 	int num_pairs_gone = 0;
 	enum exchg_pair pairs_gone[EXCHG_NUM_PAIRS];
 
@@ -455,7 +455,7 @@ static const struct exchg_websocket_ops websocket_ops = {
 };
 
 static int bitstamp_connect(struct exchg_client *cl) {
-	struct bitstamp_client *bts = cl->priv;
+	struct bitstamp_client *bts = client_private(cl);
 
 	bts->conn = exchg_websocket_connect(cl, "ws.bitstamp.net", "/",
 					    &websocket_ops);
@@ -646,7 +646,7 @@ static struct exchg_http_ops get_info_ops = {
 
 static int bitstamp_l2_subscribe(struct exchg_client *cl,
 				 enum exchg_pair pair) {
-	struct bitstamp_client *bts = cl->priv;
+	struct bitstamp_client *bts = client_private(cl);
 	struct bts_pair_info *bpi = &bts->pair_info[pair];
 
 	if (bpi->state & BTS_ACTIVE && bts->conn)
@@ -730,7 +730,7 @@ static int balances_recv(struct exchg_client *cl, struct conn *conn,
 static int string_to_sign(char *dst, struct exchg_client *cl, const char *millis,
 			  const char *nonce, const char *host, const char *path,
 			  const char *payload) {
-	struct bitstamp_client *bts = cl->priv;
+	struct bitstamp_client *bts = client_private(cl);
 	const char *content_type = payload && *payload ?
 		"application/x-www-form-urlencoded" : "";
 	if (!payload)
@@ -748,7 +748,7 @@ void bitstamp_get_nonce(char *dst) {
 }
 
 static int add_headers(struct exchg_client *cl, struct conn *conn) {
-	struct bitstamp_client *bts = cl->priv;
+	struct bitstamp_client *bts = client_private(cl);
 	struct http_data *h = conn_private(conn);
 	char millis[30], nonce[37];
 	size_t millis_len;
@@ -976,9 +976,8 @@ static int bitstamp_cancel_order(struct exchg_client *cl, struct order_info *inf
 }
 
 static void bitstamp_destroy(struct exchg_client *cli) {
-	struct bitstamp_client *bts = cli->priv;
+	struct bitstamp_client *bts = client_private(cli);
 	free(bts->api_header);
-	free(bts);
 	free_exchg_client(cli);
 }
 
@@ -992,7 +991,7 @@ static bool bitstamp_priv_ws_online(struct exchg_client *cl) {
 
 static int bitstamp_new_keypair(struct exchg_client *cl,
 				const unsigned char *key, size_t len) {
-	struct bitstamp_client *bts = cl->priv;
+	struct bitstamp_client *bts = client_private(cl);
 
 	if (!HMAC_Init_ex(cl->hmac_ctx, key, len, EVP_sha256(), NULL)) {
 		exchg_log("%s HMAC_Init_ex() failure\n", __func__);
@@ -1016,20 +1015,11 @@ struct exchg_client *alloc_bitstamp_client(struct exchg_context *ctx) {
 		return NULL;
 	}
 
-	struct exchg_client *ret = alloc_exchg_client(ctx, EXCHG_BITSTAMP, 200);
+	struct exchg_client *ret = alloc_exchg_client(ctx, EXCHG_BITSTAMP, 200, sizeof(struct bitstamp_client));
 	if (!ret)
 		return NULL;
-	struct bitstamp_client *bts = malloc(sizeof(*bts));
-	if (!bts) {
-		free_exchg_client(ret);
-		exchg_log("OOM\n");
-		return NULL;
-	}
-
-	memset(bts, 0, sizeof(*bts));
 
 	ret->name = "Bitstamp";
-	ret->priv = bts;
 	ret->get_balances = bitstamp_get_balances;
 	ret->l2_subscribe = bitstamp_l2_subscribe;
 	ret->get_pair_info = bitstamp_get_pair_info;

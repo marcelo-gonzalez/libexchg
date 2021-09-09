@@ -281,7 +281,7 @@ static int64_t parse_oid(const char *json, jsmntok_t *tok) {
 
 static int msg_finish(struct exchg_client *cl, struct ws_msg *msg,
 		      char *json, jsmntok_t *first_tok, const char **problem) {
-	struct coinbase_client *cb = cl->priv;
+	struct coinbase_client *cb = client_private(cl);
 	struct order_info *info;
 	enum exchg_order_status status = EXCHG_ORDER_PENDING;
 	decimal_t filled_size = {};
@@ -410,7 +410,7 @@ static int msg_finish(struct exchg_client *cl, struct ws_msg *msg,
 
 static int ws_recv(struct exchg_client *cl, struct conn *conn,
 		   char *json, int num_toks, jsmntok_t *toks) {
-	struct coinbase_client *cb = cl->priv;
+	struct coinbase_client *cb = client_private(cl);
 	const char *problem = "";
 	if (toks[0].type != JSMN_OBJECT) {
 		problem = "not a JSON object";
@@ -624,7 +624,7 @@ static int coinbase_auth(struct coinbase_auth *auth, HMAC_CTX *hmac_ctx,
 }
 
 static int channel_sub(struct exchg_client *cl) {
-	struct coinbase_client *cb = cl->priv;
+	struct coinbase_client *cb = client_private(cl);
 	bool level2_sub = false;
 	bool user_sub = false;
 	char level2[200];
@@ -692,7 +692,7 @@ static int channel_sub(struct exchg_client *cl) {
 }
 
 static bool sub_work(struct exchg_client *cl, void *p) {
-	struct coinbase_client *cb = cl->priv;
+	struct coinbase_client *cb = client_private(cl);
 
 	if (!cl->pair_info_current || !conn_established(cb->ws))
 		return false;
@@ -712,7 +712,7 @@ static int ws_on_established(struct exchg_client *cl,
 static int ws_on_disconnect(struct exchg_client *cl,
 			    struct conn *conn,
 			    int reconnect_seconds) {
-	struct coinbase_client *cb = cl->priv;
+	struct coinbase_client *cb = client_private(cl);
 	int num_pairs_gone = 0;
 	enum exchg_pair pairs_gone[EXCHG_NUM_PAIRS];
 	if (reconnect_seconds < 0)
@@ -740,7 +740,7 @@ static const struct exchg_websocket_ops ws_ops = {
 
 static int coinbase_l2_subscribe(struct exchg_client *cl,
 				 enum exchg_pair pair) {
-	struct coinbase_client *cb = cl->priv;
+	struct coinbase_client *cb = client_private(cl);
 	struct coinbase_pair_info *ci = &cb->pair_info[pair];
 
 	if (ci->subbed)
@@ -781,7 +781,7 @@ static int decimal_inc_to_places(const decimal_t *d) {
 
 static int parse_info(struct exchg_client *cl, struct conn *conn,
 		      int status, char *json, int num_toks, jsmntok_t *toks) {
-	struct coinbase_client *cb = cl->priv;
+	struct coinbase_client *cb = client_private(cl);
 	const char *problem = "";
 	jsmntok_t *bad_tok = &toks[0];
 
@@ -1194,7 +1194,7 @@ static void write_oid(char *dst, uint64_t id) {
 
 static int place_order(struct exchg_client *cl, struct conn *http,
 		       struct order_info *oi, bool update_on_err) {
-	struct coinbase_client *cb = cl->priv;
+	struct coinbase_client *cb = client_private(cl);
 	struct http_data *data = conn_private(http);
 	struct exchg_order_info *info = &oi->info;
 	struct exchg_pair_info *pinfo = &cl->pair_info[info->order.pair];
@@ -1323,7 +1323,7 @@ static struct exchg_http_ops cancel_order_ops = {
 };
 
 static int coinbase_cancel_order(struct exchg_client *cl, struct order_info *info) {
-	struct coinbase_client *cb = cl->priv;
+	struct coinbase_client *cb = client_private(cl);
 	if (unlikely(info->info.status == EXCHG_ORDER_UNSUBMITTED)) {
 		remove_work(cl, place_order_work, info);
 		exchg_order_update(cl, info, EXCHG_ORDER_CANCELED, NULL, false);
@@ -1367,7 +1367,7 @@ static int coinbase_new_keypair(struct exchg_client *cl,
 }
 
 static int coinbase_priv_ws_connect(struct exchg_client *cl) {
-	struct coinbase_client *cb = cl->priv;
+	struct coinbase_client *cb = client_private(cl);
 
 	if (exchg_get_pair_info(cl))
 		return -1;
@@ -1385,35 +1385,28 @@ static int coinbase_priv_ws_connect(struct exchg_client *cl) {
 }
 
 static bool coinbase_priv_ws_online(struct exchg_client *cl) {
-	struct coinbase_client *cb = cl->priv;
+	struct coinbase_client *cb = client_private(cl);
 	return cb->watching_user_chan && cb->sub_acked;
 }
 
 static void coinbase_destroy(struct exchg_client *cl) {
-	struct coinbase_client *cb = cl->priv;
+	struct coinbase_client *cb = client_private(cl);
 
 	for (enum exchg_pair p = 0; p < EXCHG_NUM_PAIRS; p++)
 		free(cb->pair_info[p].id);
 	g_hash_table_unref(cb->orders);
-	free(cb);
 	free_exchg_client(cl);
 }
 
 struct exchg_client *alloc_coinbase_client(struct exchg_context *ctx) {
-	struct exchg_client *ret = alloc_exchg_client(ctx, EXCHG_COINBASE, 2000);
+	struct exchg_client *ret = alloc_exchg_client(ctx, EXCHG_COINBASE, 2000, sizeof(struct coinbase_client));
 	if (!ret)
 		return NULL;
-	struct coinbase_client *cb = malloc(sizeof(*cb));
-	if (!cb) {
-		exchg_log("%s: OOM\n", __func__);
-		free_exchg_client(ret);
-		return NULL;
-	}
-	memset(cb, 0, sizeof(*cb));
+	struct coinbase_client *cb = client_private(ret);
+
 	cb->orders = g_hash_table_new_full(g_str_hash, g_str_equal, free, NULL);
 
 	ret->name = "Coinbase";
-	ret->priv = cb;
 	ret->l2_subscribe = coinbase_l2_subscribe;
 	ret->get_pair_info = coinbase_get_pair_info;
 	ret->get_balances = coinbase_get_balances;

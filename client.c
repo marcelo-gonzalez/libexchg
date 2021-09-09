@@ -739,17 +739,17 @@ const char *exchg_name(struct exchg_client *cl) {
 }
 
 struct exchg_client *alloc_exchg_client(struct exchg_context *ctx,
-					enum exchg_id id, int l2_update_size) {
+					enum exchg_id id, int l2_update_size, size_t private_size) {
 	if (ctx->clients[id]) {
 		exchg_log("%s client already allocated\n", exchg_id_to_name(id));
 		return NULL;
 	}
-	struct exchg_client *ret = malloc(sizeof(*ret));
+	struct exchg_client *ret = malloc(sizeof(*ret) + private_size);
 	if (!ret) {
 		fprintf(stderr, "%s OOM\n", __func__);
 		return NULL;
 	}
-	memset(ret, 0, sizeof(*ret));
+	memset(ret, 0, sizeof(*ret) + private_size);
 
 	ret->hmac_ctx = HMAC_CTX_new();
 	if (!ret->hmac_ctx) {
@@ -760,6 +760,7 @@ struct exchg_client *alloc_exchg_client(struct exchg_context *ctx,
 	ret->id = id;
 	ret->ctx = ctx;
 	ret->state = EXCH_DOWN;
+	// TODO: only really need this many for the first update. Should shrink the buffers after that.
 	ret->l2_update_size = l2_update_size;
 	ret->update.exchange_id = id;
 	ret->update.bids = malloc(l2_update_size * sizeof(struct exchg_limit_order));

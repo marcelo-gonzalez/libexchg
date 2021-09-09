@@ -72,7 +72,6 @@ struct exchg_client {
 	int (*priv_ws_connect)(struct exchg_client *cl);
 	bool (*priv_ws_online)(struct exchg_client *cl);
 	void (*destroy)(struct exchg_client *cl);
-	void *priv;
 	LIST_HEAD(conn_list, conn) conn_list;
 	HMAC_CTX *hmac_ctx;
 	unsigned char *apikey_public;
@@ -87,7 +86,12 @@ struct exchg_client {
 	int l2_update_size;
 	struct exchg_l2_update update;
 	LIST_HEAD(work_list, work) work;
+	char private[];
 };
+
+static inline void *client_private(struct exchg_client *cl) {
+	return cl->private;
+}
 
 static inline void exchg_update_init(struct exchg_client *cl) {
 	cl->update.num_bids = 0;
@@ -177,7 +181,7 @@ static inline void exchg_book_clear(struct exchg_client *cl, enum exchg_pair pai
 }
 
 struct exchg_client *alloc_exchg_client(struct exchg_context *ctx,
-					enum exchg_id id, int l2_update_size);
+					enum exchg_id id, int l2_update_size, size_t private_size);
 // complete in progress stuff first
 // otherwise you can get a user after free in http_get callback
 void free_exchg_client(struct exchg_client *cl);

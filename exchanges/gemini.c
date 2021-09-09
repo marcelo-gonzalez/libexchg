@@ -847,13 +847,12 @@ static int gemini_get_balances(struct exchg_client *cl, void *req_private) {
 }
 
 static void gemini_destroy(struct exchg_client *cli) {
-	free(cli->priv);
 	free_exchg_client(cli);
 }
 
 static int parse_event_object(struct exchg_client *cl, struct conn *conn,
 			      char *json, int num_toks, jsmntok_t *toks) {
-	struct gemini_client *g = cl->priv;
+	struct gemini_client *g = client_private(cl);
 	int key_idx = 1;
 
 	for (int i = 0; i < toks[0].size; i++) {
@@ -1027,7 +1026,7 @@ bad:
 static int order_events_on_disconnect(struct exchg_client *cl,
 				      struct conn *conn, int reconnect_seconds) {
 	struct http_data *data = conn_private(conn);
-	struct gemini_client *g = cl->priv;
+	struct gemini_client *g = client_private(cl);
 
 	free(data->payload);
 	g->order_events_sub_acked = false;
@@ -1053,7 +1052,7 @@ static const struct exchg_websocket_ops order_events_ops = {
 };
 
 static int gemini_priv_ws_connect(struct exchg_client *cl) {
-	struct gemini_client *g = cl->priv;
+	struct gemini_client *g = client_private(cl);
 
 	if (g->priv_ws_connected)
 		return 0;
@@ -1075,7 +1074,7 @@ static int gemini_priv_ws_connect(struct exchg_client *cl) {
 }
 
 static bool gemini_priv_ws_online(struct exchg_client *cl) {
-	struct gemini_client *g = cl->priv;
+	struct gemini_client *g = client_private(cl);
 	return g->order_events_sub_acked;
 }
 
@@ -1089,7 +1088,7 @@ static int gemini_new_keypair(struct exchg_client *cl,
 }
 
 struct exchg_client *alloc_gemini_client(struct exchg_context *ctx) {
-	struct exchg_client *ret = alloc_exchg_client(ctx, EXCHG_GEMINI, 8000);
+	struct exchg_client *ret = alloc_exchg_client(ctx, EXCHG_GEMINI, 8000, sizeof(struct gemini_client));
 	if (!ret)
 		return NULL;
 
@@ -1117,12 +1116,5 @@ struct exchg_client *alloc_gemini_client(struct exchg_context *ctx) {
 	ret->priv_ws_connect = gemini_priv_ws_connect;
 	ret->priv_ws_online = gemini_priv_ws_online;
 	ret->destroy = gemini_destroy;
-	ret->priv = malloc(sizeof(struct gemini_client));
-	if (!ret->priv) {
-		exchg_log("%s: OOM\n", __func__);
-		free_exchg_client(ret);
-		return NULL;
-	}
-	memset(ret->priv, 0, sizeof(struct gemini_client));
 	return ret;
 }

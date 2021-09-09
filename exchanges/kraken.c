@@ -95,7 +95,7 @@ struct event_msg {
 
 static int parse_event(struct exchg_client *cl, struct conn *conn,
 		       const char *json, int num_toks, jsmntok_t *toks) {
-	struct kraken_client *kkn = cl->priv;
+	struct kraken_client *kkn = client_private(cl);
 	const char *problem;
 	struct event_msg status = {
 		.channel_id = -1,
@@ -359,7 +359,7 @@ static int insert_orders(struct exchg_client *cl, const char *json,
 
 static int kraken_recv(struct exchg_client *cl, struct conn *conn,
 		       char *json, int num_toks, jsmntok_t *toks) {
-	struct kraken_client *kkn = cl->priv;
+	struct kraken_client *kkn = client_private(cl);
 
 	if (num_toks < 3)
 		return 0;
@@ -417,7 +417,7 @@ static int kraken_recv(struct exchg_client *cl, struct conn *conn,
 }
 
 static int book_sub(struct exchg_client *cl) {
-	struct kraken_client *kkn = cl->priv;
+	struct kraken_client *kkn = client_private(cl);
 
 	for (enum exchg_pair pair = 0; pair < EXCHG_NUM_PAIRS; pair++) {
 		struct kraken_pair_info *kpi = &kkn->pair_info[pair];
@@ -435,7 +435,7 @@ static int book_sub(struct exchg_client *cl) {
 }
 
 static bool book_sub_work(struct exchg_client *cl, void *p) {
-	struct kraken_client *kkn = cl->priv;
+	struct kraken_client *kkn = client_private(cl);
 
 	if (!cl->pair_info_current || !conn_established(kkn->conn))
 		return false;
@@ -454,7 +454,7 @@ static int kraken_conn_established(struct exchg_client *cl,
 
 static int kraken_on_disconnect(struct exchg_client *cl, struct conn *conn,
 				 int reconnect_seconds) {
-	struct kraken_client *kkn = cl->priv;
+	struct kraken_client *kkn = client_private(cl);
 	int num_pairs_gone = 0;
 	enum exchg_pair pairs_gone[EXCHG_NUM_PAIRS];
 	if (reconnect_seconds < 0)
@@ -479,7 +479,7 @@ static const struct exchg_websocket_ops websocket_ops = {
 };
 
 static int kraken_connect(struct exchg_client *cl) {
-	struct kraken_client *kkn = cl->priv;
+	struct kraken_client *kkn = client_private(cl);
 	kkn->conn = exchg_websocket_connect(cl, "ws.kraken.com", "/",
 					    &websocket_ops);
 	if (kkn->conn)
@@ -552,7 +552,7 @@ static int kraken_str_to_ccy(enum exchg_currency *ccy, const char *json,
 static int parse_info_result(struct exchg_client *cl, const char *json,
 			     int num_toks, jsmntok_t *toks,
 			     int idx, char *problem) {
-	struct kraken_client *kkn = cl->priv;
+	struct kraken_client *kkn = client_private(cl);
 
 	if (toks[idx].type != JSMN_OBJECT) {
 		sprintf(problem, "non-object result");
@@ -745,7 +745,7 @@ static struct exchg_http_ops get_info_ops = {
 
 static int kraken_l2_subscribe(struct exchg_client *cl,
 			       enum exchg_pair pair) {
-	struct kraken_client *kkn = cl->priv;
+	struct kraken_client *kkn = client_private(cl);
 	struct kraken_pair_info *kpi = &kkn->pair_info[pair];
 
 	if (kpi->subbed)
@@ -884,7 +884,7 @@ static struct exchg_http_ops balances_ops = {
 
 static int private_http_post(struct exchg_client *cl, const char *path,
 			     struct exchg_http_ops *ops, void *req_private) {
-	struct kraken_client *k = cl->priv;
+	struct kraken_client *k = client_private(cl);
 	struct conn *http = exchg_http_post("api.kraken.com", path, ops, cl);
 	if (!http)
 		return -1;
@@ -930,7 +930,7 @@ static int kraken_get_balances(struct exchg_client *cl, void *req_private) {
 
 static int kraken_new_keypair(struct exchg_client *cl,
 			      const unsigned char *key, size_t len) {
-	struct kraken_client *kc = cl->priv;
+	struct kraken_client *kc = client_private(cl);
 
 	free(kc->ws_token);
 	kc->ws_token = NULL;
@@ -950,7 +950,7 @@ static int kraken_new_keypair(struct exchg_client *cl,
 
 static int token_recv(struct exchg_client *cl, struct conn *conn,
 		      int status, char *json, int num_toks, jsmntok_t *toks) {
-	struct kraken_client *kc = cl->priv;
+	struct kraken_client *kc = client_private(cl);
 	const char *problem;
 	const char *url = "api.kraken.com/0/private/GetWebSocketsTokeninfo";
 
@@ -1020,7 +1020,7 @@ bad:
 }
 
 static void token_on_closed(struct exchg_client *cl, struct conn *conn) {
-	struct kraken_client *kc = cl->priv;
+	struct kraken_client *kc = client_private(cl);
 
 	kc->getting_token = false;
 }
@@ -1033,7 +1033,7 @@ static struct exchg_http_ops token_ops = {
 };
 
 static int get_token(struct exchg_client *cl) {
-	struct kraken_client *kc = cl->priv;
+	struct kraken_client *kc = client_private(cl);
 
 	kc->getting_token = true;
 	return private_http_post(cl, "/0/private/GetWebSocketsToken",
@@ -1057,7 +1057,7 @@ struct openorders_update {
 
 static int parse_openorders(struct exchg_client *cl,
 			    const char *json, int num_toks, jsmntok_t *toks) {
-	struct kraken_client *kkn = cl->priv;
+	struct kraken_client *kkn = client_private(cl);
 	const char *problem;
 
 	if (!kkn->openorders_recvd) {
@@ -1201,7 +1201,7 @@ static int priv_sub(struct kraken_client *kkn) {
 }
 
 static bool priv_sub_work(struct exchg_client *cl, void *p) {
-	struct kraken_client *kkn = cl->priv;
+	struct kraken_client *kkn = client_private(cl);
 
 	if (!kkn->ws_token || !conn_established(kkn->private_ws))
 		return false;
@@ -1211,7 +1211,7 @@ static bool priv_sub_work(struct exchg_client *cl, void *p) {
 
 static int private_ws_on_established(struct exchg_client *cl,
 				     struct conn *conn) {
-	struct kraken_client *kkn = cl->priv;
+	struct kraken_client *kkn = client_private(cl);
 
 	if (kkn->ws_token)
 		return priv_sub(kkn);
@@ -1226,7 +1226,7 @@ static int private_ws_on_established(struct exchg_client *cl,
 static int private_ws_on_disconnect(struct exchg_client *cl,
 				    struct conn *conn,
 				    int reconnect_seconds) {
-	struct kraken_client *kkn = cl->priv;
+	struct kraken_client *kkn = client_private(cl);
 	if (reconnect_seconds < 0)
 		kkn->private_ws = NULL;
 	kkn->openorders_recvd = false;
@@ -1240,7 +1240,7 @@ static const struct exchg_websocket_ops private_ws_ops = {
 };
 
 static int private_ws_connect(struct exchg_client *cl) {
-	struct kraken_client *kkn = cl->priv;
+	struct kraken_client *kkn = client_private(cl);
 
 	kkn->private_ws = exchg_websocket_connect(cl, "ws-auth.kraken.com", "/",
 						  &private_ws_ops);
@@ -1250,14 +1250,13 @@ static int private_ws_connect(struct exchg_client *cl) {
 }
 
 bool kraken_private_ws_online(struct exchg_client *cl) {
-	struct kraken_client *kc = cl->priv;
+	struct kraken_client *kc = client_private(cl);
 
-	kc = cl->priv;
 	return cl->pair_info_current && kc->openorders_recvd;
 }
 
 static int kraken_private_ws_connect(struct exchg_client *cl) {
-	struct kraken_client *kc = cl->priv;
+	struct kraken_client *kc = client_private(cl);
 
 	if (kc->private_ws)
 		return 0;
@@ -1275,7 +1274,7 @@ static int kraken_private_ws_connect(struct exchg_client *cl) {
 
 static int private_ws_add_order(struct exchg_client *cl,
 				struct exchg_order_info *info) {
-	struct kraken_client *kkn = cl->priv;
+	struct kraken_client *kkn = client_private(cl);
 	struct exchg_pair_info *pi = &cl->pair_info[info->order.pair];
 	struct kraken_pair_info *kpi = &kkn->pair_info[info->order.pair];
 	char sz[30], px[30];
@@ -1312,7 +1311,7 @@ static int private_ws_add_order(struct exchg_client *cl,
 }
 
 static bool place_order_work(struct exchg_client *cl, void *p) {
-	struct kraken_client *kkn = cl->priv;
+	struct kraken_client *kkn = client_private(cl);
 
 	if (!cl->pair_info_current || !kkn->openorders_recvd)
 		return false;
@@ -1323,7 +1322,7 @@ static bool place_order_work(struct exchg_client *cl, void *p) {
 static int64_t kraken_place_order(struct exchg_client *cl, struct exchg_order *order,
 				  struct exchg_place_order_opts *opts,
 				  void *request_private) {
-	struct kraken_client *kkn = cl->priv;
+	struct kraken_client *kkn = client_private(cl);
 
 	struct order_info *info = __exchg_new_order(cl, order, opts, request_private,
 						    0, kkn->next_order_id++);
@@ -1357,12 +1356,11 @@ static int kraken_cancel_order(struct exchg_client *cl, struct order_info *info)
 }
 
 static void kraken_destroy(struct exchg_client *cl) {
-	struct kraken_client *kkn = cl->priv;
+	struct kraken_client *kkn = client_private(cl);
 	g_hash_table_unref(kkn->channel_mapping);
 	for (enum exchg_pair p = 0; p < EXCHG_NUM_PAIRS; p++)
 		free(kkn->pair_info[p].wsname);
 	free(kkn->ws_token);
-	free(kkn);
 	free_exchg_client(cl);
 }
 
@@ -1372,21 +1370,15 @@ struct exchg_client *alloc_kraken_client(struct exchg_context *ctx) {
 		return NULL;
 	}
 
-	struct exchg_client *ret = alloc_exchg_client(ctx, EXCHG_KRAKEN, 2000);
+	struct exchg_client *ret = alloc_exchg_client(ctx, EXCHG_KRAKEN, 2000, sizeof(struct kraken_client));
 	if (!ret)
 		return NULL;
-	struct kraken_client *kkn = malloc(sizeof(*kkn));
-	if (!kkn) {
-		exchg_log("OOM\n");
-		free_exchg_client(ret);
-		return NULL;
-	}
-	memset(kkn, 0, sizeof(*kkn));
+	struct kraken_client *kkn = client_private(ret);
+
 	kkn->channel_mapping = g_hash_table_new(g_direct_hash, g_direct_equal);
 	kkn->next_order_id = current_millis() % 86400000;
 
 	ret->name = "Kraken";
-	ret->priv = kkn;
 	ret->l2_subscribe = kraken_l2_subscribe;
 	ret->get_pair_info = kraken_get_pair_info;
 	ret->get_balances = kraken_get_balances;
