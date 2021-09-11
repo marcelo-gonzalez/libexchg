@@ -1201,6 +1201,7 @@ static int parse_openorders(struct exchg_client *cl,
 			break;
 		case STATUS_OPEN:
 			status = EXCHG_ORDER_OPEN;
+			break;
 		case STATUS_PENDING:
 		case NO_STATUS:
 			status = EXCHG_ORDER_PENDING;
