@@ -343,9 +343,10 @@ static void private_ws_read(struct websocket *ws, struct buf *buf,
 	switch (ack_msg->type) {
 	case ACK_ADDORDERSTATUS:
 		buf_xsprintf(buf, "{\"event\": \"addOrderStatus\", "
-			     "\"status\": \"ok\", \"txid\": \"asdf\", "
+			     "\"status\": \"%s\", \"txid\": \"asdf\", "
 			     "\"reqid\": %"PRId64", "
-			     "}", ack_msg->reqid);
+			     "}", ack->status != EXCHG_ORDER_ERROR ? "ok" : "test-bad-status",
+			     ack_msg->reqid);
 		break;
 	case ACK_OPENORDERS:
 		switch (ack->status) {
@@ -522,18 +523,19 @@ static void private_ws_write(struct websocket *w, char *buf, size_t len) {
 			problem = "no \"reqid\" field";
 			goto bad;
 		}
+		on_order_placed(w->ctx, EXCHG_KRAKEN, &ack, 0);
 		struct exchg_test_event *ev = exchg_fake_queue_ws_event_tail(
 			w, EXCHG_EVENT_ORDER_ACK, sizeof(struct ack_msg));
 		ev->data.order_ack = ack;
-		ev->data.order_ack.status = EXCHG_ORDER_PENDING;
+		if (ack.status != EXCHG_ORDER_ERROR)
+			ev->data.order_ack.status = EXCHG_ORDER_PENDING;
 		struct ack_msg *msg = test_event_private(ev);
 		msg->type = ACK_ADDORDERSTATUS;
 		msg->reqid = reqid;
-		if (pw->openorders_subbed) {
+		if (ack.status != EXCHG_ORDER_ERROR && pw->openorders_subbed) {
 			ev = exchg_fake_queue_ws_event_tail(
 				w, EXCHG_EVENT_ORDER_ACK, sizeof(struct ack_msg));
 			ev->data.order_ack = ack;
-			on_order_placed(w->ctx, EXCHG_KRAKEN, &ev->data.order_ack, 0);
 			struct ack_msg *msg = test_event_private(ev);
 			msg->type = ACK_OPENORDERS;
 			msg->reqid = reqid;
