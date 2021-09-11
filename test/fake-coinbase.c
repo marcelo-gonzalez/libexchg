@@ -438,10 +438,7 @@ static bool cancel_order(struct exchg_net_context *ctx, struct test_order *o) {
 			continue;
 
 		struct ack_msg *m = test_event_private(&e->event);
-		if (m->type == ACK_OPEN) {
-			TAILQ_REMOVE(&ctx->events, e, list);
-			free(e);
-		} else if (m->type == ACK_DONE) {
+		if (m->type == ACK_DONE) {
 			send_done = false;
 		} else {
 			last = e;
@@ -484,7 +481,11 @@ static void cancel_order_write(struct http_req *req) {
 	LIST_FOREACH(o, &req->ctx->servers[EXCHG_COINBASE].order_list, list) {
 		struct order_ids *ids = test_order_private(o);
 		if (!strcmp(cancel->client_oid, ids->client_oid)) {
-			if (!cancel_order(req->ctx, o)) {
+			if (decimal_cmp(&o->info.filled_size, &o->info.order.size) >= 0) {
+				req->status = 404;
+				snprintf(cancel->msg, sizeof(cancel->msg),
+					 "order id %s not recognized", ids->client_oid);
+			} else if (!cancel_order(req->ctx, o)) {
 				req->status = 503;
 				snprintf(cancel->msg, sizeof(cancel->msg),
 					 "Service Unavailable");

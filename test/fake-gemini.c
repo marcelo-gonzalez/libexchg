@@ -605,7 +605,11 @@ static void cancel_order_add_header(struct http_req *req, const unsigned char *n
 	struct test_order *o;
 	LIST_FOREACH(o, &req->ctx->servers[EXCHG_GEMINI].order_list, list) {
 		if (o->info.id == order_id) {
-			if (!on_order_canceled(req->ctx, EXCHG_GEMINI, o)) {
+			if (decimal_cmp(&o->info.filled_size, &o->info.order.size) >= 0) {
+				req->status = 404;
+				snprintf(cancel->err, sizeof(cancel->err),
+					 "order id %"PRId64" not recognized", order_id);
+			} else if (!on_order_canceled(req->ctx, EXCHG_GEMINI, o)) {
 				req->status = 503;
 				snprintf(cancel->err, sizeof(cancel->err),
 					 "Service Unavailable");
@@ -616,8 +620,6 @@ static void cancel_order_add_header(struct http_req *req, const unsigned char *n
 				struct websocket *ws = fake_websocket_get(req->ctx, "api.gemini.com", "/v1/order/events");
 				if (!ws)
 					return;
-				// TODO: here we just send a cancel event no matter what, and in fake-coinbase.c we
-				// remove existing OPEN events. should pick one and implement it in a common place
 				struct exchg_test_event *cancel = exchg_fake_queue_ws_event(
 					ws, EXCHG_EVENT_ORDER_ACK, sizeof(struct gemini_ack));
 				ack_init(cancel, ORDER_CANCELLED, o, *(int64_t *)test_order_private(o));
