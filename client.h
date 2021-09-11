@@ -8,6 +8,7 @@
 #include <jsmn/jsmn.h>
 #include <libwebsockets.h>
 #include <openssl/hmac.h>
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <sys/queue.h>
@@ -123,6 +124,17 @@ void order_info_free(struct exchg_client *cl, struct order_info *info);
 void exchg_order_update(struct exchg_client *cl, struct order_info *oi,
 			enum exchg_order_status new_status, const decimal_t *new_size, bool cancel_failed);
 struct order_info *exchg_order_lookup(struct exchg_client *cl, int64_t id);
+
+__attribute__((format (printf, 3, 4)))
+static inline void order_err_update(struct exchg_client *cl, struct order_info *oi,
+				    const char *fmt, ...) {
+	va_list ap;
+
+	va_start(ap, fmt);
+	vsnprintf(oi->info.err, EXCHG_ORDER_ERR_SIZE, fmt, ap);
+	exchg_order_update(cl, oi, EXCHG_ORDER_ERROR, NULL, false);
+	va_end(ap);
+}
 
 struct exchg_context {
 	struct exchg_options opts;

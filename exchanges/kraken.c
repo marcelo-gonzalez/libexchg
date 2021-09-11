@@ -526,6 +526,45 @@ static int kraken_str_to_pair(enum exchg_pair *pair, const char *json,
 	return 0;
 }
 
+static const char *kraken_pair_to_str(enum exchg_pair pair) {
+	switch (pair) {
+	case EXCHG_PAIR_BTCUSD:
+		return "XXBTZUSD";
+	case EXCHG_PAIR_ETHUSD:
+		return "XETHZUSD";
+	case EXCHG_PAIR_ETHBTC:
+		return "XETHXXBT";
+	case EXCHG_PAIR_ZECUSD:
+		return "XZECZUSD";
+	case EXCHG_PAIR_ZECBTC:
+		return "XZECXXBT";
+	case EXCHG_PAIR_ZECETH:
+		return "XZECXETH";
+	case EXCHG_PAIR_ZECBCH:
+		return "ZECBCH";
+	case EXCHG_PAIR_ZECLTC:
+		return "XZECXLTC";
+	case EXCHG_PAIR_BCHUSD:
+		return "BCHUSD";
+	case EXCHG_PAIR_BCHBTC:
+		return "BCHXBT";
+	case EXCHG_PAIR_BCHETH:
+		return "BCHETH";
+	case EXCHG_PAIR_LTCUSD:
+		return "XLTCZUSD";
+	case EXCHG_PAIR_LTCBTC:
+		return "XLTCXXBT";
+	case EXCHG_PAIR_LTCETH:
+		return "LTCETH";
+	case EXCHG_PAIR_LTCBCH:
+		return "LTCBCH";
+	case EXCHG_PAIR_DAIUSD:
+		return "DAIUSD";
+	default:
+		return NULL;
+	}
+}
+
 static int kraken_str_to_ccy(enum exchg_currency *ccy, const char *json,
 			     jsmntok_t *tok) {
 	if (json_streq(json, tok, "ZUSD"))
@@ -771,7 +810,10 @@ static int kraken_get_pair_info(struct exchg_client *cl) {
 struct http_data {
 	size_t hmac_len;
 	char hmac[HMAC_SHA512_B64_LEN];
-	void *request_private;
+	union {
+		void *request_private;
+		int64_t order_id;
+	};
 };
 
 static int private_http_add_headers(struct exchg_client *cl, struct conn *conn) {
@@ -878,21 +920,14 @@ static struct exchg_http_ops balances_ops = {
 	.conn_data_size = sizeof(struct http_data),
 };
 
-static int private_http_post(struct exchg_client *cl, const char *path,
-			     struct exchg_http_ops *ops, void *req_private) {
-	struct kraken_client *k = client_private(cl);
-	struct conn *http = exchg_http_post("api.kraken.com", path, ops, cl);
-	if (!http)
-		return -1;
-
+static int private_http_auth(struct exchg_client *cl, struct conn *http) {
 	struct http_data *h = conn_private(http);
-	h->request_private = req_private;
+	struct kraken_client *k = client_private(cl);
 
 	// 123456{body}&nonce=123456
 	char *to_hash = malloc(20 + conn_http_body_len(http) + 27);
 	if (!to_hash) {
 		fprintf(stderr, "%s: OOM\n", __func__);
-		conn_close(http);
 		return -1;
 	}
 	char *p = to_hash;
@@ -900,7 +935,6 @@ static int private_http_post(struct exchg_client *cl, const char *path,
 
 	if (conn_http_body_sprintf(http, "%snonce=%"PRId64,
 				   conn_http_body_len(http) > 0 ? "&" : "", nonce) < 0) {
-		conn_close(http);
 		free(to_hash);
 		return -1;
 	}
@@ -909,6 +943,7 @@ static int private_http_post(struct exchg_client *cl, const char *path,
 	p += conn_http_body_len(http);
 
 	unsigned char to_auth[200+SHA256_DIGEST_LENGTH];
+	const char *path = conn_path(http);
 	size_t path_len = strlen(path);
 	unsigned char *hash = to_auth + path_len;
 
@@ -921,7 +956,6 @@ static int private_http_post(struct exchg_client *cl, const char *path,
 	h->hmac_len = hmac_b64(cl->hmac_ctx, to_auth,
 			       path_len + SHA256_DIGEST_LENGTH, h->hmac);
 	if (h->hmac_len < 0) {
-		conn_close(http);
 		free(to_hash);
 		return -1;
 	}
@@ -930,7 +964,18 @@ static int private_http_post(struct exchg_client *cl, const char *path,
 }
 
 static int kraken_get_balances(struct exchg_client *cl, void *req_private) {
-	return private_http_post(cl, "/0/private/Balance", &balances_ops, req_private);
+	struct conn *http = exchg_http_post("api.kraken.com", "/0/private/Balance",
+					    &balances_ops, cl);
+	if (!http)
+		return -1;
+	struct http_data *h = conn_private(http);
+	h->request_private = req_private;
+
+	if (private_http_auth(cl, http)) {
+		conn_close(http);
+		return -1;
+	}
+	return 0;
 }
 
 static int kraken_new_keypair(struct exchg_client *cl,
@@ -1039,10 +1084,16 @@ static struct exchg_http_ops token_ops = {
 
 static int get_token(struct exchg_client *cl) {
 	struct kraken_client *kc = client_private(cl);
-
+	struct conn *http = exchg_http_post("api.kraken.com", "/0/private/GetWebSocketsToken",
+					    &token_ops, cl);
+	if (!http)
+		return -1;
+	if (private_http_auth(cl, http)) {
+		conn_close(http);
+		return -1;
+	}
 	kc->getting_token = true;
-	return private_http_post(cl, "/0/private/GetWebSocketsToken",
-				 &token_ops, NULL);
+	return 0;
 }
 
 enum openorders_status {
@@ -1315,12 +1366,126 @@ static int private_ws_add_order(struct exchg_client *cl,
 	return 0;
 }
 
-static bool place_order_work(struct exchg_client *cl, void *p) {
-	struct kraken_client *kkn = client_private(cl);
+static int add_order_recv(struct exchg_client *cl, struct conn *conn,
+			  int status, char *json, int num_toks, jsmntok_t *toks) {
+	struct http_data *data = conn_private(conn);
+	struct order_info *info = exchg_order_lookup(cl, data->order_id);
 
-	if (!cl->pair_info_current || !kkn->openorders_recvd)
+	if (!info)
+		return 0;
+
+	if (toks[0].type != JSMN_OBJECT) {
+		exchg_log("%s%s sent non-object data:\n", conn_host(conn), conn_path(conn));
+		json_fprintln(stderr, json, &toks[0]);
+		return 0;
+	}
+
+	int key_idx = 1;
+	for (int i = 0; i < toks[0].size; i++) {
+		jsmntok_t *key = &toks[key_idx];
+		jsmntok_t *value = key + 1;
+
+		if (json_streq(json, key, "error")) {
+			enum exchg_order_status new_status = EXCHG_ORDER_PENDING;
+
+			if (value->type != JSMN_ARRAY || value->size > 1) {
+				order_err_cpy(&info->info, json, value);
+				new_status = EXCHG_ORDER_ERROR;
+			} else if (value->size == 1) {
+				order_err_cpy(&info->info, json, value+1);
+				new_status = EXCHG_ORDER_ERROR;
+			}
+			exchg_order_update(cl, info, new_status, NULL, false);
+			return 0;
+		}
+		key_idx = json_skip(num_toks, toks, key_idx+1);
+	}
+	exchg_order_update(cl, info, EXCHG_ORDER_PENDING, NULL, false);
+	return 0;
+}
+
+static void add_order_on_err(struct exchg_client *cl, struct conn *conn,
+			       const char *err) {
+	struct http_data *data = conn_private(conn);
+	struct order_info *info = exchg_order_lookup(cl, data->order_id);
+
+	if (!info)
+		return;
+	if (err)
+		strncpy(info->info.err, err, EXCHG_ORDER_ERR_SIZE);
+	else
+		strncpy(info->info.err, "<unknown>", EXCHG_ORDER_ERR_SIZE);
+	exchg_order_update(cl, info, EXCHG_ORDER_ERROR, NULL, false);
+}
+
+static struct exchg_http_ops add_order_ops = {
+	.recv = add_order_recv,
+	.on_error = add_order_on_err,
+	.add_headers = private_http_add_headers,
+	.conn_data_size = sizeof(struct http_data),
+};
+
+static int http_post_add_order(struct exchg_client *cl,
+			       struct order_info *oi, bool update_on_err) {
+	struct exchg_order_info *info = &oi->info;
+	struct exchg_pair_info *pi = &cl->pair_info[info->order.pair];
+	char sz[30], px[30];
+
+	if (unlikely(!pi->available)) {
+		exchg_log("Kraken can't submit order in %s. Pair not available on Kraken\n",
+			  exchg_pair_to_str(info->order.pair));
+		if (update_on_err)
+			order_err_update(cl, oi, "%s not available on Kraken",
+					 exchg_pair_to_str(info->order.pair));
+		return -1;
+	}
+
+	struct conn *http = exchg_http_post("api.kraken.com", "/0/private/AddOrder",
+					    &add_order_ops, cl);
+	if (!http) {
+		if (update_on_err)
+			order_err_update(cl, oi, "HTTP POST failed");
+		return -1;
+	}
+
+	decimal_to_str(sz, &info->order.size);
+	decimal_trim(&info->order.price, &info->order.price,
+		     pi->price_decimals);
+	decimal_to_str(px, &info->order.price);
+
+	if (conn_http_body_sprintf(http, "userref=%"PRId64"&ordertype=limit&"
+				   "type=%s&pair=%s&price=%s&volume=%s",
+				   info->id, info->order.side == EXCHG_SIDE_BUY ?
+				   "buy" : "sell", kraken_pair_to_str(info->order.pair),
+				   px, sz) < 0) {
+		if (update_on_err)
+			order_err_update(cl, oi, "OOM writing order");
+		conn_close(http);
+		return -1;
+	}
+	if (info->opts.immediate_or_cancel &&
+	    conn_http_body_sprintf(http, "&timeinforce=IOC") < 0) {
+		if (update_on_err)
+			order_err_update(cl, oi, "OOM writing order");
+		conn_close(http);
+		return -1;
+	}
+	if (private_http_auth(cl, http)) {
+		if (update_on_err)
+			order_err_update(cl, oi, "HMAC computation failed");
+		conn_close(http);
+		return -1;
+	}
+	info->status = EXCHG_ORDER_SUBMITTED;
+	struct http_data *data = conn_private(http);
+	data->order_id = info->id;
+	return 0;
+}
+
+static bool place_order_work(struct exchg_client *cl, void *p) {
+	if (!cl->pair_info_current)
 		return false;
-	private_ws_add_order(cl, (struct exchg_order_info *)p);
+	http_post_add_order(cl, (struct order_info *)p, true);
 	return true;
 }
 
@@ -1334,24 +1499,25 @@ static int64_t kraken_place_order(struct exchg_client *cl, const struct exchg_or
 	if (!info)
 		return -ENOMEM;
 
-	if (cl->pair_info_current && kkn->openorders_recvd) {
-		if (private_ws_add_order(cl, &info->info))
+	if (unlikely(!cl->pair_info_current)) {
+		if (exchg_get_pair_info(cl) || queue_work(cl, place_order_work, info)) {
+			order_info_free(cl, info);
 			return -1;
-		return info->info.id;
+		}
+		return 0;
 	}
 
-	if (!cl->pair_info_current && exchg_get_pair_info(cl))
-		return -1;
-
-	// TODO: here I bet it's faster to use the HTTP POST API
-	// if we haven't previously connected to the private websocket.
-	// Could just make it transparent to the user where placer_order()
-	// will use the private websocket iff we already connected to it.
-	if (kraken_private_ws_connect(cl))
-		return -1;
-
-	if (queue_work(cl, place_order_work, info))
-		return -ENOMEM;
+	if (kkn->openorders_recvd) {
+		if (private_ws_add_order(cl, &info->info)) {
+			order_info_free(cl, info);
+			return -1;
+		}
+	} else {
+		if (http_post_add_order(cl, info, false)) {
+			order_info_free(cl, info);
+			return -1;
+		}
+	}
 	return info->info.id;
 }
 

@@ -393,6 +393,16 @@ enum private_ws_channel {
 	CHAN_UNKNOWN,
 };
 
+static void queue_ws_order_ack(struct websocket *w, struct exchg_order_info *ack,
+			       int64_t reqid) {
+	struct exchg_test_event *ev = exchg_fake_queue_ws_event_tail(
+		w, EXCHG_EVENT_ORDER_ACK, sizeof(struct ack_msg));
+	ev->data.order_ack = *ack;
+	struct ack_msg *msg = test_event_private(ev);
+	msg->type = ACK_OPENORDERS;
+	msg->reqid = reqid;
+}
+
 static void private_ws_write(struct websocket *w, char *buf, size_t len) {
 	struct private_ws *pw = w->priv;
 	const char *problem;
@@ -533,12 +543,7 @@ static void private_ws_write(struct websocket *w, char *buf, size_t len) {
 		msg->type = ACK_ADDORDERSTATUS;
 		msg->reqid = reqid;
 		if (ack.status != EXCHG_ORDER_ERROR && pw->openorders_subbed) {
-			ev = exchg_fake_queue_ws_event_tail(
-				w, EXCHG_EVENT_ORDER_ACK, sizeof(struct ack_msg));
-			ev->data.order_ack = ack;
-			struct ack_msg *msg = test_event_private(ev);
-			msg->type = ACK_OPENORDERS;
-			msg->reqid = reqid;
+			queue_ws_order_ack(w, &ack, reqid);
 		}
 	} else if (event == EVENT_SUB) {
 		if (chan == CHAN_UNKNOWN) {
@@ -687,6 +692,188 @@ static struct http_req *token_dial(struct exchg_net_context *ctx,
 	return req;
 }
 
+static void add_order_read(struct http_req *req, struct exchg_test_event *ev,
+		       struct buf *buf) {
+	buf_xsprintf(buf, "{\"error\":[%s],\"result\":{\""
+		     "descr\":\"fake order description\", "
+		     "\"txid\": {\"OUF4EM-FRGI2-MQMWZD\"}}}",
+		     ev->data.order_ack.status == EXCHG_ORDER_ERROR ?
+		     "\"TestErrorBadThingHappened\"" : "");
+}
+
+struct add_order_post {
+	int64_t userref;
+	bool got_side;
+	bool got_pair;
+	bool got_price;
+	bool got_size;
+};
+
+static int find_char(struct buf *buf, int idx, char c) {
+	for (; idx < buf->len; idx++) {
+		if (buf->buf[idx] == c)
+			return idx;
+	}
+	return -1;
+}
+
+static enum exchg_pair asset_name_to_pair(char *c, int start, int end) {
+	if (!strncmp(&c[start], "XXBTZUSD", strlen("XXBTZUSD")))
+		return EXCHG_PAIR_BTCUSD;
+	else if (!strncmp(&c[start], "XETHZUSD", strlen("XETHZUSD")))
+		return EXCHG_PAIR_ETHUSD;
+	else if (!strncmp(&c[start], "XETHXXBT", strlen("XETHXXBT")))
+		return EXCHG_PAIR_ETHBTC;
+	else if (!strncmp(&c[start], "XZECZUSD", strlen("XZECZUSD")))
+		return EXCHG_PAIR_ZECUSD;
+	else if (!strncmp(&c[start], "XZECXXBT", strlen("XZECXXBT")))
+		return EXCHG_PAIR_ZECBTC;
+	else if (!strncmp(&c[start], "XZECXETH", strlen("XZECXETH")))
+		return EXCHG_PAIR_ZECETH;
+	else if (!strncmp(&c[start], "ZECBCH", strlen("ZECBCH")))
+		return EXCHG_PAIR_ZECBCH;
+	else if (!strncmp(&c[start], "XZECXLTC", strlen("XZECXLTC")))
+		return EXCHG_PAIR_ZECLTC;
+	else if (!strncmp(&c[start], "BCHUSD", strlen("BCHUSD")))
+		return EXCHG_PAIR_BCHUSD;
+	else if (!strncmp(&c[start], "BCHXBT", strlen("BCHXBT")))
+		return EXCHG_PAIR_BCHBTC;
+	else if (!strncmp(&c[start], "BCHETH", strlen("BCHETH")))
+		return EXCHG_PAIR_BCHETH;
+	else if (!strncmp(&c[start], "XLTCZUSD", strlen("XLTCZUSD")))
+		return EXCHG_PAIR_LTCUSD;
+	else if (!strncmp(&c[start], "XLTCXXBT", strlen("XLTCXXBT")))
+		return EXCHG_PAIR_LTCBTC;
+	else if (!strncmp(&c[start], "LTCETH", strlen("LTCETH")))
+		return EXCHG_PAIR_LTCETH;
+	else if (!strncmp(&c[start], "LTCBCH", strlen("LTCBCH")))
+		return EXCHG_PAIR_LTCBCH;
+	else if (!strncmp(&c[start], "DAIUSD", strlen("DAIUSD")))
+		return EXCHG_PAIR_DAIUSD;
+	return -1;
+}
+
+static void add_order_write(struct http_req *req) {
+	const char *problem = "";
+	struct add_order_post request = {};
+	int key = 0, key_end, val, val_end;
+	struct exchg_order_info *ack = &req->read_event->data.order_ack;
+
+	while (1) {
+		key_end = find_char(&req->body, key, '=');
+		if (key_end < 0)
+			break;
+		val = key_end + 1;
+		val_end = find_char(&req->body, val, '&');
+		if (val_end < 0)
+			val_end = req->body.len-1;
+		if (val == val_end) {
+			exchg_log("Kraken test: bad urlencoded HTTP Body:\n");
+			fwrite(req->body.buf, 1, req->body.len, stderr);
+			fputc('\n', stderr);
+			return;
+		}
+		if (!strncmp(&req->body.buf[key], "userref", strlen("userref"))) {
+			char s[21];
+			char *end;
+			if (val_end-val > 21) {
+				problem = "bad userref";
+				goto bad;
+			}
+			memcpy(s, &req->body.buf[val], val_end-val);
+			s[val_end-val] = 0;
+			request.userref = strtoll(s, &end, 10);
+			if (*end) {
+				problem = "bad userref";
+				goto bad;
+			}
+		} else if (!strncmp(&req->body.buf[key], "pair", strlen("pair"))) {
+			ack->order.pair = asset_name_to_pair(req->body.buf, val, val_end);
+			if (ack->order.pair == -1) {
+				problem = "bad pair";
+				goto bad;
+			}
+			request.got_pair = true;
+		} else if (!strncmp(&req->body.buf[key], "price", strlen("price"))) {
+			if (decimal_from_str_n(&ack->order.price, &req->body.buf[val], val_end-val)) {
+				problem = "bad price";
+				goto bad;
+			}
+			request.got_price = true;
+		} else if (!strncmp(&req->body.buf[key], "volume", strlen("volume"))) {
+			if (decimal_from_str_n(&ack->order.size, &req->body.buf[val], val_end-val)) {
+				problem = "bad size";
+				goto bad;
+			}
+			request.got_size = true;
+		} else if (!strncmp(&req->body.buf[key], "type", strlen("type"))) {
+			if (!strncmp(&req->body.buf[val], "buy", strlen("buy"))) {
+				ack->order.side = EXCHG_SIDE_BUY;
+			} else if (!strncmp(&req->body.buf[val], "sell", strlen("sell"))) {
+				ack->order.side = EXCHG_SIDE_SELL;
+			} else {
+				problem = "bad type";
+				goto bad;
+			}
+			request.got_side = true;
+		} else if (!strncmp(&req->body.buf[key], "timeinforce", strlen("timeinforce"))) {
+			if (!strncmp(&req->body.buf[val], "IOC", strlen("IOC")))
+				ack->opts.immediate_or_cancel = true;
+		}
+		key = val_end + 1;
+	}
+
+	if (!request.got_side) {
+		problem = "no \"type\"";
+		goto bad;
+	}
+	if (!request.got_pair) {
+		problem = "no \"pair\"";
+		goto bad;
+	}
+	if (!request.got_price) {
+		problem = "no \"price\"";
+		goto bad;
+	}
+	if (!request.got_size) {
+		problem = "no \"volume\"";
+		goto bad;
+	}
+	if (!request.userref) {
+		exchg_log("FIXME: kraken test expects to get a \"userref\" with orders for now. HTTP POST data:\n");
+		fwrite(req->body.buf, 1, req->body.len, stderr);
+		fputc('\n', stderr);
+		return;
+	}
+
+	on_order_placed(req->ctx, EXCHG_KRAKEN, ack, 0);
+	struct websocket *ws = fake_websocket_get(req->ctx, "ws-auth.kraken.com", NULL);
+	if (!ws)
+		return;
+	struct private_ws *pw = ws->priv;
+	if (ack->status != EXCHG_ORDER_ERROR && pw->openorders_subbed) {
+		queue_ws_order_ack(ws, ack, request.userref);
+	}
+	return;
+
+bad:
+	exchg_log("Kraken test: %s%s bad HTTP POST body: %s:\n", req->host, req->path, problem);
+	fwrite(req->body.buf, 1, req->body.len, stderr);
+	fputc('\n', stderr);
+}
+
+static struct http_req *add_order_dial(struct exchg_net_context *ctx,
+				   const char *path, const char *method,
+				   void *private) {
+	struct http_req *req = fake_http_req_alloc(ctx, EXCHG_KRAKEN,
+						   EXCHG_EVENT_ORDER_ACK, private);
+	req->read = add_order_read;
+	req->write = add_order_write;
+	req->add_header = no_http_add_header;
+	req->destroy = fake_http_req_free;
+	return req;
+}
+
 struct http_req *kraken_http_dial(struct exchg_net_context *ctx,
 				  const char *path, const char *method,
 				  void *private) {
@@ -696,6 +883,8 @@ struct http_req *kraken_http_dial(struct exchg_net_context *ctx,
 		return balances_dial(ctx, path, method, private);
 	} else if (!strcmp(path, "/0/private/GetWebSocketsToken")) {
 		return token_dial(ctx, path, method, private);
+	} else if (!strcmp(path, "/0/private/AddOrder")) {
+		return add_order_dial(ctx, path, method, private);
 	} else {
 		fprintf(stderr, "Kraken bad http path: %s\n", path);
 		return NULL;
