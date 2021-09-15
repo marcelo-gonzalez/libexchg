@@ -21,9 +21,10 @@ struct kraken_client {
 		int channel_id;
 		char *wsname;
 	} pair_info[EXCHG_NUM_PAIRS];
-	int next_order_id;
+	unsigned int next_reqid;
 	SHA256_CTX sha_ctx;
 	GHashTable *channel_mapping;
+	GHashTable *cancelations;
 	struct conn *conn;
 	bool openorders_recvd;
 	struct conn *private_ws;
@@ -69,9 +70,37 @@ static bool wsname_match(const char *json, jsmntok_t *tok, const char *str) {
 	return !str[spos] && jpos == tok->end;
 }
 
+struct kraken_order {
+	bool canceling;
+	unsigned int cancel_reqid;
+};
+
+static void cancel_free(struct exchg_client *cl, unsigned int reqid) {
+	struct kraken_client *kkn = client_private(cl);
+
+	g_hash_table_remove(kkn->cancelations, GUINT_TO_POINTER(reqid));
+}
+
+static void cancel_done(struct exchg_client *cl, struct order_info *oi) {
+	struct kraken_order *k = order_info_private(oi);
+
+	if (k->cancel_reqid > 0)
+		cancel_free(cl, k->cancel_reqid);
+	k->canceling = false;
+	k->cancel_reqid = 0;
+}
+
+static void order_update(struct exchg_client *cl, struct order_info *oi,
+			 enum exchg_order_status new_status, const decimal_t *new_size, bool cancel_failed) {
+	if (order_status_done(new_status))
+		cancel_done(cl, oi);
+	exchg_order_update(cl, oi, new_status, new_size, cancel_failed);
+}
+
 enum event_type {
 	EVENT_SUB_STATUS,
-	EVENT_ADD_EXCHG_ORDER,
+	EVENT_ADD_ORDER,
+	EVENT_CANCEL_ORDER,
 	EVENT_UNKNOWN,
 };
 
@@ -90,7 +119,7 @@ struct event_msg {
 	enum event_type type;
 	enum channel_name name;
 	enum exchg_pair pair;
-	int64_t reqid;
+	unsigned int reqid;
 };
 
 static int parse_event(struct exchg_client *cl, struct conn *conn,
@@ -105,7 +134,6 @@ static int parse_event(struct exchg_client *cl, struct conn *conn,
 		.type = EVENT_UNKNOWN,
 		.name = CHAN_UNSET,
 		.pair = INVALID_PAIR,
-		.reqid = -1,
 	};
 
 	int key_idx = 1;
@@ -116,9 +144,10 @@ static int parse_event(struct exchg_client *cl, struct conn *conn,
 		if (json_streq(json, key, "event")) {
 			if (json_streq(json, value, "subscriptionStatus")) {
 				status.type = EVENT_SUB_STATUS;
-			} else if (json_streq(json, value,
-					      "addOrderStatus")) {
-				status.type = EVENT_ADD_EXCHG_ORDER;
+			} else if (json_streq(json, value, "addOrderStatus")) {
+				status.type = EVENT_ADD_ORDER;
+			} else if (json_streq(json, value, "cancelOrderStatus")) {
+				status.type = EVENT_CANCEL_ORDER;
 			} else
 				return 0;
 			key_idx += 2;
@@ -177,7 +206,7 @@ static int parse_event(struct exchg_client *cl, struct conn *conn,
 			}
 			key_idx += 2;
 		} else if (json_streq(json, key, "reqid")) {
-			if (json_get_int64(&status.reqid, json, value)) {
+			if (json_get_uint(&status.reqid, json, value)) {
 				problem = "bad \"reqid\"";
 				goto bad;
 			}
@@ -217,8 +246,8 @@ static int parse_event(struct exchg_client *cl, struct conn *conn,
 		g_hash_table_insert(kkn->channel_mapping,
 				    GINT_TO_POINTER(status.channel_id),
 				    GINT_TO_POINTER(status.pair));
-	} else if (status.type == EVENT_ADD_EXCHG_ORDER) {
-		if (status.reqid == -1) {
+	} else if (status.type == EVENT_ADD_ORDER) {
+		if (status.reqid == 0) {
 			problem = "no \"reqid\" field";
 			goto bad;
 		}
@@ -235,7 +264,30 @@ static int parse_event(struct exchg_client *cl, struct conn *conn,
 			new_status = EXCHG_ORDER_ERROR;
 			order_err_cpy(&oi->info, json, status.error_msg);
 		}
-		exchg_order_update(cl, oi, new_status, NULL, false);
+		order_update(cl, oi, new_status, NULL, false);
+	} else if (status.type == EVENT_CANCEL_ORDER) {
+		if (status.reqid == 0)
+			return 0;
+		unsigned int id = GPOINTER_TO_UINT(g_hash_table_lookup(kkn->cancelations,
+								       GUINT_TO_POINTER(status.reqid)));
+		if (!id)
+			return 0;
+		struct order_info *oi = exchg_order_lookup(cl, id);
+		if (!oi) {
+			exchg_log("Kraken: Received order cancel update for unknown order:\n");
+			json_fprintln(stderr, json, &toks[0]);
+			cancel_free(cl, id);
+			return 0;
+		}
+		cancel_done(cl, oi);
+		if (status.status_ok) {
+			exchg_order_update(cl, oi, EXCHG_ORDER_CANCELED, NULL, false);
+		} else {
+			order_err_cpy(&oi->info, json, status.error_msg);
+			exchg_order_update(cl, oi, EXCHG_ORDER_SUBMITTED, NULL, true);
+			exchg_log("Kraken: cancelation of order %u failed:\n", id);
+			json_fprintln(stderr, json, &toks[0]);
+		}
 	}
 	return 0;
 
@@ -1207,7 +1259,7 @@ static int parse_openorders(struct exchg_client *cl,
 			status = EXCHG_ORDER_PENDING;
 			break;
 		}
-		exchg_order_update(cl, oi, status, &upd.size, false);
+		order_update(cl, oi, status, &upd.size, false);
 	}
 	return 0;
 
@@ -1396,12 +1448,12 @@ static int add_order_recv(struct exchg_client *cl, struct conn *conn,
 				order_err_cpy(&info->info, json, value+1);
 				new_status = EXCHG_ORDER_ERROR;
 			}
-			exchg_order_update(cl, info, new_status, NULL, false);
+			order_update(cl, info, new_status, NULL, false);
 			return 0;
 		}
 		key_idx = json_skip(num_toks, toks, key_idx+1);
 	}
-	exchg_order_update(cl, info, EXCHG_ORDER_PENDING, NULL, false);
+	order_update(cl, info, EXCHG_ORDER_PENDING, NULL, false);
 	return 0;
 }
 
@@ -1416,7 +1468,7 @@ static void add_order_on_err(struct exchg_client *cl, struct conn *conn,
 		strncpy(info->info.err, err, EXCHG_ORDER_ERR_SIZE);
 	else
 		strncpy(info->info.err, "<unknown>", EXCHG_ORDER_ERR_SIZE);
-	exchg_order_update(cl, info, EXCHG_ORDER_ERROR, NULL, false);
+	order_update(cl, info, EXCHG_ORDER_ERROR, NULL, false);
 }
 
 static struct exchg_http_ops add_order_ops = {
@@ -1490,15 +1542,27 @@ static bool place_order_work(struct exchg_client *cl, void *p) {
 	return true;
 }
 
+static unsigned int get_reqid(struct exchg_client *cl) {
+	struct kraken_client *kkn = client_private(cl);
+	unsigned int reqid = kkn->next_reqid++;
+
+	if (reqid == 0)
+		reqid = kkn->next_reqid++;
+	return reqid;
+}
+
 static int64_t kraken_place_order(struct exchg_client *cl, const struct exchg_order *order,
 				  const struct exchg_place_order_opts *opts,
 				  void *request_private) {
 	struct kraken_client *kkn = client_private(cl);
 
 	struct order_info *info = __exchg_new_order(cl, order, opts, request_private,
-						    0, kkn->next_order_id++);
+						    sizeof(struct kraken_order), get_reqid(cl));
 	if (!info)
 		return -ENOMEM;
+	struct kraken_order *k = order_info_private(info);
+	k->cancel_reqid = 0;
+	k->canceling = false;
 
 	if (unlikely(!cl->pair_info_current)) {
 		if (exchg_get_pair_info(cl) || queue_work(cl, place_order_work, info)) {
@@ -1522,14 +1586,161 @@ static int64_t kraken_place_order(struct exchg_client *cl, const struct exchg_or
 	return info->info.id;
 }
 
+static int cancel_order_recv(struct exchg_client *cl, struct conn *conn,
+			     int status, char *json, int num_toks, jsmntok_t *toks) {
+	struct http_data *data = conn_private(conn);
+	struct order_info *oi = exchg_order_lookup(cl, data->order_id);
+	const char *problem = "";
+
+	if (!oi)
+		return 0;
+
+	cancel_done(cl, oi);
+
+	if (toks[0].type != JSMN_OBJECT) {
+		problem = "not an object";
+		goto bad;
+	}
+
+	bool got_count = false;
+	int count;
+	int key_idx = 1;
+	for (int i = 0; i < toks[0].size; i++) {
+		jsmntok_t *key = &toks[key_idx];
+		jsmntok_t *value = key + 1;
+
+		if (json_streq(json, key, "error")) {
+			if (value->type == JSMN_ARRAY && value->size == 0) {
+				key_idx += 2;
+				continue;
+			}
+			if (value->type != JSMN_ARRAY || value->size > 1)
+				order_err_cpy(&oi->info, json, value);
+			else
+				order_err_cpy(&oi->info, json, value+1);
+			exchg_order_update(cl, oi, EXCHG_ORDER_SUBMITTED, NULL, true);
+			return 0;
+		} else if (json_streq(json, key, "result")) {
+			if (value->type != JSMN_OBJECT) {
+				problem = "bad \"result\"";
+				goto bad;
+			}
+			int n = value->size;
+			key_idx += 2;
+			for (int j = 0; j < n; j++) {
+				key = &toks[key_idx];
+				value = key + 1;
+
+				if (json_streq(json, key, "count")) {
+					if (json_get_int(&count, json, value)) {
+						problem = "bad \"result\":\"count\"";
+						goto bad;
+					}
+					got_count = true;
+					key_idx += 2;
+				} else {
+					key_idx = json_skip(num_toks, toks, key_idx+1);
+				}
+			}
+		} else {
+			key_idx = json_skip(num_toks, toks, key_idx+1);
+		}
+	}
+	if (!got_count) {
+		problem = "no \"result\":\"count\"";
+		goto bad;
+	}
+	if (count != 1) {
+		exchg_log("%s%s sent data with \"result\":\"count\" != 1:\n", conn_host(conn), conn_path(conn));
+		json_fprintln(stderr, json, &toks[0]);
+	}
+	if (count > 0)
+		exchg_order_update(cl, oi, EXCHG_ORDER_CANCELED, NULL, false);
+	return 0;
+
+bad:
+	snprintf(oi->info.err, EXCHG_ORDER_ERR_SIZE, "%s%s sent bad data",
+		 conn_host(conn), conn_path(conn));
+	exchg_order_update(cl, oi, EXCHG_ORDER_SUBMITTED, NULL, true);
+	exchg_log("%s%s sent bad data: %s\n", conn_host(conn), conn_path(conn), problem);
+	json_fprintln(stderr, json, &toks[0]);
+	return 0;
+}
+
+static void cancel_order_on_err(struct exchg_client *cl, struct conn *conn,
+				const char *err) {
+	struct http_data *data = conn_private(conn);
+	struct order_info *info = exchg_order_lookup(cl, data->order_id);
+
+	if (!info)
+		return;
+	if (err)
+		strncpy(info->info.err, err, EXCHG_ORDER_ERR_SIZE);
+	else
+		strncpy(info->info.err, "<unknown>", EXCHG_ORDER_ERR_SIZE);
+	cancel_done(cl, info);
+	exchg_order_update(cl, info, EXCHG_ORDER_SUBMITTED, NULL, true);
+}
+
+static void cancel_order_on_closed(struct exchg_client *cl, struct conn *conn) {
+	struct http_data *data = conn_private(conn);
+	struct order_info *info = exchg_order_lookup(cl, data->order_id);
+
+	if (info)
+		cancel_done(cl, info);
+}
+
+static struct exchg_http_ops cancel_order_ops = {
+	.recv = cancel_order_recv,
+	.add_headers = private_http_add_headers,
+	.on_error = cancel_order_on_err,
+	.on_closed = cancel_order_on_closed,
+	.conn_data_size = sizeof(struct http_data),
+};
+
 static int kraken_cancel_order(struct exchg_client *cl, struct order_info *info) {
-	printf("sorry dunno how to cancel %s orders\n", exchg_name(cl));
-	return -1;
+	struct kraken_client *kkn = client_private(cl);
+	struct kraken_order *ko = order_info_private(info);
+
+	if (unlikely(ko->canceling))
+		return 0;
+
+	if (conn_established(kkn->private_ws)) {
+		unsigned int reqid = get_reqid(cl);
+		// TODO: there should be an exchg_cancel_orders()
+		// function canceling multiple at once
+		if (conn_printf(kkn->private_ws, "{\"event\": \"cancelOrder\", \"reqid\": %u, "
+				"\"token\": \"%s\", \"txid\": [\"%"PRId64"\"]}",
+				reqid, kkn->ws_token, info->info.id) < 0)
+			return -1;
+		ko->cancel_reqid = reqid;
+		// cast is fine since the id comes from ->next_reqid
+		g_hash_table_insert(kkn->cancelations, GUINT_TO_POINTER(reqid),
+				    GUINT_TO_POINTER((unsigned int)info->info.id));
+	} else {
+		struct conn *http = exchg_http_post("api.kraken.com", "/0/private/CancelOrder",
+						    &cancel_order_ops, cl);
+		if (!http)
+			return -1;
+		if (conn_http_body_sprintf(http, "txid=%"PRId64, info->info.id) < 0) {
+			conn_close(http);
+			return -1;
+		}
+		if (private_http_auth(cl, http)) {
+			conn_close(http);
+			return -1;
+		}
+		struct http_data *data = conn_private(http);
+		data->order_id = info->info.id;
+	}
+	ko->canceling = true;
+	return 0;
 }
 
 static void kraken_destroy(struct exchg_client *cl) {
 	struct kraken_client *kkn = client_private(cl);
 	g_hash_table_unref(kkn->channel_mapping);
+	g_hash_table_unref(kkn->cancelations);
 	for (enum exchg_pair p = 0; p < EXCHG_NUM_PAIRS; p++)
 		free(kkn->pair_info[p].wsname);
 	free(kkn->ws_token);
@@ -1548,7 +1759,8 @@ struct exchg_client *alloc_kraken_client(struct exchg_context *ctx) {
 	struct kraken_client *kkn = client_private(ret);
 
 	kkn->channel_mapping = g_hash_table_new(g_direct_hash, g_direct_equal);
-	kkn->next_order_id = current_millis() % 86400000;
+	kkn->cancelations = g_hash_table_new(g_direct_hash, g_direct_equal);
+	kkn->next_reqid = current_millis() % 86400000;
 
 	ret->name = "Kraken";
 	ret->l2_subscribe = kraken_l2_subscribe;

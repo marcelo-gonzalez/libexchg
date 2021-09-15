@@ -322,10 +322,31 @@ struct ack_msg {
 	int64_t reqid;
 };
 
+struct order_cancel {
+	unsigned int reqid;
+	char err[100];
+};
+
 static void private_ws_read(struct websocket *ws, struct buf *buf,
 			    struct exchg_test_event *msg) {
 	if (msg->type == EXCHG_EVENT_WS_PROTOCOL) {
 		proto_read(buf, (struct kraken_proto *)test_event_private(msg));
+		return;
+	}
+	if (msg->type == EXCHG_EVENT_ORDER_CANCEL_ACK) {
+		struct order_cancel *cancel = test_event_private(msg);
+		if (cancel->err[0]) {
+			buf_xsprintf(buf, "{\"event\": \"cancelOrderStatus\", \"status\": \"error\","
+				     "\"errorMessage\": \"%s\"", cancel->err);
+			if (cancel->reqid)
+				buf_xsprintf(buf, ", \"reqid\": %u", cancel->reqid);
+			buf_xsprintf(buf, "}");
+		} else {
+			buf_xsprintf(buf, "{\"event\": \"cancelOrderStatus\", \"status\": \"ok\"");
+			if (cancel->reqid)
+				buf_xsprintf(buf, ", \"reqid\": %u", cancel->reqid);
+			buf_xsprintf(buf, "}");
+		}
 		return;
 	}
 	if (msg->type != EXCHG_EVENT_ORDER_ACK) {
@@ -385,6 +406,7 @@ static int private_ws_matches(struct websocket *w, enum exchg_pair p) {
 enum private_ws_event {
 	EVENT_SUB,
 	EVENT_ADDORDER,
+	EVENT_CANCELORDER,
 	EVENT_UNKNOWN,
 };
 
@@ -401,6 +423,31 @@ static void queue_ws_order_ack(struct websocket *w, struct exchg_order_info *ack
 	struct ack_msg *msg = test_event_private(ev);
 	msg->type = ACK_OPENORDERS;
 	msg->reqid = reqid;
+}
+
+static void cancel_order(struct exchg_net_context *ctx, int64_t userref,
+			 struct order_cancel *cancel) {
+	struct test_order *o;
+	struct websocket *ws = fake_websocket_get(ctx, "ws-auth.kraken.com", NULL);
+
+	LIST_FOREACH(o, &ctx->servers[EXCHG_KRAKEN].order_list, list) {
+		int64_t uref = *(int64_t *)test_order_private(o);
+		if (uref != userref)
+			continue;
+		if (decimal_cmp(&o->info.filled_size, &o->info.order.size) >= 0) {
+			snprintf(cancel->err, sizeof(cancel->err),
+				 "order id %"PRId64" not recognized", userref);
+			return;
+		}
+		bool succeed = on_order_canceled(ctx, EXCHG_KRAKEN, o);
+		if (!succeed) {
+			snprintf(cancel->err, sizeof(cancel->err), "TestError");
+		} else if (ws) {
+			queue_ws_order_ack(ws, &o->info, userref);
+		}
+		return;
+	}
+	snprintf(cancel->err, sizeof(cancel->err), "order id %"PRId64" not recognized", userref);
 }
 
 static void private_ws_write(struct websocket *w, char *buf, size_t len) {
@@ -423,7 +470,8 @@ static void private_ws_write(struct websocket *w, char *buf, size_t len) {
 	}
 
 	struct exchg_order_info ack = {};
-	int64_t reqid;
+	unsigned int reqid = 0;
+	int64_t userref = -1;
 	enum private_ws_event event = EVENT_UNKNOWN;
 	enum private_ws_channel chan = CHAN_UNKNOWN;
 	bool got_id = false, got_price = false;
@@ -439,6 +487,8 @@ static void private_ws_write(struct websocket *w, char *buf, size_t len) {
 				event = EVENT_ADDORDER;
 			} else if (json_streq(buf, value, "subscribe")) {
 				event = EVENT_SUB;
+			} else if (json_streq(buf, value, "cancelOrder")) {
+				event = EVENT_CANCELORDER;
 			} else {
 				problem = "bad \"event\"";
 				goto bad;
@@ -496,7 +546,7 @@ static void private_ws_write(struct websocket *w, char *buf, size_t len) {
 			}
 			got_size = true;
 		} else if (json_streq(buf, key, "reqid")) {
-			if (json_get_int64(&reqid, buf, value)) {
+			if (json_get_uint(&reqid, buf, value)) {
 				problem = "bad reqid field";
 				goto bad;
 			}
@@ -504,6 +554,20 @@ static void private_ws_write(struct websocket *w, char *buf, size_t len) {
 		} else if (json_streq(buf, key, "timeinforce")) {
 			if (json_streq(buf, value, "IOC"))
 				ack.opts.immediate_or_cancel = true;
+		} else if (json_streq(buf, key, "txid")) {
+			if (value->type != JSMN_ARRAY) {
+				problem = "bad txid field";
+				goto bad;
+			}
+			if (value->size != 1) {
+				exchg_log("FIXME: kraken test can only cancel one order at a time for now. Got this request:\n");
+				json_fprintln(stderr, buf, &pw->toks[0]);
+				return;
+			}
+			if (json_get_int64(&userref, buf, value+1)) {
+				problem = "bad txid field";
+				goto bad;
+			}
 		}
 		key_idx = json_skip(r, pw->toks, key_idx+1);
 	}
@@ -533,7 +597,8 @@ static void private_ws_write(struct websocket *w, char *buf, size_t len) {
 			problem = "no \"reqid\" field";
 			goto bad;
 		}
-		on_order_placed(w->ctx, EXCHG_KRAKEN, &ack, 0);
+		struct test_order *o = on_order_placed(w->ctx, EXCHG_KRAKEN, &ack, sizeof(int64_t));
+		*(int64_t *)test_order_private(o) = reqid;
 		struct exchg_test_event *ev = exchg_fake_queue_ws_event_tail(
 			w, EXCHG_EVENT_ORDER_ACK, sizeof(struct ack_msg));
 		ev->data.order_ack = ack;
@@ -545,6 +610,16 @@ static void private_ws_write(struct websocket *w, char *buf, size_t len) {
 		if (ack.status != EXCHG_ORDER_ERROR && pw->openorders_subbed) {
 			queue_ws_order_ack(w, &ack, reqid);
 		}
+	} else if (event == EVENT_CANCELORDER) {
+		if (userref == -1) {
+			problem = "no txids given";
+			goto bad;
+		}
+		struct exchg_test_event *ev = exchg_fake_queue_ws_event_tail(
+			w, EXCHG_EVENT_ORDER_CANCEL_ACK, sizeof(struct order_cancel));
+		struct order_cancel *cancel = test_event_private(ev);
+		cancel->reqid = reqid;
+		cancel_order(w->ctx, userref, cancel);
 	} else if (event == EVENT_SUB) {
 		if (chan == CHAN_UNKNOWN) {
 			problem = "missing \"name\"";
@@ -774,7 +849,7 @@ static void add_order_write(struct http_req *req) {
 			return;
 		}
 		if (!strncmp(&req->body.buf[key], "userref", strlen("userref"))) {
-			char s[21];
+			char s[22];
 			char *end;
 			if (val_end-val > 21) {
 				problem = "bad userref";
@@ -846,7 +921,8 @@ static void add_order_write(struct http_req *req) {
 		return;
 	}
 
-	on_order_placed(req->ctx, EXCHG_KRAKEN, ack, 0);
+	struct test_order *o = on_order_placed(req->ctx, EXCHG_KRAKEN, ack, sizeof(int64_t));
+	*(int64_t *)test_order_private(o) = request.userref;
 	struct websocket *ws = fake_websocket_get(req->ctx, "ws-auth.kraken.com", NULL);
 	if (!ws)
 		return;
@@ -874,6 +950,86 @@ static struct http_req *add_order_dial(struct exchg_net_context *ctx,
 	return req;
 }
 
+static void cancel_order_free(struct http_req *req) {
+	free(req->priv);
+	fake_http_req_free(req);
+}
+
+static void cancel_order_read(struct http_req *req, struct exchg_test_event *ev,
+		       struct buf *buf) {
+	struct order_cancel *cancel = req->priv;
+	if (cancel->err[0]) {
+		buf_xsprintf(buf, "{\"error\":[\"%s\"],\"result\":{}}", cancel->err);
+	} else {
+		buf_xsprintf(buf, "{\"error\":[],\"result\":{\"count\": 1}}");
+	}
+}
+
+static void cancel_order_write(struct http_req *req) {
+	const char *problem = "";
+	int key = 0, key_end, val, val_end;
+	unsigned int txid;
+	bool got_txid = false;
+
+	while (1) {
+		key_end = find_char(&req->body, key, '=');
+		if (key_end < 0)
+			break;
+		val = key_end + 1;
+		val_end = find_char(&req->body, val, '&');
+		if (val_end < 0)
+			val_end = req->body.len-1;
+		if (val == val_end) {
+			exchg_log("Kraken test: bad urlencoded HTTP Body:\n");
+			fwrite(req->body.buf, 1, req->body.len, stderr);
+			fputc('\n', stderr);
+			return;
+		}
+		if (!strncmp(&req->body.buf[key], "txid", strlen("txid"))) {
+			char s[22];
+			char *end;
+			if (val_end-val > 21) {
+				problem = "bad txid";
+				goto bad;
+			}
+			memcpy(s, &req->body.buf[val], val_end-val);
+			s[val_end-val] = 0;
+			txid = strtol(s, &end, 10);
+			if (*end) {
+				problem = "bad txid";
+				goto bad;
+			}
+			got_txid = true;
+		}
+		key = val_end + 1;
+	}
+
+	if (!got_txid) {
+		problem = "no txid";
+		goto bad;
+	}
+	cancel_order(req->ctx, txid, req->priv);
+	return;
+
+bad:
+	exchg_log("Kraken test: %s%s bad HTTP POST body: %s:\n", req->host, req->path, problem);
+	fwrite(req->body.buf, 1, req->body.len, stderr);
+	fputc('\n', stderr);
+}
+
+static struct http_req *cancel_order_dial(struct exchg_net_context *ctx,
+					  const char *path, const char *method,
+					  void *private) {
+	struct http_req *req = fake_http_req_alloc(ctx, EXCHG_KRAKEN,
+						   EXCHG_EVENT_ORDER_ACK, private);
+	req->read = cancel_order_read;
+	req->write = cancel_order_write;
+	req->add_header = no_http_add_header;
+	req->destroy = cancel_order_free;
+	req->priv = xzalloc(sizeof(struct order_cancel));
+	return req;
+}
+
 struct http_req *kraken_http_dial(struct exchg_net_context *ctx,
 				  const char *path, const char *method,
 				  void *private) {
@@ -885,6 +1041,8 @@ struct http_req *kraken_http_dial(struct exchg_net_context *ctx,
 		return token_dial(ctx, path, method, private);
 	} else if (!strcmp(path, "/0/private/AddOrder")) {
 		return add_order_dial(ctx, path, method, private);
+	} else if (!strcmp(path, "/0/private/CancelOrder")) {
+		return cancel_order_dial(ctx, path, method, private);
 	} else {
 		fprintf(stderr, "Kraken bad http path: %s\n", path);
 		return NULL;

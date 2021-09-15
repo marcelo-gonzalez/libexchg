@@ -6,8 +6,10 @@
 
 #include <errno.h>
 #include <stdbool.h>
-#include <stdlib.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <jsmn/jsmn.h>
 
 #include "exchg/decimal.h"
@@ -61,6 +63,10 @@ static inline int json_get_int(int *dst, const char *json, jsmntok_t *tok) {
 		return -1;
 	*dst = x;
 	return 0;
+}
+
+static inline int json_get_uint(unsigned int *dst, const char *json, jsmntok_t *tok) {
+	return json_get_int((int *)dst, json, tok);
 }
 
 static inline int json_get_int64(int64_t *dst, const char *json, jsmntok_t *tok) {

@@ -402,6 +402,8 @@ bool on_order_canceled(struct exchg_net_context *ctx, enum exchg_id id,
 	};
 	if (ctx->callback)
 		ctx->callback(ctx, &event, ctx->cb_private);
+	if (event.data.order_canceled.succeed)
+		o->info.status = EXCHG_ORDER_CANCELED;
 	return event.data.order_canceled.succeed;
 }
 
