@@ -1235,11 +1235,8 @@ static int parse_openorders(struct exchg_client *cl,
 			continue;
 
 		struct order_info *oi = exchg_order_lookup(cl, upd.id);
-		if (!oi) {
-			exchg_log("Kraken: unrecognized \"userref\":\n");
-			json_fprintln(stderr, json, &toks[0]);
+		if (!oi)
 			continue;
-		}
 
 		enum exchg_order_status status;
 
