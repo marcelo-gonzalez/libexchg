@@ -1005,6 +1005,8 @@ struct exchg_context *exchg_new(struct exchg_callbacks *callbacks,
 }
 
 void exchg_free(struct exchg_context *ctx) {
+	if (!ctx)
+		return;
 	net_destroy(ctx->net_context);
 	for (int i = 0; i < EXCHG_ALL_EXCHANGES; i++) {
 		struct exchg_client *cl = ctx->clients[i];
