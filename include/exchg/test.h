@@ -44,6 +44,7 @@ enum exchg_test_event_type {
 	EXCHG_EVENT_HTTP_PROTOCOL,
 	EXCHG_EVENT_WS_CLOSE,
 	EXCHG_EVENT_HTTP_CLOSE,
+	EXCHG_EVENT_TIMER,
 };
 
 struct exchg_test_l2_update {

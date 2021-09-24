@@ -120,6 +120,7 @@ void no_http_add_header(struct http_req *req, const unsigned char *name,
 enum conn_type {
 	CONN_TYPE_HTTP,
 	CONN_TYPE_WS,
+	CONN_TYPE_NONE,
 };
 
 struct test_event {

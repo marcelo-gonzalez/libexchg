@@ -64,4 +64,9 @@ void ws_close(struct websocket *ws);
 struct websocket *ws_dial(struct exchg_net_context *, const char *host,
 			  const char *path, void *private);
 
+struct timer;
+
+struct timer *timer_new(struct exchg_net_context *, void (*)(void *), void *, int seconds);
+// it is a bug to call this inside the timer callback
+void timer_cancel(struct timer *t);
 #endif

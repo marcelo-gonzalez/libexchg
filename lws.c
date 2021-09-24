@@ -405,3 +405,39 @@ struct exchg_net_context *net_new(struct net_callbacks *c) {
 	}
 	return ret;
 }
+
+struct timer {
+	GSource *source;
+	void (*f)(void *);
+	void *p;
+};
+
+gboolean timeout_callback(void *p) {
+	struct timer *t = p;
+
+	t->f(t->p);
+	g_source_unref(t->source);
+	free(t);
+	return FALSE;
+}
+
+struct timer *timer_new(struct exchg_net_context *ctx, void (*f)(void *),
+			void *p, int seconds) {
+	struct timer *t = malloc(sizeof(*t));
+	if (!t) {
+		fprintf(stderr, "%s: OOM\n", __func__);
+		return NULL;
+	}
+	t->f = f;
+	t->p = p;
+	t->source = g_timeout_source_new_seconds(seconds);
+	g_source_set_callback(t->source, timeout_callback, t, NULL);
+	g_source_attach(t->source, NULL);
+	return t;
+}
+
+void timer_cancel(struct timer *t) {
+	g_source_destroy(t->source);
+	g_source_unref(t->source);
+	free(t);
+}

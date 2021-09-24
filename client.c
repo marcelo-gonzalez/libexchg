@@ -30,9 +30,9 @@ struct conn {
 	char *path;
 	bool established;
 	bool disconnecting;
-	int reconnect_tries;
-	struct timespec last_reconnected;
-	int reconnect_seconds;
+	struct timer *retry;
+	struct timespec last_connected;
+	int retry_seconds_idx;
 	jsmn_parser parser;
 	jsmntok_t *tokens;
 	int num_tokens;
@@ -112,31 +112,12 @@ int conn_printf(struct conn *conn, const char *fmt, ...) {
 	return ret;
 }
 
-void conn_close(struct conn *conn) {
-	conn->reconnect_seconds = -1;
-	if (conn->type == CONN_TYPE_WS)
-		ws_close(conn->ws.conn);
-	else
-		http_close(conn->http.req);
-}
-
-void exchg_teardown(struct exchg_client *cl) {
-	// TODO: add a callback and call it here,
-	// send order cancels, etc. Set a bit and
-	// look at that bit in the main callback
-	struct conn *conn;
-	LIST_FOREACH(conn, &cl->conn_list, list)
-		conn_close(conn);
-}
-
 static void conn_offline(struct conn *conn) {
 	struct exchg_context *ctx = conn->cl->ctx;
 
 	LIST_REMOVE(conn, list);
 	conn_free(conn);
 
-	// TODO: in future when we might reconnect in 30 seconds,
-	// modify this logic
 	ctx->online = false;
 	for (enum exchg_id id = 0; id < EXCHG_ALL_EXCHANGES; id++) {
 		struct exchg_client *cl = ctx->clients[id];
@@ -150,6 +131,36 @@ static void conn_offline(struct conn *conn) {
 		net_stop(ctx->net_context);
 		ctx->running = false;
 	}
+}
+
+void conn_close(struct conn *conn) {
+	conn->disconnecting = true;
+	if (conn->type == CONN_TYPE_WS) {
+		if (conn->ws.conn) {
+			ws_close(conn->ws.conn);
+		} else if (conn->retry) {
+			timer_cancel(conn->retry);
+			conn_offline(conn);
+		}
+		// else { we're inside the on_l2_disconnect() callback }
+	} else
+		http_close(conn->http.req);
+}
+
+#ifndef LIST_FOREACH_SAFE
+#define	LIST_FOREACH_SAFE(var, head, field, tmp)		\
+	for ((var) = ((head)->lh_first);			\
+	     (var) && ((tmp) = (var)->field.le_next, 1);	\
+	     (var) = (tmp))
+#endif
+
+void exchg_teardown(struct exchg_client *cl) {
+	// TODO: add a callback and call it here,
+	// send order cancels, etc. Set a bit and
+	// look at that bit in the main callback
+	struct conn *conn, *tmp;
+	LIST_FOREACH_SAFE(conn, &cl->conn_list, list, tmp)
+		conn_close(conn);
 }
 
 static void put_response(char *in, size_t len) {
@@ -225,7 +236,7 @@ static void ws_on_error(void *p) {
 
 	exchg_log("wss://%s%s error\n", conn->host, conn->path);
 	conn->established = false;
-	conn->reconnect_seconds = -1;
+	conn->disconnecting = true;
 	if (conn->ws.ops->on_disconnect)
 		conn->ws.ops->on_disconnect(conn->cl, conn, -1);
 	conn_offline(conn);
@@ -261,57 +272,103 @@ static int ws_recv(void *p, char *in, size_t len) {
 	// TODO: return code that says whether to try reconnecting or not
 	if (conn->ws.ops->recv(conn->cl, conn, json,
 			       numtoks, conn->tokens)) {
-		conn->reconnect_seconds = -1;
+		conn->disconnecting = true;
 		return -1;
 	}
 	return 0;
+}
+
+#define ARRAY_SIZE(x) (sizeof(x) / sizeof(*x))
+
+static const int retry_seconds[] = {0, 1, 3, 10, 60, 300};
+
+static void time_since(struct timespec *dst, const struct timespec *ts) {
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+
+	time_t carry = now.tv_nsec < ts->tv_nsec ? 1 : 0;
+	dst->tv_nsec = now.tv_nsec - ts->tv_nsec;
+	if (carry)
+		dst->tv_nsec += 1000000000;
+	dst->tv_sec = now.tv_sec - ts->tv_sec - carry;
+}
+
+static inline void conn_next_retry_seconds(struct conn *conn) {
+	int last_idx = ARRAY_SIZE(retry_seconds)-1;
+	struct timespec since_last_connected;
+
+	time_since(&since_last_connected, &conn->last_connected);
+	if (since_last_connected.tv_sec > retry_seconds[last_idx])
+		conn->retry_seconds_idx = 0;
+	else if (conn->retry_seconds_idx < last_idx)
+		conn->retry_seconds_idx++;
+}
+
+static inline int conn_retry_seconds(struct conn *conn) {
+	if (conn->disconnecting)
+		return -1;
+	return retry_seconds[conn->retry_seconds_idx];
+}
+
+static void ws_reconnect(struct conn *conn);
+
+static void reconnect_timer(void *p) {
+	struct conn *conn = p;
+
+	conn->retry = NULL;
+	ws_reconnect(conn);
+}
+
+static void conn_add_retry_timer(struct conn *conn) {
+	conn->retry = timer_new(conn->cl->ctx->net_context, reconnect_timer, conn,
+				retry_seconds[conn->retry_seconds_idx]);
 }
 
 void exchg_data_disconnect(struct exchg_client *cl, struct conn *conn,
 			   int num_pairs_gone, enum exchg_pair *pairs_gone)
 {
 	if (cl->ctx->callbacks.on_l2_disconnect)
-		cl->ctx->callbacks.on_l2_disconnect(cl, conn->reconnect_seconds,
+		cl->ctx->callbacks.on_l2_disconnect(cl, conn_retry_seconds(conn),
 						    num_pairs_gone, pairs_gone,
 						    cl->ctx->user);
 }
 
-static int ws_reconnect(struct conn *conn) {
-	conn->ws.conn = ws_dial(conn->cl->ctx->net_context, conn->host,
-				conn->path, conn);
-	if (!conn->ws.conn)
-		return -1;
-	return 0;
+static void ws_reconnect(struct conn *conn) {
+	do {
+		clock_gettime(CLOCK_MONOTONIC, &conn->last_connected);
+		conn->ws.conn = ws_dial(conn->cl->ctx->net_context, conn->host,
+					conn->path, conn);
+		if (conn->ws.conn)
+			return;
+
+		conn_next_retry_seconds(conn);
+	} while (conn_retry_seconds(conn) == 0);
+
+	conn_add_retry_timer(conn);
 }
 
 static void ws_on_closed(void *p) {
 	struct conn *conn = p;
 
-	exchg_log("wss://%s%s closed. Reconnecting in %d\n", conn->host, conn->path, conn->reconnect_seconds);
+	conn_next_retry_seconds(conn);
+	int reconnect_seconds = conn_retry_seconds(conn);
 
 	conn->established = false;
-	if (conn->reconnect_seconds < 0)
-		conn->disconnecting = true;
+	conn->ws.conn = NULL;
 	if (conn->ws.ops->on_disconnect &&
-	    conn->ws.ops->on_disconnect(conn->cl, conn, conn->reconnect_seconds))
+	    conn->ws.ops->on_disconnect(conn->cl, conn, reconnect_seconds))
 		conn->disconnecting = true;
 
 	if (!conn->disconnecting) {
-		struct timespec now;
-
-		if (!ws_reconnect(conn)) {
-			clock_gettime(CLOCK_MONOTONIC, &now);
-			if (now.tv_sec - conn->last_reconnected.tv_sec > 30)
-				conn->reconnect_tries = 1;
-			else if (++conn->reconnect_tries > 1)
-				conn->reconnect_seconds = -1;
-			conn->last_reconnected = now;
+		if (reconnect_seconds == 0) {
+			exchg_log("wss://%s%s closed. Reconnecting now\n",
+				  conn->host, conn->path);
+			ws_reconnect(conn);
 		} else {
-			// TODO: try again later
-			conn->disconnecting = true;
-			if (conn->ws.ops->on_disconnect)
-				conn->ws.ops->on_disconnect(conn->cl, conn, -1);
-			conn_offline(conn);
+			exchg_log("wss://%s%s closed. Reconnecting in %d second%s\n",
+				  conn->host, conn->path, reconnect_seconds,
+				  reconnect_seconds > 1 ? "s" : "");
+			conn_add_retry_timer(conn);
 		}
 	} else {
 		conn_offline(conn);
@@ -449,6 +506,7 @@ static int conn_init(struct conn *conn, struct exchg_client *cl,
 		return -1;
 	}
 	conn->num_tokens = 500;
+	clock_gettime(CLOCK_MONOTONIC, &conn->last_connected);
 	return 0;
 }
 
@@ -777,13 +835,6 @@ struct exchg_client *alloc_exchg_client(struct exchg_context *ctx,
 	return ret;
 }
 
-#ifndef LIST_FOREACH_SAFE
-#define	LIST_FOREACH_SAFE(var, head, field, tmp)		\
-	for ((var) = ((head)->lh_first);			\
-	     (var) && ((tmp) = (var)->field.le_next, 1);	\
-	     (var) = (tmp))
-#endif
-
 void free_exchg_client(struct exchg_client *cl) {
 	struct work *w, *tmp_w;
 	struct conn *c, *tmp_c;
@@ -1027,6 +1078,8 @@ void exchg_run(struct exchg_context *ctx) {
 		exchg_log("%s called recursively. This is an error.\n", __func__);
 		return;
 	}
+	if (!ctx->online)
+		return;
 	ctx->running = true;
 	net_run(ctx->net_context);
 }

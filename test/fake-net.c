@@ -104,55 +104,63 @@ void exchg_test_set_callback(struct exchg_net_context *ctx,
 	ctx->cb_private = private;
 }
 
-void exchg_test_event_print(struct exchg_test_event *ev) {
-	const char *type;
-
-	switch (ev->type) {
+static const char *event_str(enum exchg_test_event_type type) {
+	switch (type) {
 	case EXCHG_EVENT_HTTP_PREP:
-		type = "HTTP_PREP";
-		break;
+		return "HTTP_PREP";
 	case EXCHG_EVENT_WS_PREP:
-		type = "WS_PREP";
-		break;
+		return "WS_PREP";
 	case EXCHG_EVENT_BOOK_UPDATE:
-		type = "BOOK_UPDATE";
-		break;
+		return "BOOK_UPDATE";
 	case EXCHG_EVENT_ORDER_PLACED:
-		type = "ORDER_PLACED";
-		break;
+		return "ORDER_PLACED";
 	case EXCHG_EVENT_ORDER_CANCELED:
-		type = "ORDER_CANCELED";
-		break;
+		return "ORDER_CANCELED";
 	case EXCHG_EVENT_ORDER_ACK:
-		type = "ORDER_ACK";
-		break;
+		return "ORDER_ACK";
 	case EXCHG_EVENT_ORDER_CANCEL_ACK:
-		type = "ORDER_CANCEL_ACK";
-		break;
+		return "ORDER_CANCEL_ACK";
 	case EXCHG_EVENT_PAIRS_DATA:
-		type = "PAIRS_DATA";
-		break;
+		return "PAIRS_DATA";
 	case EXCHG_EVENT_BALANCES:
-		type = "BALANCES";
-		break;
+		return "BALANCES";
 	case EXCHG_EVENT_WS_PROTOCOL:
-		type = "WS_PROTOCOL";
-		break;
+		return "WS_PROTOCOL";
 	case EXCHG_EVENT_HTTP_PROTOCOL:
-		type = "HTTP_PROTOCOL";
-		break;
+		return "HTTP_PROTOCOL";
 	case EXCHG_EVENT_WS_CLOSE:
-		type = "WS_CLOSE";
-		break;
+		return "WS_CLOSE";
 	case EXCHG_EVENT_HTTP_CLOSE:
-		type = "HTTP_CLOSE";
+		return "HTTP_CLOSE";
+	case EXCHG_EVENT_TIMER:
+		return "TIMER";
+	default:
+		return "<Unknown Type : Internal Error>";
+	}
+}
+
+void exchg_test_event_print(struct exchg_test_event *ev) {
+	const char *exchange;
+
+	switch (ev->id) {
+	case EXCHG_BITSTAMP:
+		exchange = "Bitstamp";
+		break;
+	case EXCHG_GEMINI:
+		exchange = "Gemini";
+		break;
+	case EXCHG_KRAKEN:
+		exchange = "Kraken";
+		break;
+	case EXCHG_COINBASE:
+		exchange = "Coinbase";
 		break;
 	default:
-		type = "<Unknown Type : Internal Error>";
+		exchange = "<No Exchange>";
 		break;
 	}
 
-	printf("event: %s %s\n", exchg_id_to_name(ev->id), type);
+	printf("event: %s %s\n", exchange, event_str(ev->type));
 }
 
 static void set_matching_ws(struct exchg_net_context *ctx,
@@ -404,6 +412,12 @@ bool on_order_canceled(struct exchg_net_context *ctx, enum exchg_id id,
 	return event.data.order_canceled.succeed;
 }
 
+struct timer {
+	void (*f)(void *);
+	void *p;
+	struct exchg_net_context *ctx;
+};
+
 static bool service(struct exchg_net_context *ctx) {
 	int ret;
 	struct buf buf;
@@ -503,6 +517,16 @@ static bool service(struct exchg_net_context *ctx) {
 			break;
 		}
 		break;
+	case CONN_TYPE_NONE:
+		if (event->type != EXCHG_EVENT_TIMER) {
+			exchg_log("test: internal error: CONN_TYPE_NONE event with"
+				  " type != TIMER: %s\n",
+				  event_str(event->type));
+			break;
+		}
+		struct timer *t = test_event_private(event);
+		t->f(t->p);
+		break;
 	}
 	free_event(ctx, ev);
 	return true;
@@ -510,6 +534,28 @@ static bool service(struct exchg_net_context *ctx) {
 
 void net_service(struct exchg_net_context *ctx) {
 	service(ctx);
+}
+
+void timer_cancel(struct timer *t) {
+	// can I copy the linux container_of() macro? can't put GPL stuff in this
+	// MIT licenced code but it's so small... better safe than sorry
+	struct test_event *e = (struct test_event *)((void *)t -
+						     (void *)&((struct test_event *)NULL)->private);
+	free_event(t->ctx, e);
+}
+
+struct timer *timer_new(struct exchg_net_context *ctx, void (*f)(void *), void *p, int seconds) {
+	struct test_event *e = xzalloc(sizeof(*e) + sizeof(struct timer));
+
+	e->conn_type = CONN_TYPE_NONE;
+	e->event.id = -1;
+	e->event.type = EXCHG_EVENT_TIMER;
+	struct timer *t = (struct timer *)e->private;
+	t->f = f;
+	t->p = p;
+	t->ctx = ctx;
+	TAILQ_INSERT_HEAD(&ctx->events, e, list);
+	return t;
 }
 
 void net_run(struct exchg_net_context *ctx) {
