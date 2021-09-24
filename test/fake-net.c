@@ -7,7 +7,6 @@
 #include <sys/queue.h>
 
 #include "auth.h"
-#include "client.h"
 #include "net-backend.h"
 
 #include "util.h"
@@ -174,10 +173,6 @@ static void set_matching_ws(struct exchg_net_context *ctx,
 	}
 }
 
-struct exchg_net_context *exchg_test_net_ctx(struct exchg_context *ctx) {
-	return ctx->net_context;
-}
-
 void exchg_test_add_events(struct exchg_net_context *ctx,
 			   int n, struct exchg_test_event *events) {
 	for (int i = 0; i < n; i++) {
@@ -335,11 +330,6 @@ struct exchg_net_context *net_new(struct net_callbacks *c) {
 	LIST_INIT(&ctx->http_list);
 	ctx->callbacks = c;
 	return ctx;
-}
-
-struct exchg_context *exchg_test_new(struct exchg_callbacks *c,
-				     const struct exchg_options *opts, void *user) {
-	return exchg_new(c, opts, user);
 }
 
 static void free_event(struct exchg_net_context *ctx, struct test_event *ev) {

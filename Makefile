@@ -33,7 +33,8 @@ hdrs = $(public-hdrs) auth.h client.h json-helpers.h
 hdrs += compiler.h net-backend.h order-book.h time-helpers.h
 hdrs += exchanges/bitstamp.h exchanges/coinbase.h exchanges/kraken.h exchanges/gemini.h
 
-test-obj = test/fake-net.o test/fake-gemini.o test/fake-kraken.o test/fake-bitstamp.o test/fake-coinbase.o
+test-obj = test/fake-net.o test/context.o
+test-obj += test/fake-gemini.o test/fake-kraken.o test/fake-bitstamp.o test/fake-coinbase.o
 test-obj += test/json/kraken/pair-info.o
 test-obj += test/json/bitstamp/pairs-info.o
 test-obj += test/json/coinbase/products.o
@@ -114,6 +115,7 @@ order-book.o: include/exchg/decimal.h include/exchg/exchanges.h order-book.h
 lws.o: net-backend.h
 
 test/fake-net.o: $(hdrs) $(test-hdrs)
+test/context.o: $(hdrs) $(test-hdrs)
 
 test/fake-bitstamp.o: $(hdrs) $(test-hdrs) test/fake-bitstamp.c
 	$(CC) $(CFLAGS) $(JSMN_DEFINE) -c -o $@ test/fake-bitstamp.c

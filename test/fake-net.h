@@ -9,7 +9,6 @@
 #include <sys/queue.h>
 
 #include "auth.h"
-#include "client.h"
 #include "exchg/exchg.h"
 #include "exchg/test.h"
 
@@ -117,6 +116,11 @@ void auth_check_set_hmac(struct auth_check *a, const unsigned char *c, size_t le
 void no_http_write(struct http_req *req);
 void no_http_add_header(struct http_req *req, const unsigned char *name,
 			const unsigned char *val, size_t len);
+
+enum conn_type {
+	CONN_TYPE_HTTP,
+	CONN_TYPE_WS,
+};
 
 struct test_event {
 	enum conn_type conn_type;
