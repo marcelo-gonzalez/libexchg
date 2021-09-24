@@ -737,6 +737,7 @@ struct websocket *ws_dial(struct exchg_net_context *ctx, const char *host,
 	TAILQ_INSERT_HEAD(&ctx->events, event, list);
 	ws->host = xstrdup(host);
 	ws->path = xstrdup(path);
+	ws->id = exchange;
 	return ws;
 }
 

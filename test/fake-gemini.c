@@ -161,7 +161,6 @@ static int events_matches(struct websocket *w, enum exchg_pair p) {
 
 struct websocket *order_events_dial(struct exchg_net_context *ctx, void *private) {
 	struct websocket *s = fake_websocket_alloc(ctx, private);
-	s->id = EXCHG_GEMINI;
 	s->read = events_read;
 	s->write = no_ws_write;
 	s->matches = events_matches;
@@ -194,8 +193,6 @@ struct websocket *gemini_ws_dial(struct exchg_net_context *ctx,
 	}
 
 	struct websocket *s = fake_websocket_alloc(ctx, private);
-	// TODO: can set that in core code
-	s->id = EXCHG_GEMINI;
 	s->read = gemini_ws_read;
 	s->write = no_ws_write;
 	s->matches = gemini_ws_matches;
