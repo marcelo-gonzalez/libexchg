@@ -91,7 +91,7 @@ size_t http_body_len(struct http_req *req) {
 	return req->body.len;
 }
 
-static int ws_matches(struct websocket *ws, struct exchg_test_event *ev) {
+static int ws_matches(struct websocket_conn *ws, struct exchg_test_event *ev) {
 	return ev->type == EXCHG_EVENT_BOOK_UPDATE &&
 		ws->established && ws->id == ev->id &&
 		ws->matches(ws, ev->data.book.pair);
@@ -165,7 +165,7 @@ void exchg_test_event_print(struct exchg_test_event *ev) {
 
 static void set_matching_ws(struct exchg_net_context *ctx,
 			    struct test_event *ev) {
-	struct websocket *ws;
+	struct websocket_conn *ws;
 	LIST_FOREACH(ws, &ctx->ws_list, list) {
 		if (ws_matches(ws, &ev->event)) {
 			ev->conn.ws = ws;
@@ -277,7 +277,7 @@ void *test_event_private(struct exchg_test_event *event) {
 }
 
 struct test_event *event_alloc(
-	struct websocket *w, enum exchg_test_event_type type, size_t private_size) {
+	struct websocket_conn *w, enum exchg_test_event_type type, size_t private_size) {
 	struct test_event *event = xzalloc(sizeof(*event) + private_size);
 	struct exchg_test_event *e = &event->event;
 
@@ -289,7 +289,7 @@ struct test_event *event_alloc(
 }
 
 struct exchg_test_event *exchg_fake_queue_ws_event(
-	struct websocket *w, enum exchg_test_event_type type, size_t private_size) {
+	struct websocket_conn *w, enum exchg_test_event_type type, size_t private_size) {
 	struct test_event *event = event_alloc(w, type, private_size);
 	struct test_event *last = NULL, *tmp;
 
@@ -306,7 +306,7 @@ struct exchg_test_event *exchg_fake_queue_ws_event(
 }
 
 struct exchg_test_event *exchg_fake_queue_ws_event_tail(
-	struct websocket *w, enum exchg_test_event_type type, size_t private_size) {
+	struct websocket_conn *w, enum exchg_test_event_type type, size_t private_size) {
 	struct test_event *event = event_alloc(w, type, private_size);
 
 	TAILQ_INSERT_TAIL(&w->ctx->events, event, list);
@@ -314,7 +314,7 @@ struct exchg_test_event *exchg_fake_queue_ws_event_tail(
 }
 
 struct exchg_test_event *exchg_fake_queue_ws_event_before(
-	struct websocket *w, enum exchg_test_event_type type, size_t private_size,
+	struct websocket_conn *w, enum exchg_test_event_type type, size_t private_size,
 	struct exchg_test_event *before) {
 	struct test_event *event = event_alloc(w, type, private_size);
 
@@ -323,7 +323,7 @@ struct exchg_test_event *exchg_fake_queue_ws_event_before(
 }
 
 struct exchg_test_event *exchg_fake_queue_ws_event_after(
-	struct websocket *w, enum exchg_test_event_type type, size_t private_size,
+	struct websocket_conn *w, enum exchg_test_event_type type, size_t private_size,
 	struct exchg_test_event *after) {
 	struct test_event *event = event_alloc(w, type, private_size);
 
@@ -423,10 +423,10 @@ static bool service(struct exchg_net_context *ctx) {
 	struct buf buf;
 	struct test_event *ev, *e, *tmp;
 	struct exchg_test_event *event = NULL;
-	struct websocket_callbacks *ws = &ctx->callbacks->ws;
+	struct websocket_conn_callbacks *ws = &ctx->callbacks->ws;
 	struct http_callbacks *http = &ctx->callbacks->http;
 	struct http_req *http_req;
-	struct websocket *wsock;
+	struct websocket_conn *wsock;
 
 	ev = TAILQ_FIRST(&ctx->events);
 	if (ev)
@@ -578,7 +578,7 @@ void net_stop(struct exchg_net_context *ctx) {
 void net_destroy(struct exchg_net_context *ctx) {
 	struct test_event *e, *etmp;
 	struct http_req *h, *htmp;
-	struct websocket *w, *wtmp;
+	struct websocket_conn *w, *wtmp;
 	struct test_order *o, *otmp;
 
 	TAILQ_FOREACH_SAFE(e, &ctx->events, list, etmp) {
@@ -599,7 +599,7 @@ void net_destroy(struct exchg_net_context *ctx) {
 	free(ctx);
 }
 
-void no_ws_write(struct websocket *w, char *buf, size_t len) {}
+void no_ws_write(struct websocket_conn *w, char *buf, size_t len) {}
 
 void no_http_add_header(struct http_req *req, const unsigned char *name,
 			const unsigned char *val, size_t len) {}
@@ -699,7 +699,7 @@ void http_close(struct http_req *http) {
 	TAILQ_INSERT_HEAD(&http->ctx->events, event, list);
 }
 
-int ws_vprintf(struct websocket *ws, const char *fmt, va_list ap) {
+int ws_conn_vprintf(struct websocket_conn *ws, const char *fmt, va_list ap) {
 	va_list a;
 	va_copy(a, ap);
 	char buf[1024];
@@ -723,13 +723,13 @@ int ws_vprintf(struct websocket *ws, const char *fmt, va_list ap) {
 	}
 }
 
-int ws_add_header(struct websocket *req, const unsigned char *name,
-		  const unsigned char *val, size_t len) {
+int ws_conn_add_header(struct websocket_conn *req, const unsigned char *name,
+		       const unsigned char *val, size_t len) {
 	// TODO
 	return 0;
 }
 
-void ws_close(struct websocket *ws) {
+void ws_conn_close(struct websocket_conn *ws) {
 	struct test_event *event;
 	struct exchg_test_event *ev;
 
@@ -748,22 +748,22 @@ void ws_close(struct websocket *ws) {
 	TAILQ_INSERT_HEAD(&ws->ctx->events, event, list);
 }
 
-struct websocket *fake_websocket_alloc(struct exchg_net_context *ctx, void *user) {
-	struct websocket *s = xzalloc(sizeof(*s));
+struct websocket_conn *fake_websocket_alloc(struct exchg_net_context *ctx, void *user) {
+	struct websocket_conn *s = xzalloc(sizeof(*s));
 	s->user = user;
 	s->ctx = ctx;
 	LIST_INSERT_HEAD(&ctx->ws_list, s, list);
 	return s;
 }
 
-void ws_free(struct websocket *ws) {
+void ws_conn_free(struct websocket_conn *ws) {
 	free(ws->host);
 	free(ws->path);
 	free(ws);
 }
 
-struct websocket *fake_websocket_get(struct exchg_net_context *ctx, const char *host, const char *path) {
-	struct websocket *ws;
+struct websocket_conn *fake_websocket_get(struct exchg_net_context *ctx, const char *host, const char *path) {
+	struct websocket_conn *ws;
 	LIST_FOREACH(ws, &ctx->ws_list, list) {
 		if (!strcmp(ws->host, host) && (!path || !strcmp(ws->path, path)))
 			return ws;
@@ -771,9 +771,9 @@ struct websocket *fake_websocket_get(struct exchg_net_context *ctx, const char *
 	return NULL;
 }
 
-struct websocket *ws_dial(struct exchg_net_context *ctx, const char *host,
-			  const char *path, void *private) {
-	struct websocket *ws;
+struct websocket_conn *ws_dial(struct exchg_net_context *ctx, const char *host,
+			       const char *path, void *private) {
+	struct websocket_conn *ws;
 	enum exchg_id exchange;
 
 	if (!strcmp(host, "api.gemini.com")) {

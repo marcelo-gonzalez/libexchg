@@ -7,7 +7,7 @@
 
 #include "net-backend.h"
 
-struct websocket {
+struct websocket_conn {
 	struct lws *wsi;
 	char *host;
 	char *path;
@@ -63,7 +63,7 @@ static int buf_vsprintf(struct buf *buf, const char *fmt, va_list ap) {
 	return len;
 }
 
-int ws_vprintf(struct websocket *ws, const char *fmt, va_list ap) {
+int ws_conn_vprintf(struct websocket_conn *ws, const char *fmt, va_list ap) {
 	va_list a;
 	char buf[1024 + LWS_PRE];
 	va_copy(a, ap);
@@ -100,8 +100,8 @@ int ws_vprintf(struct websocket *ws, const char *fmt, va_list ap) {
 	}
 }
 
-int ws_add_header(struct websocket *ws, const unsigned char *name,
-		  const unsigned char *val, size_t len) {
+int ws_conn_add_header(struct websocket_conn *ws, const unsigned char *name,
+		       const unsigned char *val, size_t len) {
 	if (lws_add_http_header_by_name(ws->wsi, name, val, len,
 					ws->headers_start, ws->headers_end)) {
 		fprintf(stderr, "lws_add_http_header_by_name() error\n");
@@ -110,7 +110,7 @@ int ws_add_header(struct websocket *ws, const unsigned char *name,
 	return 0;
 }
 
-void ws_close(struct websocket *ws) {
+void ws_conn_close(struct websocket_conn *ws) {
 	lws_set_timeout(ws->wsi, PENDING_TIMEOUT_USER_OK,
 			LWS_TO_KILL_ASYNC);
 }
@@ -118,8 +118,8 @@ void ws_close(struct websocket *ws) {
 static int websocket_callback(struct lws *wsi, enum lws_callback_reasons reason,
 			      void *user, void *in, size_t len) {
 	const struct net_callbacks *c = lws_context_user(lws_get_context(wsi));
-	const struct websocket_callbacks *ops = &c->ws;
-	struct websocket *ws = user;
+	const struct websocket_conn_callbacks *ops = &c->ws;
+	struct websocket_conn *ws = user;
 
 	switch (reason) {
 	case LWS_CALLBACK_CLIENT_CONNECTION_ERROR:
@@ -323,9 +323,9 @@ struct http_req *http_dial(struct exchg_net_context *ctx,
 	return req;
 }
 
-struct websocket *ws_dial(struct exchg_net_context *ctx, const char *host,
-			  const char *path, void *private) {
-	struct websocket *ws = malloc(sizeof(*ws));
+struct websocket_conn *ws_dial(struct exchg_net_context *ctx, const char *host,
+			       const char *path, void *private) {
+	struct websocket_conn *ws = malloc(sizeof(*ws));
 	if (!ws) {
 		fprintf(stderr, "OOM: %s\n", __func__);
 		return NULL;

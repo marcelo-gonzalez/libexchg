@@ -19,19 +19,19 @@ struct http_callbacks {
 	void (*on_closed)(void *p);
 };
 
-struct websocket;
+struct websocket_conn;
 
-struct websocket_callbacks {
+struct websocket_conn_callbacks {
 	void (*on_error)(void *p);
 	void (*on_established)(void *p);
-	int (*add_headers)(void *p, struct websocket *);
+	int (*add_headers)(void *p, struct websocket_conn *);
 	int (*recv)(void *p, char *in, size_t len);
 	void (*on_closed)(void *p);
 };
 
 struct net_callbacks {
 	struct http_callbacks http;
-	struct websocket_callbacks ws;
+	struct websocket_conn_callbacks ws;
 };
 
 extern struct exchg_net_context *net_new(struct net_callbacks *c);
@@ -54,15 +54,15 @@ int http_status(struct http_req *);
 
 void http_close(struct http_req *req);
 
-extern int ws_vprintf(struct websocket *, const char *fmt, va_list ap);
+extern int ws_conn_vprintf(struct websocket_conn *, const char *fmt, va_list ap);
 
-int ws_add_header(struct websocket *req, const unsigned char *name,
-		  const unsigned char *val, size_t len);
+int ws_conn_add_header(struct websocket_conn *req, const unsigned char *name,
+		       const unsigned char *val, size_t len);
 
-void ws_close(struct websocket *ws);
+void ws_conn_close(struct websocket_conn *ws);
 
-struct websocket *ws_dial(struct exchg_net_context *, const char *host,
-			  const char *path, void *private);
+struct websocket_conn *ws_dial(struct exchg_net_context *, const char *host,
+			       const char *path, void *private);
 
 struct timer;
 

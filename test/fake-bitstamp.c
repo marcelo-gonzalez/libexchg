@@ -91,7 +91,7 @@ static void proto_read(struct buf *buf, struct bitstamp_proto *bp) {
 	}
 }
 
-static void bitstamp_ws_read(struct websocket *ws, struct buf *buf,
+static void bitstamp_ws_read(struct websocket_conn *ws, struct buf *buf,
 			     struct exchg_test_event *msg) {
 	struct bitstamp_websocket *b = ws->priv;
 
@@ -106,7 +106,7 @@ static void bitstamp_ws_read(struct websocket *ws, struct buf *buf,
 		     (!c->full_subbed || c->full_unsubbed));
 }
 
-static int bitstamp_ws_matches(struct websocket *w, enum exchg_pair p) {
+static int bitstamp_ws_matches(struct websocket_conn *w, enum exchg_pair p) {
 	struct bitstamp_websocket *b = w->priv;
 	return b->channels[p].diff_subbed || b->channels[p].full_subbed;
 }
@@ -142,7 +142,7 @@ static int get_channel(char *c, enum exchg_pair *p, bool *is_full) {
 	return 0;
 }
 
-static void bitstamp_ws_write(struct websocket *w, char *buf, size_t len) {
+static void bitstamp_ws_write(struct websocket_conn *w, char *buf, size_t len) {
 	struct bitstamp_websocket *b = w->priv;
 	enum exchg_pair p;
 	bool is_full;
@@ -187,14 +187,14 @@ static void bitstamp_ws_write(struct websocket *w, char *buf, size_t len) {
 	}
 }
 
-static void bitstamp_ws_destroy(struct websocket *w) {
+static void bitstamp_ws_destroy(struct websocket_conn *w) {
 	free(w->priv);
-	ws_free(w);
+	ws_conn_free(w);
 }
 
-struct websocket *bitstamp_ws_dial(struct exchg_net_context *ctx,
-				   const char *path, void *private) {
-	struct websocket *s = fake_websocket_alloc(ctx, private);
+struct websocket_conn *bitstamp_ws_dial(struct exchg_net_context *ctx,
+					const char *path, void *private) {
+	struct websocket_conn *s = fake_websocket_alloc(ctx, private);
 	s->read = bitstamp_ws_read;
 	s->write = bitstamp_ws_write;
 	s->matches = bitstamp_ws_matches;
@@ -208,7 +208,7 @@ extern char _binary_test_json_bitstamp_pairs_info_json_start[];
 extern char _binary_test_json_bitstamp_pairs_info_json_end[];
 
 static void bitstamp_pair_info_read(struct http_req *req, struct exchg_test_event *ev,
-				      struct buf *buf) {
+				    struct buf *buf) {
 	size_t size = _binary_test_json_bitstamp_pairs_info_json_end -
 		_binary_test_json_bitstamp_pairs_info_json_start;
 	buf_xcpy(buf, _binary_test_json_bitstamp_pairs_info_json_start, size);
@@ -232,7 +232,7 @@ static struct http_req *asset_pairs_dial(struct exchg_net_context *ctx,
 }
 
 static void bitstamp_balance_read(struct http_req *req, struct exchg_test_event *ev,
-				    struct buf *buf) {
+				  struct buf *buf) {
 	buf_xsprintf(buf, "{ ");
 	for (enum exchg_currency c = 0; c < EXCHG_NUM_CCYS; c++) {
 		char s[30];

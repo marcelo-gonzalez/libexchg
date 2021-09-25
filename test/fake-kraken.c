@@ -184,7 +184,7 @@ static void proto_read(struct buf *buf, struct kraken_proto *p) {
 	}
 }
 
-static void kraken_ws_read(struct websocket *ws, struct buf *buf,
+static void kraken_ws_read(struct websocket_conn *ws, struct buf *buf,
 			   struct exchg_test_event *msg) {
 	struct exchg_test_l2_updates *up = &msg->data.book;
 	struct kraken_websocket *k = ws->priv;
@@ -208,12 +208,12 @@ static void kraken_ws_read(struct websocket *ws, struct buf *buf,
 	buf_xsprintf(buf, "}, \"book-100\", \"%s\"]", wsname(up->pair));
 }
 
-static int kraken_ws_matches(struct websocket *w, enum exchg_pair p) {
+static int kraken_ws_matches(struct websocket_conn *w, enum exchg_pair p) {
 	struct kraken_websocket *k = w->priv;
 	return k->channels[p].subbed;
 }
 
-static void kraken_ws_write(struct websocket *w, char *buf, size_t len) {
+static void kraken_ws_write(struct websocket_conn *w, char *buf, size_t len) {
 	struct kraken_websocket *k = w->priv;
 	const char *problem;
 
@@ -289,15 +289,15 @@ bad:
 	fputc('\n', stderr);
 }
 
-static void kraken_ws_destroy(struct websocket *w) {
+static void kraken_ws_destroy(struct websocket_conn *w) {
 	struct kraken_websocket *k = w->priv;
 	free(k);
-	ws_free(w);
+	ws_conn_free(w);
 }
 
-struct websocket *kraken_ws_dial(struct exchg_net_context *ctx,
-				 const char *path, void *private) {
-	struct websocket *s = fake_websocket_alloc(ctx, private);
+struct websocket_conn *kraken_ws_dial(struct exchg_net_context *ctx,
+				      const char *path, void *private) {
+	struct websocket_conn *s = fake_websocket_alloc(ctx, private);
 	s->read = kraken_ws_read;
 	s->write = kraken_ws_write;
 	s->matches = kraken_ws_matches;
@@ -326,7 +326,7 @@ struct order_cancel {
 	char err[100];
 };
 
-static void private_ws_read(struct websocket *ws, struct buf *buf,
+static void private_ws_read(struct websocket_conn *ws, struct buf *buf,
 			    struct exchg_test_event *msg) {
 	if (msg->type == EXCHG_EVENT_WS_PROTOCOL) {
 		proto_read(buf, (struct kraken_proto *)test_event_private(msg));
@@ -398,7 +398,7 @@ static void private_ws_read(struct websocket *ws, struct buf *buf,
 	}
 }
 
-static int private_ws_matches(struct websocket *w, enum exchg_pair p) {
+static int private_ws_matches(struct websocket_conn *w, enum exchg_pair p) {
 	return 0;
 }
 
@@ -414,7 +414,7 @@ enum private_ws_channel {
 	CHAN_UNKNOWN,
 };
 
-static void queue_ws_order_ack(struct websocket *w, struct exchg_order_info *ack,
+static void queue_ws_order_ack(struct websocket_conn *w, struct exchg_order_info *ack,
 			       int64_t reqid) {
 	struct exchg_test_event *ev = exchg_fake_queue_ws_event_tail(
 		w, EXCHG_EVENT_ORDER_ACK, sizeof(struct ack_msg));
@@ -427,7 +427,7 @@ static void queue_ws_order_ack(struct websocket *w, struct exchg_order_info *ack
 static void cancel_order(struct exchg_net_context *ctx, int64_t userref,
 			 struct order_cancel *cancel) {
 	struct test_order *o;
-	struct websocket *ws = fake_websocket_get(ctx, "ws-auth.kraken.com", NULL);
+	struct websocket_conn *ws = fake_websocket_get(ctx, "ws-auth.kraken.com", NULL);
 
 	LIST_FOREACH(o, &ctx->servers[EXCHG_KRAKEN].order_list, list) {
 		int64_t uref = *(int64_t *)test_order_private(o);
@@ -449,7 +449,7 @@ static void cancel_order(struct exchg_net_context *ctx, int64_t userref,
 	snprintf(cancel->err, sizeof(cancel->err), "order id %"PRId64" not recognized", userref);
 }
 
-static void private_ws_write(struct websocket *w, char *buf, size_t len) {
+static void private_ws_write(struct websocket_conn *w, char *buf, size_t len) {
 	struct private_ws *pw = w->priv;
 	const char *problem;
 
@@ -638,14 +638,14 @@ bad:
 	fputc('\n', stderr);
 }
 
-static void private_ws_destroy(struct websocket *w) {
+static void private_ws_destroy(struct websocket_conn *w) {
 	free(w->priv);
-	ws_free(w);
+	ws_conn_free(w);
 }
 
-struct websocket *kraken_ws_auth_dial(struct exchg_net_context *ctx,
-				      const char *path, void *private) {
-	struct websocket *s = fake_websocket_alloc(ctx, private);
+struct websocket_conn *kraken_ws_auth_dial(struct exchg_net_context *ctx,
+					   const char *path, void *private) {
+	struct websocket_conn *s = fake_websocket_alloc(ctx, private);
 	s->read = private_ws_read;
 	s->write = private_ws_write;
 	s->matches = private_ws_matches;
@@ -767,7 +767,7 @@ static struct http_req *token_dial(struct exchg_net_context *ctx,
 }
 
 static void add_order_read(struct http_req *req, struct exchg_test_event *ev,
-		       struct buf *buf) {
+			   struct buf *buf) {
 	buf_xsprintf(buf, "{\"error\":[%s],\"result\":{\""
 		     "descr\":\"fake order description\", "
 		     "\"txid\": {\"OUF4EM-FRGI2-MQMWZD\"}}}",
@@ -922,7 +922,7 @@ static void add_order_write(struct http_req *req) {
 
 	struct test_order *o = on_order_placed(req->ctx, EXCHG_KRAKEN, ack, sizeof(int64_t));
 	*(int64_t *)test_order_private(o) = request.userref;
-	struct websocket *ws = fake_websocket_get(req->ctx, "ws-auth.kraken.com", NULL);
+	struct websocket_conn *ws = fake_websocket_get(req->ctx, "ws-auth.kraken.com", NULL);
 	if (!ws)
 		return;
 	struct private_ws *pw = ws->priv;
@@ -938,8 +938,8 @@ bad:
 }
 
 static struct http_req *add_order_dial(struct exchg_net_context *ctx,
-				   const char *path, const char *method,
-				   void *private) {
+				       const char *path, const char *method,
+				       void *private) {
 	struct http_req *req = fake_http_req_alloc(ctx, EXCHG_KRAKEN,
 						   EXCHG_EVENT_ORDER_ACK, private);
 	req->read = add_order_read;
@@ -955,7 +955,7 @@ static void cancel_order_free(struct http_req *req) {
 }
 
 static void cancel_order_read(struct http_req *req, struct exchg_test_event *ev,
-		       struct buf *buf) {
+			      struct buf *buf) {
 	struct order_cancel *cancel = req->priv;
 	if (cancel->err[0]) {
 		buf_xsprintf(buf, "{\"error\":[\"%s\"],\"result\":{}}", cancel->err);

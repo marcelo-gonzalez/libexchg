@@ -42,7 +42,7 @@ struct conn {
 	struct exchg_client *cl;
 	union {
 		struct conn_ws {
-			struct websocket *conn;
+			struct websocket_conn *conn;
 			const struct exchg_websocket_ops *ops;
 		} ws;
 		struct conn_http {
@@ -107,7 +107,7 @@ int conn_printf(struct conn *conn, const char *fmt, ...) {
 	va_list ap;
 	va_start(ap, fmt);
 
-	int ret = ws_vprintf(conn->ws.conn, fmt, ap);
+	int ret = ws_conn_vprintf(conn->ws.conn, fmt, ap);
 	va_end(ap);
 	return ret;
 }
@@ -137,7 +137,7 @@ void conn_close(struct conn *conn) {
 	conn->disconnecting = true;
 	if (conn->type == CONN_TYPE_WS) {
 		if (conn->ws.conn) {
-			ws_close(conn->ws.conn);
+			ws_conn_close(conn->ws.conn);
 		} else if (conn->retry) {
 			timer_cancel(conn->retry);
 			conn_offline(conn);
@@ -252,7 +252,7 @@ static void ws_on_established(void *p) {
 		conn->ws.ops->on_conn_established(conn->cl, conn);
 }
 
-static int ws_add_headers(void *p, struct websocket *ws) {
+static int ws_add_headers(void *p, struct websocket_conn *ws) {
 	struct conn *conn = p;
 	if (conn->ws.ops->add_headers)
 		return conn->ws.ops->add_headers(conn->cl, conn);
@@ -380,7 +380,7 @@ int conn_add_header(struct conn *conn, const unsigned char *name,
 	if (conn->type == CONN_TYPE_HTTP)
 		return http_add_header(conn->http.req, name, val, len);
 	else
-		return ws_add_header(conn->ws.conn, name, val, len);
+		return ws_conn_add_header(conn->ws.conn, name, val, len);
 }
 
 static void http_on_error(void *p, const char *err) {
@@ -566,7 +566,7 @@ struct conn *exchg_websocket_connect(struct exchg_client *cl,
 		exchg_log("%s: OOM\n", __func__);
 		return NULL;
 	}
-	struct websocket *ws = ws_dial(cl->ctx->net_context, host, path, conn);
+	struct websocket_conn *ws = ws_dial(cl->ctx->net_context, host, path, conn);
 	if (!ws) {
 		free(conn);
 		return NULL;
@@ -577,7 +577,7 @@ struct conn *exchg_websocket_connect(struct exchg_client *cl,
 		.conn = ws,
 	};
 	if (conn_init(conn, cl, NULL, host, path, CONN_TYPE_WS, NULL, &w)) {
-		ws_close(ws);
+		ws_conn_close(ws);
 		return NULL;
 	}
 	cl->ctx->online = true;

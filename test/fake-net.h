@@ -50,18 +50,18 @@ struct http_req {
 	LIST_ENTRY(http_req) list;
 };
 
-struct websocket {
+struct websocket_conn {
 	char *host;
 	char *path;
 	bool established;
 	enum exchg_id id;
-	LIST_ENTRY(websocket) list;
+	LIST_ENTRY(websocket_conn) list;
 	void *user;
 	struct exchg_net_context *ctx;
-	void (*read)(struct websocket *, struct buf *buf, struct exchg_test_event *);
-	void (*write)(struct websocket *, char *buf, size_t len);
-	int (*matches)(struct websocket *, enum exchg_pair );
-	void (*destroy)(struct websocket *);
+	void (*read)(struct websocket_conn *, struct buf *buf, struct exchg_test_event *);
+	void (*write)(struct websocket_conn *, char *buf, size_t len);
+	int (*matches)(struct websocket_conn *, enum exchg_pair );
+	void (*destroy)(struct websocket_conn *);
 	void *priv;
 };
 
@@ -70,17 +70,17 @@ int buf_xsprintf(struct buf *buf, const char *fmt, ...)
 void buf_xcpy(struct buf *buf, void *src, size_t len);
 
 struct exchg_test_event *exchg_fake_queue_ws_event(
-	struct websocket *w, enum exchg_test_event_type type, size_t private_size);
+	struct websocket_conn *w, enum exchg_test_event_type type, size_t private_size);
 struct exchg_test_event *exchg_fake_queue_ws_event_tail(
-	struct websocket *w, enum exchg_test_event_type type, size_t private_size);
+	struct websocket_conn *w, enum exchg_test_event_type type, size_t private_size);
 struct exchg_test_event *exchg_fake_queue_ws_event_before(
-	struct websocket *w, enum exchg_test_event_type type, size_t private_size,
+	struct websocket_conn *w, enum exchg_test_event_type type, size_t private_size,
 	struct exchg_test_event *event);
 struct exchg_test_event *exchg_fake_queue_ws_event_after(
-	struct websocket *w, enum exchg_test_event_type type, size_t private_size,
+	struct websocket_conn *w, enum exchg_test_event_type type, size_t private_size,
 	struct exchg_test_event *event);
 
-void no_ws_write(struct websocket *, char *, size_t);
+void no_ws_write(struct websocket_conn *, char *, size_t);
 
 enum auth_status {
 	AUTH_UNSET,
@@ -127,7 +127,7 @@ struct test_event {
 	enum conn_type conn_type;
 	union {
 		struct http_req *http;
-		struct websocket *ws;
+		struct websocket_conn *ws;
 	} conn;
 	struct exchg_test_event event;
 	TAILQ_ENTRY(test_event) list;
@@ -148,7 +148,7 @@ static inline void *test_order_private(struct test_order *o) {
 
 struct exchg_net_context {
 	struct net_callbacks *callbacks;
-	LIST_HEAD(ws_list, websocket) ws_list;
+	LIST_HEAD(ws_list, websocket_conn) ws_list;
 	LIST_HEAD(http_list, http_req) http_list;
 	TAILQ_HEAD(events, test_event) events;
 	bool running;
@@ -162,9 +162,9 @@ struct exchg_net_context {
 	// TODO: char error[100];
 };
 
-struct websocket *fake_websocket_alloc(struct exchg_net_context *ctx, void *user);
-void ws_free(struct websocket *);
-struct websocket *fake_websocket_get(struct exchg_net_context *ctx, const char *host, const char *path);
+struct websocket_conn *fake_websocket_alloc(struct exchg_net_context *ctx, void *user);
+void ws_conn_free(struct websocket_conn *);
+struct websocket_conn *fake_websocket_get(struct exchg_net_context *ctx, const char *host, const char *path);
 
 struct http_req *fake_http_req_alloc(struct exchg_net_context *ctx, enum exchg_id exchange,
 				     enum exchg_test_event_type type, void *private);

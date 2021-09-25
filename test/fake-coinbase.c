@@ -142,7 +142,7 @@ struct order_ids {
 };
 
 static void orders_read(struct http_req *req, struct exchg_test_event *ev,
-			  struct buf *buf) {
+			struct buf *buf) {
 	struct order_ids *ids = req->priv;
 	struct exchg_order_info *ack = &ev->data.order_ack;
 	char cost_str[30], fee_str[30];
@@ -201,7 +201,7 @@ static void ack_init(struct exchg_test_event *e, enum ack_type type, struct test
 
 static void generate_order_acks(struct exchg_net_context *ctx, struct exchg_test_event *read_event,
 				struct test_order *o) {
-	struct websocket *ws = fake_websocket_get(ctx, "ws-feed.pro.coinbase.com", NULL);
+	struct websocket_conn *ws = fake_websocket_get(ctx, "ws-feed.pro.coinbase.com", NULL);
 	if (!ws)
 		return;
 	struct coinbase_websocket *cb = ws->priv;
@@ -446,7 +446,7 @@ static bool cancel_order(struct exchg_net_context *ctx, struct test_order *o) {
 		}
 	}
 	if (send_done) {
-		struct websocket *ws = fake_websocket_get(ctx, "ws-feed.pro.coinbase.com", NULL);
+		struct websocket_conn *ws = fake_websocket_get(ctx, "ws-feed.pro.coinbase.com", NULL);
 		if (!ws)
 			return true;
 		struct coinbase_websocket *cb = ws->priv;
@@ -602,7 +602,7 @@ static void ack_read(struct buf *buf, struct exchg_test_event *msg) {
 		     type_str, ack->order.side == EXCHG_SIDE_BUY ? "buy" : "sell",
 		     coinbase_pair_to_str(ack->order.pair), sequence++);
 	if (coinbase_ack->type == ACK_DONE || coinbase_ack->type == ACK_OPEN ||
-		coinbase_ack->type == ACK_RECV) {
+	    coinbase_ack->type == ACK_RECV) {
 		buf_xsprintf(buf, "\"order_id\": \"%s\", ", coinbase_ack->ids.server_oid);
 	} else {
 		buf_xsprintf(buf, "\"trade_id\": \"%"PRId64"\", "
@@ -643,7 +643,7 @@ static void ack_read(struct buf *buf, struct exchg_test_event *msg) {
 
 }
 
-static void ws_read(struct websocket *ws, struct buf *buf,
+static void ws_read(struct websocket_conn *ws, struct buf *buf,
 		    struct exchg_test_event *msg) {
 	if (msg->type == EXCHG_EVENT_WS_PROTOCOL) {
 		proto_read(buf, (struct coinbase_proto *)test_event_private(msg));
@@ -708,7 +708,7 @@ static void ws_read(struct websocket *ws, struct buf *buf,
 	}
 }
 
-static void ws_write(struct websocket *w, char *json, size_t len) {
+static void ws_write(struct websocket_conn *w, char *json, size_t len) {
 	struct coinbase_websocket *c = w->priv;
 	const char *problem = "";
 
@@ -868,19 +868,19 @@ bad:
 	fputc('\n', stderr);
 }
 
-static int ws_matches(struct websocket *w, enum exchg_pair p) {
+static int ws_matches(struct websocket_conn *w, enum exchg_pair p) {
 	struct coinbase_websocket *c = w->priv;
 	return c->channels[p].l2_subbed;
 }
 
-static void ws_destroy(struct websocket *w) {
+static void ws_destroy(struct websocket_conn *w) {
 	free(w->priv);
-	ws_free(w);
+	ws_conn_free(w);
 }
 
-struct websocket *coinbase_ws_dial(struct exchg_net_context *ctx,
-				   const char *path, void *private) {
-	struct websocket *s = fake_websocket_alloc(ctx, private);
+struct websocket_conn *coinbase_ws_dial(struct exchg_net_context *ctx,
+					const char *path, void *private) {
+	struct websocket_conn *s = fake_websocket_alloc(ctx, private);
 	s->read = ws_read;
 	s->write = ws_write;
 	s->matches = ws_matches;

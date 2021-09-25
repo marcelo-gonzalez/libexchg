@@ -66,7 +66,7 @@ static int get_counter(void) {
 	return ++x;
 }
 
-static void gemini_ws_read(struct websocket *ws, struct buf *buf,
+static void gemini_ws_read(struct websocket_conn *ws, struct buf *buf,
 			   struct exchg_test_event *msg) {
 	struct gemini_websocket *g = ws->priv;
 	buf_xsprintf(buf, "{\"type\": \"update\", \"event_id\": %d, "
@@ -77,12 +77,12 @@ static void gemini_ws_read(struct websocket *ws, struct buf *buf,
 	buf_xsprintf(buf, "]}");
 }
 
-static void gemini_ws_destroy(struct websocket *w) {
+static void gemini_ws_destroy(struct websocket_conn *w) {
 	free(w->priv);
-	ws_free(w);
+	ws_conn_free(w);
 }
 
-static int gemini_ws_matches(struct websocket *w, enum exchg_pair p) {
+static int gemini_ws_matches(struct websocket_conn *w, enum exchg_pair p) {
 	struct gemini_websocket *g = w->priv;
 	return g->pair == p;
 }
@@ -101,7 +101,7 @@ struct gemini_ack {
 	int64_t client_oid;
 };
 
-static void events_read(struct websocket *ws, struct buf *buf,
+static void events_read(struct websocket_conn *ws, struct buf *buf,
 			struct exchg_test_event *msg) {
 	if (msg->type == EXCHG_EVENT_WS_PROTOCOL) {
 		// there are more fields but we just parse this for now so whatever
@@ -155,22 +155,22 @@ static void events_read(struct websocket *ws, struct buf *buf,
 		     type, size, g->client_oid, ack->id, is_live, reason);
 }
 
-static int events_matches(struct websocket *w, enum exchg_pair p) {
+static int events_matches(struct websocket_conn *w, enum exchg_pair p) {
 	return 0;
 }
 
-struct websocket *order_events_dial(struct exchg_net_context *ctx, void *private) {
-	struct websocket *s = fake_websocket_alloc(ctx, private);
+struct websocket_conn *order_events_dial(struct exchg_net_context *ctx, void *private) {
+	struct websocket_conn *s = fake_websocket_alloc(ctx, private);
 	s->read = events_read;
 	s->write = no_ws_write;
 	s->matches = events_matches;
-	s->destroy = ws_free;
+	s->destroy = ws_conn_free;
 	exchg_fake_queue_ws_event(s, EXCHG_EVENT_WS_PROTOCOL, 0);
 	return s;
 }
 
-struct websocket *gemini_ws_dial(struct exchg_net_context *ctx,
-				 const char *path, void *private) {
+struct websocket_conn *gemini_ws_dial(struct exchg_net_context *ctx,
+				      const char *path, void *private) {
 	if (!strcmp(path, "/v1/order/events"))
 		return order_events_dial(ctx, private);
 
@@ -192,7 +192,7 @@ struct websocket *gemini_ws_dial(struct exchg_net_context *ctx,
 		return NULL;
 	}
 
-	struct websocket *s = fake_websocket_alloc(ctx, private);
+	struct websocket_conn *s = fake_websocket_alloc(ctx, private);
 	s->read = gemini_ws_read;
 	s->write = no_ws_write;
 	s->matches = gemini_ws_matches;
@@ -324,7 +324,7 @@ static void place_order_read(struct http_req *req, struct exchg_test_event *ev,
 			     is_live, is_canceled, filled_size, p->client_oid, price, original_size, remaining_size);
 	} else if (p->auth->hmac_status == AUTH_BAD) {
 		buf_xsprintf(buf, "{ \"result\": \"error\", \"reason\": \"InvalidSignature\","
-				      "\"message\": \"InvalidSignature\" }");
+			     "\"message\": \"InvalidSignature\" }");
 	} else {
 		buf_xsprintf(buf, "{}");
 	}
@@ -469,7 +469,7 @@ static void place_order_add_header(struct http_req *req, const unsigned char *na
 	struct test_order *order = on_order_placed(req->ctx, EXCHG_GEMINI, ack, sizeof(int64_t));
 	*(int64_t *)test_order_private(order) = o->client_oid;
 
-	struct websocket *ws = fake_websocket_get(req->ctx, "api.gemini.com", "/v1/order/events");
+	struct websocket_conn *ws = fake_websocket_get(req->ctx, "api.gemini.com", "/v1/order/events");
 	if (!ws)
 		return;
 
@@ -614,7 +614,7 @@ static void cancel_order_add_header(struct http_req *req, const unsigned char *n
 				if (o->info.status == EXCHG_ORDER_OPEN) {
 					o->info.status = EXCHG_ORDER_CANCELED;
 				}
-				struct websocket *ws = fake_websocket_get(req->ctx, "api.gemini.com", "/v1/order/events");
+				struct websocket_conn *ws = fake_websocket_get(req->ctx, "api.gemini.com", "/v1/order/events");
 				if (!ws)
 					return;
 				struct exchg_test_event *cancel = exchg_fake_queue_ws_event(

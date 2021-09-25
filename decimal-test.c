@@ -247,7 +247,7 @@ void test_decimal_from_str_n(void) {
 	for (int i = 0; i < ARRAY_SIZE(from_str_tests); i++) {
 		decimal_t d;
 		int err = decimal_from_str_n(&d, from_str_tests[i].input,
-			from_str_tests[i].len);
+					     from_str_tests[i].len);
 		if (!!err != !!from_str_tests[i].want_err) {
 			fprintf(stderr, "%s: test %d, got err %d, want err %d\n",
 				__func__, i, !!err, !!from_str_tests[i].want_err);

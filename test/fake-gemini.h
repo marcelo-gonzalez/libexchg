@@ -10,7 +10,7 @@ struct http_req *gemini_http_dial(struct exchg_net_context *ctx,
 				  const char *path,
 				  const char *method, void *private);
 
-struct websocket *gemini_ws_dial(struct exchg_net_context *ctx,
+struct websocket_conn *gemini_ws_dial(struct exchg_net_context *ctx,
 				 const char *path, void *private);
 
 
