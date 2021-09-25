@@ -6,7 +6,7 @@
 
 #include "net-backend.h"
 
-struct http_req *gemini_http_dial(struct exchg_net_context *ctx,
+struct http_conn *gemini_http_dial(struct exchg_net_context *ctx,
 				  const char *path,
 				  const char *method, void *private);
 

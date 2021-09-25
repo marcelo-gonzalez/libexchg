@@ -207,31 +207,31 @@ struct websocket_conn *bitstamp_ws_dial(struct exchg_net_context *ctx,
 extern char _binary_test_json_bitstamp_pairs_info_json_start[];
 extern char _binary_test_json_bitstamp_pairs_info_json_end[];
 
-static void bitstamp_pair_info_read(struct http_req *req, struct exchg_test_event *ev,
+static void bitstamp_pair_info_read(struct http_conn *req, struct exchg_test_event *ev,
 				    struct buf *buf) {
 	size_t size = _binary_test_json_bitstamp_pairs_info_json_end -
 		_binary_test_json_bitstamp_pairs_info_json_start;
 	buf_xcpy(buf, _binary_test_json_bitstamp_pairs_info_json_start, size);
 }
 
-static struct http_req *asset_pairs_dial(struct exchg_net_context *ctx,
-					 const char *path, const char *method,
-					 void *private) {
+static struct http_conn *asset_pairs_dial(struct exchg_net_context *ctx,
+					  const char *path, const char *method,
+					  void *private) {
 	if (strcmp(method, "GET")) {
 		fprintf(stderr, "Bitstamp bad method for %s: %s\n", path, method);
 		return NULL;
 	}
 
-	struct http_req *req = fake_http_req_alloc(ctx, EXCHG_BITSTAMP,
-						   EXCHG_EVENT_PAIRS_DATA, private);
+	struct http_conn *req = fake_http_conn_alloc(ctx, EXCHG_BITSTAMP,
+						     EXCHG_EVENT_PAIRS_DATA, private);
 	req->read = bitstamp_pair_info_read;
 	req->write = no_http_write;
 	req->add_header = no_http_add_header;
-	req->destroy = fake_http_req_free;
+	req->destroy = fake_http_conn_free;
 	return req;
 }
 
-static void bitstamp_balance_read(struct http_req *req, struct exchg_test_event *ev,
+static void bitstamp_balance_read(struct http_conn *req, struct exchg_test_event *ev,
 				  struct buf *buf) {
 	buf_xsprintf(buf, "{ ");
 	for (enum exchg_currency c = 0; c < EXCHG_NUM_CCYS; c++) {
@@ -244,27 +244,27 @@ static void bitstamp_balance_read(struct http_req *req, struct exchg_test_event 
 	buf_xsprintf(buf, " }");
 }
 
-static struct http_req *balance_dial(struct exchg_net_context *ctx,
-				     const char *path, const char *method,
-				     void *private) {
+static struct http_conn *balance_dial(struct exchg_net_context *ctx,
+				      const char *path, const char *method,
+				      void *private) {
 	if (strcmp(method, "POST")) {
 		fprintf(stderr, "Bitstamp bad method for %s: %s\n", path, method);
 		return NULL;
 	}
 
-	struct http_req *req = fake_http_req_alloc(ctx, EXCHG_BITSTAMP,
-						   EXCHG_EVENT_BALANCES, private);
+	struct http_conn *req = fake_http_conn_alloc(ctx, EXCHG_BITSTAMP,
+						     EXCHG_EVENT_BALANCES, private);
 	req->read = bitstamp_balance_read;
 	req->write = no_http_write;
 	// TODO:
 	req->add_header = no_http_add_header;
-	req->destroy = fake_http_req_free;
+	req->destroy = fake_http_conn_free;
 	return req;
 }
 
-struct http_req *bitstamp_http_dial(struct exchg_net_context *ctx,
-				    const char *path, const char *method,
-				    void *private) {
+struct http_conn *bitstamp_http_dial(struct exchg_net_context *ctx,
+				     const char *path, const char *method,
+				     void *private) {
 	if (!strcmp(path, "/api/v2/trading-pairs-info/")) {
 		return asset_pairs_dial(ctx, path, method, private);
 	}

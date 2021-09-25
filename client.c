@@ -46,7 +46,7 @@ struct conn {
 			const struct exchg_websocket_ops *ops;
 		} ws;
 		struct conn_http {
-			struct http_req *req;
+			struct http_conn *req;
 			const struct exchg_http_ops *ops;
 			bool print_data;
 		} http;
@@ -144,7 +144,7 @@ void conn_close(struct conn *conn) {
 		}
 		// else { we're inside the on_l2_disconnect() callback }
 	} else
-		http_close(conn->http.req);
+		http_conn_close(conn->http.req);
 }
 
 #ifndef LIST_FOREACH_SAFE
@@ -378,7 +378,7 @@ static void ws_on_closed(void *p) {
 int conn_add_header(struct conn *conn, const unsigned char *name,
 		    const unsigned char *val, size_t len) {
 	if (conn->type == CONN_TYPE_HTTP)
-		return http_add_header(conn->http.req, name, val, len);
+		return http_conn_add_header(conn->http.req, name, val, len);
 	else
 		return ws_conn_add_header(conn->ws.conn, name, val, len);
 }
@@ -406,7 +406,7 @@ static void http_on_established(void *p, int status) {
 		conn->http.ops->on_established(conn->cl, conn, status);
 }
 
-static int http_add_headers(void *p, struct http_req *req) {
+static int http_add_headers(void *p, struct http_conn *req) {
 	struct conn *conn = p;
 	if (conn->http.ops->add_headers)
 		return conn->http.ops->add_headers(conn->cl, conn);
@@ -418,17 +418,17 @@ int conn_http_body_sprintf(struct conn *conn, const char *fmt, ...) {
 	int len;
 
 	va_start(ap, fmt);
-	len = http_vsprintf(conn->http.req, fmt, ap);
+	len = http_conn_vsprintf(conn->http.req, fmt, ap);
 	va_end(ap);
 	return len;
 }
 
 char *conn_http_body(struct conn *conn) {
-	return http_body(conn->http.req);
+	return http_conn_body(conn->http.req);
 }
 
 size_t conn_http_body_len(struct conn *conn) {
-	return http_body_len(conn->http.req);
+	return http_conn_body_len(conn->http.req);
 }
 
 static int http_recv(void *p, char *in, size_t len) {
@@ -450,7 +450,7 @@ static int http_recv(void *p, char *in, size_t len) {
 		return 0;
 
 	return conn->http.ops->recv(conn->cl, conn,
-				    http_status(conn->http.req),
+				    http_conn_status(conn->http.req),
 				    json, numtoks, conn->tokens);
 }
 
@@ -518,8 +518,8 @@ static struct conn *exchg_http_dial(const char *host, const char *path,
 		exchg_log("%s: OOM\n", __func__);
 		return NULL;
 	}
-	struct http_req *req = http_dial(cl->ctx->net_context, host,
-					 path, method, conn);
+	struct http_conn *req = http_dial(cl->ctx->net_context, host,
+					  path, method, conn);
 	if (!req) {
 		free(conn);
 		return NULL;
@@ -533,7 +533,7 @@ static struct conn *exchg_http_dial(const char *host, const char *path,
 		// partially initialized by conn_init even though it
 		// failed, so the eventual call to conn_free() will
 		// not give nonsense. same goes for exchg_websocket_connect()
-		http_close(req);
+		http_conn_close(req);
 		return NULL;
 	}
 	cl->ctx->online = true;

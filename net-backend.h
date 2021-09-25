@@ -9,12 +9,12 @@
 
 struct exchg_net_context;
 
-struct http_req;
+struct http_conn;
 
 struct http_callbacks {
 	void (*on_error)(void *p, const char *err);
 	void (*on_established)(void *p, int status);
-	int (*add_headers)(void *p, struct http_req *);
+	int (*add_headers)(void *p, struct http_conn *);
 	int (*recv)(void *p, char *in, size_t len);
 	void (*on_closed)(void *p);
 };
@@ -40,19 +40,19 @@ extern void net_run(struct exchg_net_context *);
 extern void net_stop(struct exchg_net_context *);
 extern void net_destroy(struct exchg_net_context *);
 
-int http_add_header(struct http_req *req, const unsigned char *name,
-		    const unsigned char *val, size_t len);
+int http_conn_add_header(struct http_conn *req, const unsigned char *name,
+			 const unsigned char *val, size_t len);
 
-int http_vsprintf(struct http_req *req, const char *fmt, va_list ap);
-char *http_body(struct http_req *req);
-size_t http_body_len(struct http_req *req);
+int http_conn_vsprintf(struct http_conn *req, const char *fmt, va_list ap);
+char *http_conn_body(struct http_conn *req);
+size_t http_conn_body_len(struct http_conn *req);
 
-struct http_req *http_dial(struct exchg_net_context *,
-			   const char *host, const char *path,
-			   const char *method, void *private);
-int http_status(struct http_req *);
+struct http_conn *http_dial(struct exchg_net_context *,
+			    const char *host, const char *path,
+			    const char *method, void *private);
+int http_conn_status(struct http_conn *);
 
-void http_close(struct http_req *req);
+void http_conn_close(struct http_conn *req);
 
 extern int ws_conn_vprintf(struct websocket_conn *, const char *fmt, va_list ap);
 

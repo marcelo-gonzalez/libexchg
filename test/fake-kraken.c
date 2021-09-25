@@ -662,40 +662,40 @@ struct websocket_conn *kraken_ws_auth_dial(struct exchg_net_context *ctx,
 extern char _binary_test_json_kraken_pair_info_json_start[];
 extern char _binary_test_json_kraken_pair_info_json_end[];
 
-static void kraken_pair_info_read(struct http_req *req, struct exchg_test_event *ev,
+static void kraken_pair_info_read(struct http_conn *req, struct exchg_test_event *ev,
 				  struct buf *buf) {
 	size_t size = _binary_test_json_kraken_pair_info_json_end -
 		_binary_test_json_kraken_pair_info_json_start;
 	buf_xcpy(buf, _binary_test_json_kraken_pair_info_json_start, size);
 }
 
-static struct http_req *asset_pairs_dial(struct exchg_net_context *ctx,
-					 const char *path, const char *method,
-					 void *private) {
+static struct http_conn *asset_pairs_dial(struct exchg_net_context *ctx,
+					  const char *path, const char *method,
+					  void *private) {
 	if (strcmp(method, "GET")) {
 		fprintf(stderr, "Kraken bad method for %s: %s\n", path, method);
 		return NULL;
 	}
 
-	struct http_req *req = fake_http_req_alloc(ctx, EXCHG_KRAKEN,
-						   EXCHG_EVENT_PAIRS_DATA, private);
+	struct http_conn *req = fake_http_conn_alloc(ctx, EXCHG_KRAKEN,
+						     EXCHG_EVENT_PAIRS_DATA, private);
 	req->read = kraken_pair_info_read;
 	req->write = no_http_write;
 	req->add_header = no_http_add_header;
-	req->destroy = fake_http_req_free;
+	req->destroy = fake_http_conn_free;
 	return req;
 }
 
-static void balances_add_header(struct http_req *req, const unsigned char *name,
+static void balances_add_header(struct http_conn *req, const unsigned char *name,
 				const unsigned char *val, size_t len) {
 	// TODO:
 }
 
-static void balances_write(struct http_req *req) {
+static void balances_write(struct http_conn *req) {
 	// TODO
 }
 
-static void balances_read(struct http_req *req, struct exchg_test_event *ev,
+static void balances_read(struct http_conn *req, struct exchg_test_event *ev,
 			  struct buf *buf) {
 	buf_xsprintf(buf, "{\"error\": [], \"result\": {");
 	for (enum exchg_currency c = 0; c < EXCHG_NUM_CCYS; c++) {
@@ -709,21 +709,21 @@ static void balances_read(struct http_req *req, struct exchg_test_event *ev,
 	buf_xsprintf(buf, "}}");
 }
 
-static void balances_free(struct http_req *req) {
+static void balances_free(struct http_conn *req) {
 	auth_check_free((struct auth_check *)req->priv);
-	fake_http_req_free(req);
+	fake_http_conn_free(req);
 }
 
-static struct http_req *balances_dial(struct exchg_net_context *ctx,
-				      const char *path, const char *method,
-				      void *private) {
+static struct http_conn *balances_dial(struct exchg_net_context *ctx,
+				       const char *path, const char *method,
+				       void *private) {
 	if (strcmp(method, "POST")) {
 		fprintf(stderr, "Kraken bad method for %s: %s\n", path, method);
 		return NULL;
 	}
 
-	struct http_req *req = fake_http_req_alloc(ctx, EXCHG_KRAKEN,
-						   EXCHG_EVENT_BALANCES, private);
+	struct http_conn *req = fake_http_conn_alloc(ctx, EXCHG_KRAKEN,
+						     EXCHG_EVENT_BALANCES, private);
 	req->read = balances_read;
 	req->write = balances_write;
 	req->add_header = balances_add_header;
@@ -748,25 +748,25 @@ static struct http_req *balances_dial(struct exchg_net_context *ctx,
 
 #define FAKE_WS_TOKEN "asdfkrakentokenasdf"
 
-static void token_read(struct http_req *req, struct exchg_test_event *ev,
+static void token_read(struct http_conn *req, struct exchg_test_event *ev,
 		       struct buf *buf) {
 	buf_xsprintf(buf, "{\"error\":[],\"result\":{\""
 		     "token\":\"" FAKE_WS_TOKEN "\",\"expires\":900}}");
 }
 
-static struct http_req *token_dial(struct exchg_net_context *ctx,
-				   const char *path, const char *method,
-				   void *private) {
-	struct http_req *req = fake_http_req_alloc(ctx, EXCHG_KRAKEN,
-						   EXCHG_EVENT_HTTP_PROTOCOL, private);
+static struct http_conn *token_dial(struct exchg_net_context *ctx,
+				    const char *path, const char *method,
+				    void *private) {
+	struct http_conn *req = fake_http_conn_alloc(ctx, EXCHG_KRAKEN,
+						     EXCHG_EVENT_HTTP_PROTOCOL, private);
 	req->read = token_read;
 	req->write = no_http_write;
 	req->add_header = no_http_add_header;
-	req->destroy = fake_http_req_free;
+	req->destroy = fake_http_conn_free;
 	return req;
 }
 
-static void add_order_read(struct http_req *req, struct exchg_test_event *ev,
+static void add_order_read(struct http_conn *req, struct exchg_test_event *ev,
 			   struct buf *buf) {
 	buf_xsprintf(buf, "{\"error\":[%s],\"result\":{\""
 		     "descr\":\"fake order description\", "
@@ -827,7 +827,7 @@ static enum exchg_pair asset_name_to_pair(char *c, int start, int end) {
 	return -1;
 }
 
-static void add_order_write(struct http_req *req) {
+static void add_order_write(struct http_conn *req) {
 	const char *problem = "";
 	struct add_order_post request = {};
 	int key = 0, key_end, val, val_end;
@@ -937,24 +937,24 @@ bad:
 	fputc('\n', stderr);
 }
 
-static struct http_req *add_order_dial(struct exchg_net_context *ctx,
-				       const char *path, const char *method,
-				       void *private) {
-	struct http_req *req = fake_http_req_alloc(ctx, EXCHG_KRAKEN,
-						   EXCHG_EVENT_ORDER_ACK, private);
+static struct http_conn *add_order_dial(struct exchg_net_context *ctx,
+					const char *path, const char *method,
+					void *private) {
+	struct http_conn *req = fake_http_conn_alloc(ctx, EXCHG_KRAKEN,
+						     EXCHG_EVENT_ORDER_ACK, private);
 	req->read = add_order_read;
 	req->write = add_order_write;
 	req->add_header = no_http_add_header;
-	req->destroy = fake_http_req_free;
+	req->destroy = fake_http_conn_free;
 	return req;
 }
 
-static void cancel_order_free(struct http_req *req) {
+static void cancel_order_free(struct http_conn *req) {
 	free(req->priv);
-	fake_http_req_free(req);
+	fake_http_conn_free(req);
 }
 
-static void cancel_order_read(struct http_req *req, struct exchg_test_event *ev,
+static void cancel_order_read(struct http_conn *req, struct exchg_test_event *ev,
 			      struct buf *buf) {
 	struct order_cancel *cancel = req->priv;
 	if (cancel->err[0]) {
@@ -964,7 +964,7 @@ static void cancel_order_read(struct http_req *req, struct exchg_test_event *ev,
 	}
 }
 
-static void cancel_order_write(struct http_req *req) {
+static void cancel_order_write(struct http_conn *req) {
 	const char *problem = "";
 	int key = 0, key_end, val, val_end;
 	unsigned int txid;
@@ -1016,11 +1016,11 @@ bad:
 	fputc('\n', stderr);
 }
 
-static struct http_req *cancel_order_dial(struct exchg_net_context *ctx,
-					  const char *path, const char *method,
-					  void *private) {
-	struct http_req *req = fake_http_req_alloc(ctx, EXCHG_KRAKEN,
-						   EXCHG_EVENT_ORDER_ACK, private);
+static struct http_conn *cancel_order_dial(struct exchg_net_context *ctx,
+					   const char *path, const char *method,
+					   void *private) {
+	struct http_conn *req = fake_http_conn_alloc(ctx, EXCHG_KRAKEN,
+						     EXCHG_EVENT_ORDER_ACK, private);
 	req->read = cancel_order_read;
 	req->write = cancel_order_write;
 	req->add_header = no_http_add_header;
@@ -1029,9 +1029,9 @@ static struct http_req *cancel_order_dial(struct exchg_net_context *ctx,
 	return req;
 }
 
-struct http_req *kraken_http_dial(struct exchg_net_context *ctx,
-				  const char *path, const char *method,
-				  void *private) {
+struct http_conn *kraken_http_dial(struct exchg_net_context *ctx,
+				   const char *path, const char *method,
+				   void *private) {
 	if (!strcmp(path, "/0/public/AssetPairs")) {
 		return asset_pairs_dial(ctx, path, method, private);
 	} else if (!strcmp(path, "/0/private/Balance")) {

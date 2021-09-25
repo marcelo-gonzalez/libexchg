@@ -161,7 +161,7 @@ static int prepare_http_client_read(struct lws *wsi) {
 	return lws_http_client_read(wsi, &p, &len);
 }
 
-struct http_req {
+struct http_conn {
 	struct lws *wsi;
 	char *host;
 	char *path;
@@ -172,27 +172,27 @@ struct http_req {
 	void *user;
 };
 
-int http_vsprintf(struct http_req *req, const char *fmt, va_list ap) {
+int http_conn_vsprintf(struct http_conn *req, const char *fmt, va_list ap) {
 	if (!req->body.buf && buf_alloc(&req->body, 200))
 		return -1;
 
 	return buf_vsprintf(&req->body, fmt, ap);
 }
 
-int http_status(struct http_req *req) {
+int http_conn_status(struct http_conn *req) {
 	return req->status;
 }
 
-char *http_body(struct http_req *req) {
+char *http_conn_body(struct http_conn *req) {
 	return buf_start(&req->body);
 }
 
-size_t http_body_len(struct http_req *req) {
+size_t http_conn_body_len(struct http_conn *req) {
 	return req->body.len;
 }
 
-int http_add_header(struct http_req *req, const unsigned char *name,
-		    const unsigned char *val, size_t len) {
+int http_conn_add_header(struct http_conn *req, const unsigned char *name,
+			 const unsigned char *val, size_t len) {
 	if (lws_add_http_header_by_name(req->wsi, name, val, len,
 					req->headers_start, req->headers_end)) {
 		fprintf(stderr, "lws_add_http_header_by_name() error\n");
@@ -201,7 +201,7 @@ int http_add_header(struct http_req *req, const unsigned char *name,
 	return 0;
 }
 
-void http_close(struct http_req *req) {
+void http_conn_close(struct http_conn *req) {
 	lws_set_timeout(req->wsi, PENDING_TIMEOUT_USER_OK,
 			LWS_TO_KILL_ASYNC);
 }
@@ -210,7 +210,7 @@ static int http_callback(struct lws *wsi, enum lws_callback_reasons reason,
 			 void *user, void *in, size_t len) {
 	const struct net_callbacks *c = lws_context_user(lws_get_context(wsi));
 	const struct http_callbacks *http = &c->http;
-	struct http_req *req = user;
+	struct http_conn *req = user;
 
 	switch (reason) {
 	case LWS_CALLBACK_CLIENT_CONNECTION_ERROR:
@@ -282,10 +282,10 @@ struct exchg_net_context {
 	struct lws_context *ctx;
 };
 
-struct http_req *http_dial(struct exchg_net_context *ctx,
-			   const char *host, const char *path,
-			   const char *method, void *private) {
-	struct http_req *req = malloc(sizeof(*req));
+struct http_conn *http_dial(struct exchg_net_context *ctx,
+			    const char *host, const char *path,
+			    const char *method, void *private) {
+	struct http_conn *req = malloc(sizeof(*req));
 	if (!req) {
 		fprintf(stderr, "OOM: %s\n", __func__);
 		return NULL;

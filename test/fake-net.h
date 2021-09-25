@@ -32,7 +32,7 @@ struct buf {
 	size_t size;
 };
 
-struct http_req {
+struct http_conn {
 	char *host;
 	char *path;
 	int status;
@@ -41,13 +41,13 @@ struct http_req {
 	struct exchg_net_context *ctx;
 	struct exchg_test_event *read_event;
 	struct buf body;
-	void (*read)(struct http_req *req, struct exchg_test_event *ev, struct buf *buf);
-	void (*write)(struct http_req *req);
-	void (*add_header)(struct http_req *req, const unsigned char *name,
+	void (*read)(struct http_conn *req, struct exchg_test_event *ev, struct buf *buf);
+	void (*write)(struct http_conn *req);
+	void (*add_header)(struct http_conn *req, const unsigned char *name,
 			   const unsigned char *val, size_t len);
-	void (*destroy)(struct http_req *req);
+	void (*destroy)(struct http_conn *req);
 	void *priv;
-	LIST_ENTRY(http_req) list;
+	LIST_ENTRY(http_conn) list;
 };
 
 struct websocket_conn {
@@ -113,8 +113,8 @@ void auth_check_set_public(struct auth_check *, const unsigned char *c, size_t l
 void auth_check_set_payload(struct auth_check *a, const unsigned char *c, size_t len);
 void auth_check_set_hmac(struct auth_check *a, const unsigned char *c, size_t len);
 
-void no_http_write(struct http_req *req);
-void no_http_add_header(struct http_req *req, const unsigned char *name,
+void no_http_write(struct http_conn *req);
+void no_http_add_header(struct http_conn *req, const unsigned char *name,
 			const unsigned char *val, size_t len);
 
 enum conn_type {
@@ -126,7 +126,7 @@ enum conn_type {
 struct test_event {
 	enum conn_type conn_type;
 	union {
-		struct http_req *http;
+		struct http_conn *http;
 		struct websocket_conn *ws;
 	} conn;
 	struct exchg_test_event event;
@@ -149,7 +149,7 @@ static inline void *test_order_private(struct test_order *o) {
 struct exchg_net_context {
 	struct net_callbacks *callbacks;
 	LIST_HEAD(ws_list, websocket_conn) ws_list;
-	LIST_HEAD(http_list, http_req) http_list;
+	LIST_HEAD(http_list, http_conn) http_list;
 	TAILQ_HEAD(events, test_event) events;
 	bool running;
 	struct {
@@ -166,9 +166,9 @@ struct websocket_conn *fake_websocket_alloc(struct exchg_net_context *ctx, void 
 void ws_conn_free(struct websocket_conn *);
 struct websocket_conn *fake_websocket_get(struct exchg_net_context *ctx, const char *host, const char *path);
 
-struct http_req *fake_http_req_alloc(struct exchg_net_context *ctx, enum exchg_id exchange,
+struct http_conn *fake_http_conn_alloc(struct exchg_net_context *ctx, enum exchg_id exchange,
 				     enum exchg_test_event_type type, void *private);
-void fake_http_req_free(struct http_req *);
+void fake_http_conn_free(struct http_conn *);
 
 struct test_order *on_order_placed(struct exchg_net_context *ctx, enum exchg_id id,
 				   struct exchg_order_info *ack, size_t private_size);

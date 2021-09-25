@@ -16,31 +16,31 @@
 extern char _binary_test_json_coinbase_products_json_start[];
 extern char _binary_test_json_coinbase_products_json_end[];
 
-static void products_read(struct http_req *req, struct exchg_test_event *ev,
+static void products_read(struct http_conn *req, struct exchg_test_event *ev,
 			  struct buf *buf) {
 	size_t size = _binary_test_json_coinbase_products_json_end -
 		_binary_test_json_coinbase_products_json_start;
 	buf_xcpy(buf, _binary_test_json_coinbase_products_json_start, size);
 }
 
-static struct http_req *products_dial(struct exchg_net_context *ctx,
-				      const char *path, const char *method,
-				      void *private) {
+static struct http_conn *products_dial(struct exchg_net_context *ctx,
+				       const char *path, const char *method,
+				       void *private) {
 	if (strcmp(method, "GET")) {
 		fprintf(stderr, "Coinbase bad method for %s: %s\n", path, method);
 		return NULL;
 	}
 
-	struct http_req *req = fake_http_req_alloc(ctx, EXCHG_COINBASE,
-						   EXCHG_EVENT_PAIRS_DATA, private);
+	struct http_conn *req = fake_http_conn_alloc(ctx, EXCHG_COINBASE,
+						     EXCHG_EVENT_PAIRS_DATA, private);
 	req->read = products_read;
 	req->write = no_http_write;
 	req->add_header = no_http_add_header;
-	req->destroy = fake_http_req_free;
+	req->destroy = fake_http_conn_free;
 	return req;
 }
 
-static void accounts_read(struct http_req *req, struct exchg_test_event *ev,
+static void accounts_read(struct http_conn *req, struct exchg_test_event *ev,
 			  struct buf *buf) {
 	buf_xsprintf(buf, "[");
 	for (enum exchg_currency c = 0; c < EXCHG_NUM_CCYS; c++) {
@@ -55,21 +55,21 @@ static void accounts_read(struct http_req *req, struct exchg_test_event *ev,
 	buf_xsprintf(buf, "]");
 }
 
-static struct http_req *accounts_dial(struct exchg_net_context *ctx,
-				      const char *path, const char *method,
-				      void *private) {
+static struct http_conn *accounts_dial(struct exchg_net_context *ctx,
+				       const char *path, const char *method,
+				       void *private) {
 	if (strcmp(method, "GET")) {
 		fprintf(stderr, "Coinbase bad method for %s: %s\n", path, method);
 		return NULL;
 	}
 
-	struct http_req *req = fake_http_req_alloc(ctx, EXCHG_COINBASE,
-						   EXCHG_EVENT_BALANCES, private);
+	struct http_conn *req = fake_http_conn_alloc(ctx, EXCHG_COINBASE,
+						     EXCHG_EVENT_BALANCES, private);
 	req->read = accounts_read;
 	req->write = no_http_write;
 	// TODO: check auth stuff
 	req->add_header = no_http_add_header;
-	req->destroy = fake_http_req_free;
+	req->destroy = fake_http_conn_free;
 	return req;
 }
 
@@ -141,7 +141,7 @@ struct order_ids {
 	char client_oid[37];
 };
 
-static void orders_read(struct http_req *req, struct exchg_test_event *ev,
+static void orders_read(struct http_conn *req, struct exchg_test_event *ev,
 			struct buf *buf) {
 	struct order_ids *ids = req->priv;
 	struct exchg_order_info *ack = &ev->data.order_ack;
@@ -260,7 +260,7 @@ static void write_oid(char *dst, uint64_t id) {
 	dst[len-twelve_left] = 0;
 }
 
-static void orders_write(struct http_req *req) {
+static void orders_write(struct http_conn *req) {
 	const char *problem = "";
 	jsmn_parser parser;
 	jsmntok_t toks[100];
@@ -380,21 +380,21 @@ bad:
 	fputc('\n', stderr);
 }
 
-static void orders_destroy(struct http_req *req) {
+static void orders_destroy(struct http_conn *req) {
 	free(req->priv);
-	fake_http_req_free(req);
+	fake_http_conn_free(req);
 }
 
-static struct http_req *orders_dial(struct exchg_net_context *ctx,
-				    const char *path, const char *method,
-				    void *private) {
+static struct http_conn *orders_dial(struct exchg_net_context *ctx,
+				     const char *path, const char *method,
+				     void *private) {
 	if (strcmp(method, "POST")) {
 		fprintf(stderr, "Coinbase bad method for %s: %s\n", path, method);
 		return NULL;
 	}
 
-	struct http_req *req = fake_http_req_alloc(ctx, EXCHG_COINBASE,
-						   EXCHG_EVENT_ORDER_ACK, private);
+	struct http_conn *req = fake_http_conn_alloc(ctx, EXCHG_COINBASE,
+						     EXCHG_EVENT_ORDER_ACK, private);
 	req->read = orders_read;
 	req->write = orders_write;
 	// TODO: check auth stuff
@@ -409,7 +409,7 @@ struct order_cancel {
 	char msg[100];
 };
 
-static void cancel_order_read(struct http_req *req, struct exchg_test_event *ev,
+static void cancel_order_read(struct http_conn *req, struct exchg_test_event *ev,
 			      struct buf *buf) {
 	struct order_cancel *cancel = req->priv;
 
@@ -420,9 +420,9 @@ static void cancel_order_read(struct http_req *req, struct exchg_test_event *ev,
 	}
 }
 
-static void cancel_order_free(struct http_req *req) {
+static void cancel_order_free(struct http_conn *req) {
 	free(req->priv);
-	fake_http_req_free(req);
+	fake_http_conn_free(req);
 }
 
 static bool cancel_order(struct exchg_net_context *ctx, struct test_order *o) {
@@ -467,7 +467,7 @@ static bool cancel_order(struct exchg_net_context *ctx, struct test_order *o) {
 	return true;
 }
 
-static void cancel_order_write(struct http_req *req) {
+static void cancel_order_write(struct http_conn *req) {
 	struct order_cancel *cancel = req->priv;
 
 	if (strlen(req->path) < strlen("/orders/client:") + 36) {
@@ -498,17 +498,17 @@ static void cancel_order_write(struct http_req *req) {
 	snprintf(cancel->msg, sizeof(cancel->msg), "Unrecognized order id");
 }
 
-static struct http_req *cancel_order_dial(struct exchg_net_context *ctx,
-					  const char *path, const char *method,
-					  void *private) {
+static struct http_conn *cancel_order_dial(struct exchg_net_context *ctx,
+					   const char *path, const char *method,
+					   void *private) {
 	if (strcmp(method, "DELETE")) {
 		exchg_log("Coinbase bad method for %s: %s\n", path, method);
 		return NULL;
 	}
 
 	struct order_cancel *cancel = xzalloc(sizeof(*cancel));
-	struct http_req *req = fake_http_req_alloc(ctx, EXCHG_COINBASE,
-						   EXCHG_EVENT_ORDER_CANCEL_ACK, private);
+	struct http_conn *req = fake_http_conn_alloc(ctx, EXCHG_COINBASE,
+						     EXCHG_EVENT_ORDER_CANCEL_ACK, private);
 	req->read = cancel_order_read;
 	req->write = cancel_order_write;
 	// TODO: check auth stuff
@@ -518,9 +518,9 @@ static struct http_req *cancel_order_dial(struct exchg_net_context *ctx,
 	return req;
 }
 
-struct http_req *coinbase_http_dial(struct exchg_net_context *ctx,
-				    const char *path,
-				    const char *method, void *private) {
+struct http_conn *coinbase_http_dial(struct exchg_net_context *ctx,
+				     const char *path,
+				     const char *method, void *private) {
 	if (!strcmp(path, "/products"))
 		return products_dial(ctx, path, method, private);
 	else if (!strcmp(path, "/accounts"))

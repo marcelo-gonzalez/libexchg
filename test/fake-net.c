@@ -76,18 +76,18 @@ void buf_xcpy(struct buf *buf, void *src, size_t len) {
 	buf->len += len;
 }
 
-int http_vsprintf(struct http_req *req, const char *fmt, va_list ap) {
+int http_conn_vsprintf(struct http_conn *req, const char *fmt, va_list ap) {
 	if (!req->body.buf)
 		buf_init(&req->body, 200);
 
 	return buf_vsprintf(&req->body, fmt, ap);
 }
 
-char *http_body(struct http_req *req) {
+char *http_conn_body(struct http_conn *req) {
 	return req->body.buf;
 }
 
-size_t http_body_len(struct http_req *req) {
+size_t http_conn_body_len(struct http_conn *req) {
 	return req->body.len;
 }
 
@@ -425,7 +425,7 @@ static bool service(struct exchg_net_context *ctx) {
 	struct exchg_test_event *event = NULL;
 	struct websocket_conn_callbacks *ws = &ctx->callbacks->ws;
 	struct http_callbacks *http = &ctx->callbacks->http;
-	struct http_req *http_req;
+	struct http_conn *http_conn;
 	struct websocket_conn *wsock;
 
 	ev = TAILQ_FIRST(&ctx->events);
@@ -484,16 +484,16 @@ static bool service(struct exchg_net_context *ctx) {
 		}
 		break;
 	case CONN_TYPE_HTTP:
-		http_req = ev->conn.http;
+		http_conn = ev->conn.http;
 		switch (event->type) {
 		case EXCHG_EVENT_HTTP_PREP:
-			ret = http->add_headers(http_req->user, http_req);
+			ret = http->add_headers(http_conn->user, http_conn);
 			// TODO: if (ret) close(req);
 			if (!ret)
-				http_req->write(http_req);
+				http_conn->write(http_conn);
 			if (!ret)
-				http->on_established(http_req->user,
-						     http_req->status);
+				http->on_established(http_conn->user,
+						     http_conn->status);
 			// callback to fill in here
 			break;
 		case EXCHG_EVENT_HTTP_CLOSE:
@@ -503,17 +503,17 @@ static bool service(struct exchg_net_context *ctx) {
 					free_event(ctx, e);
 				}
 			}
-			LIST_REMOVE(http_req, list);
-			http->on_closed(http_req->user);
-			http_req->destroy(http_req);
+			LIST_REMOVE(http_conn, list);
+			http->on_closed(http_conn->user);
+			http_conn->destroy(http_conn);
 			break;
 		default:
 			buf_init(&buf, 1<<10);
-			http_req->read(http_req, event, &buf);
-			http->recv(http_req->user, buf.buf, buf.len);
+			http_conn->read(http_conn, event, &buf);
+			http->recv(http_conn->user, buf.buf, buf.len);
 			free(buf.buf);
-			http_close(http_req);
-			http_req->read_event = NULL;
+			http_conn_close(http_conn);
+			http_conn->read_event = NULL;
 			break;
 		}
 		break;
@@ -577,7 +577,7 @@ void net_stop(struct exchg_net_context *ctx) {
 
 void net_destroy(struct exchg_net_context *ctx) {
 	struct test_event *e, *etmp;
-	struct http_req *h, *htmp;
+	struct http_conn *h, *htmp;
 	struct websocket_conn *w, *wtmp;
 	struct test_order *o, *otmp;
 
@@ -601,27 +601,27 @@ void net_destroy(struct exchg_net_context *ctx) {
 
 void no_ws_write(struct websocket_conn *w, char *buf, size_t len) {}
 
-void no_http_add_header(struct http_req *req, const unsigned char *name,
+void no_http_add_header(struct http_conn *req, const unsigned char *name,
 			const unsigned char *val, size_t len) {}
 
-void no_http_write(struct http_req *req) {}
+void no_http_write(struct http_conn *req) {}
 
-int http_add_header(struct http_req *req, const unsigned char *name,
-		    const unsigned char *val, size_t len) {
+int http_conn_add_header(struct http_conn *req, const unsigned char *name,
+			 const unsigned char *val, size_t len) {
 	req->add_header(req, name, val, len);
 	return 0;
 }
 
-void fake_http_req_free(struct http_req *req) {
+void fake_http_conn_free(struct http_conn *req) {
 	free(req->host);
 	free(req->path);
 	free(req->body.buf);
 	free(req);
 }
 
-struct http_req *fake_http_req_alloc(struct exchg_net_context *ctx, enum exchg_id exchange,
-				     enum exchg_test_event_type type, void *private) {
-	struct http_req *req = xzalloc(sizeof(*req));
+struct http_conn *fake_http_conn_alloc(struct exchg_net_context *ctx, enum exchg_id exchange,
+				       enum exchg_test_event_type type, void *private) {
+	struct http_conn *req = xzalloc(sizeof(*req));
 	struct test_event *prep_event = xzalloc(sizeof(*prep_event));
 	struct test_event *read_event = xzalloc(sizeof(*read_event));
 	struct exchg_test_event *prep_ev = &prep_event->event;;
@@ -648,10 +648,10 @@ struct http_req *fake_http_req_alloc(struct exchg_net_context *ctx, enum exchg_i
 	return req;
 }
 
-struct http_req *http_dial(struct exchg_net_context *ctx,
-			   const char *host, const char *path,
-			   const char *method, void *private) {
-	struct http_req *http;
+struct http_conn *http_dial(struct exchg_net_context *ctx,
+			    const char *host, const char *path,
+			    const char *method, void *private) {
+	struct http_conn *http;
 
 	if (!strcmp(host, "api.gemini.com")) {
 		http = gemini_http_dial(ctx, path, method, private);
@@ -676,11 +676,11 @@ struct http_req *http_dial(struct exchg_net_context *ctx,
 	return http;
 }
 
-int http_status(struct http_req *req) {
+int http_conn_status(struct http_conn *req) {
 	return req->status;
 }
 
-void http_close(struct http_req *http) {
+void http_conn_close(struct http_conn *http) {
 	struct test_event *event;
 	struct exchg_test_event *ev;
 

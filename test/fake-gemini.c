@@ -203,7 +203,7 @@ struct websocket_conn *gemini_ws_dial(struct exchg_net_context *ctx,
 	return s;
 }
 
-static void balances_read(struct http_req *req, struct exchg_test_event *ev,
+static void balances_read(struct http_conn *req, struct exchg_test_event *ev,
 			  struct buf *buf) {
 	struct auth_check *a = req->priv;
 
@@ -240,26 +240,26 @@ static void auth_add_header(struct auth_check *a, const unsigned char *name,
 	}
 }
 
-static void balances_add_header(struct http_req *req, const unsigned char *name,
+static void balances_add_header(struct http_conn *req, const unsigned char *name,
 				const unsigned char *val, size_t len) {
 	auth_add_header((struct auth_check *)req->priv, name, val, len);
 }
 
-static void balances_free(struct http_req *req) {
+static void balances_free(struct http_conn *req) {
 	auth_check_free((struct auth_check *)req->priv);
-	fake_http_req_free(req);
+	fake_http_conn_free(req);
 }
 
-static struct http_req *balances_dial(struct exchg_net_context *ctx,
-				      const char *path, const char *method,
-				      void *private) {
+static struct http_conn *balances_dial(struct exchg_net_context *ctx,
+				       const char *path, const char *method,
+				       void *private) {
 	if (strcmp(method, "POST")) {
 		fprintf(stderr, "Gemini bad method for %s: %s\n", path, method);
 		return NULL;
 	}
 
-	struct http_req *req = fake_http_req_alloc(ctx, EXCHG_GEMINI,
-						   EXCHG_EVENT_BALANCES, private);
+	struct http_conn *req = fake_http_conn_alloc(ctx, EXCHG_GEMINI,
+						     EXCHG_EVENT_BALANCES, private);
 	req->read = balances_read;
 	req->add_header = balances_add_header;
 	req->write = no_http_write;
@@ -281,7 +281,7 @@ struct http_place_order {
 	jsmntok_t toks[200];
 };
 
-static void place_order_read(struct http_req *req, struct exchg_test_event *ev,
+static void place_order_read(struct http_conn *req, struct exchg_test_event *ev,
 			     struct buf *buf) {
 	struct http_place_order *p = req->priv;
 	struct exchg_order_info *ack = &ev->data.order_ack;
@@ -357,7 +357,7 @@ static void ack_init(struct exchg_test_event *ev, enum order_event_type type,
 	}
 }
 
-static void place_order_add_header(struct http_req *req, const unsigned char *name,
+static void place_order_add_header(struct http_conn *req, const unsigned char *name,
 				   const unsigned char *val, size_t len) {
 	struct http_place_order *o = req->priv;
 	struct exchg_order_info *ack = &req->read_event->data.order_ack;
@@ -506,23 +506,23 @@ bad:
 	g_free(json);
 }
 
-static void place_order_free(struct http_req *req) {
+static void place_order_free(struct http_conn *req) {
 	struct http_place_order *o = req->priv;
 	auth_check_free(o->auth);
 	free(o);
-	fake_http_req_free(req);
+	fake_http_conn_free(req);
 }
 
-static struct http_req *place_order_dial(struct exchg_net_context *ctx,
-					 const char *path, const char *method,
-					 void *private) {
+static struct http_conn *place_order_dial(struct exchg_net_context *ctx,
+					  const char *path, const char *method,
+					  void *private) {
 	if (strcmp(method, "POST")) {
 		fprintf(stderr, "Gemini bad method for %s: %s\n", path, method);
 		return NULL;
 	}
 
-	struct http_req *req = fake_http_req_alloc(ctx, EXCHG_GEMINI,
-						   EXCHG_EVENT_ORDER_ACK, private);
+	struct http_conn *req = fake_http_conn_alloc(ctx, EXCHG_GEMINI,
+						     EXCHG_EVENT_ORDER_ACK, private);
 	req->read = place_order_read;
 	req->add_header = place_order_add_header;
 	req->write = no_http_write;
@@ -543,7 +543,7 @@ struct cancel_order {
 	char err[100];
 };
 
-static void cancel_order_read(struct http_req *req, struct exchg_test_event *ev,
+static void cancel_order_read(struct http_conn *req, struct exchg_test_event *ev,
 			      struct buf *buf) {
 	struct cancel_order *c = req->priv;
 	if (c->auth->hmac_status == AUTH_GOOD) {
@@ -560,7 +560,7 @@ static void cancel_order_read(struct http_req *req, struct exchg_test_event *ev,
 	}
 }
 
-static void cancel_order_add_header(struct http_req *req, const unsigned char *name,
+static void cancel_order_add_header(struct http_conn *req, const unsigned char *name,
 				    const unsigned char *val, size_t len) {
 	struct cancel_order *cancel = req->priv;
 	auth_add_header(cancel->auth, name, val, len);
@@ -640,24 +640,24 @@ bad:
 	g_free(json);
 }
 
-static void cancel_order_free(struct http_req *req) {
+static void cancel_order_free(struct http_conn *req) {
 	struct cancel_order *c = req->priv;
 
 	auth_check_free(c->auth);
 	free(c);
-	fake_http_req_free(req);
+	fake_http_conn_free(req);
 }
 
-static struct http_req *cancel_order_dial(struct exchg_net_context *ctx,
-					  const char *path, const char *method,
-					  void *private) {
+static struct http_conn *cancel_order_dial(struct exchg_net_context *ctx,
+					   const char *path, const char *method,
+					   void *private) {
 	if (strcmp(method, "POST")) {
 		fprintf(stderr, "Gemini bad method for %s: %s\n", path, method);
 		return NULL;
 	}
 
-	struct http_req *req = fake_http_req_alloc(ctx, EXCHG_GEMINI,
-						   EXCHG_EVENT_ORDER_CANCEL_ACK, private);
+	struct http_conn *req = fake_http_conn_alloc(ctx, EXCHG_GEMINI,
+						     EXCHG_EVENT_ORDER_CANCEL_ACK, private);
 	req->read = cancel_order_read;
 	req->add_header = cancel_order_add_header;
 	req->write = no_http_write;
@@ -672,9 +672,9 @@ static struct http_req *cancel_order_dial(struct exchg_net_context *ctx,
 	return req;
 }
 
-struct http_req *gemini_http_dial(struct exchg_net_context *ctx,
-				  const char *path, const char *method,
-				  void *private) {
+struct http_conn *gemini_http_dial(struct exchg_net_context *ctx,
+				   const char *path, const char *method,
+				   void *private) {
 	if (!strcmp(path, "/v1/balances"))
 		return balances_dial(ctx, path, method, private);
 	if (!strcmp(path, "/v1/order/new"))
