@@ -52,13 +52,8 @@ struct conn {
 		} http;
 	};
 	LIST_ENTRY(conn) list;
-	void *request_private;
 	char private[];
 };
-
-void *conn_request_private(struct conn *c) {
-	return c->request_private;
-}
 
 bool conn_disconnecting(struct conn *c) {
 	return c->disconnecting;
