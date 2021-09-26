@@ -34,12 +34,8 @@ int queue_work_exclusive(struct exchg_client *,
 			 bool (*f)(struct exchg_client *, void *), void *p);
 void exchg_do_work(struct exchg_client *cl);
 
-struct conn;
-
-enum conn_type {
-	CONN_TYPE_HTTP,
-	CONN_TYPE_WS,
-};
+struct websocket;
+struct http;
 
 struct order_info {
 	struct exchg_order_info info;
@@ -67,7 +63,8 @@ struct exchg_client {
 	int (*priv_ws_connect)(struct exchg_client *cl);
 	bool (*priv_ws_online)(struct exchg_client *cl);
 	void (*destroy)(struct exchg_client *cl);
-	LIST_HEAD(conn_list, conn) conn_list;
+	LIST_HEAD(websocket_list, websocket) websocket_list;
+	LIST_HEAD(http_list, http) http_list;
 	HMAC_CTX *hmac_ctx;
 	unsigned char *apikey_public;
 	size_t apikey_public_len;
@@ -156,7 +153,7 @@ static inline void exchg_l2_update(struct exchg_client *cl,
 }
 
 void exchg_data_disconnect(struct exchg_client *cl,
-			   struct conn *conn,
+			   struct websocket *ws,
 			   int num_pairs_gone,
 			   enum exchg_pair *pairs_gone);
 
@@ -194,72 +191,79 @@ struct exchg_client *alloc_exchg_client(struct exchg_context *ctx,
 void free_exchg_client(struct exchg_client *cl);
 
 struct exchg_websocket_ops {
-	int (*on_conn_established)(struct exchg_client *, struct conn *);
-	int (*add_headers)(struct exchg_client *, struct conn *);
-	int (*on_disconnect)(struct exchg_client *, struct conn *,
+	int (*on_conn_established)(struct exchg_client *, struct websocket *);
+	int (*add_headers)(struct exchg_client *, struct websocket *);
+	int (*on_disconnect)(struct exchg_client *, struct websocket *,
 			     int reconnect_seconds);
-	int (*recv)(struct exchg_client *, struct conn *,
+	int (*recv)(struct exchg_client *, struct websocket *,
 		    char *js, int num_toks, jsmntok_t *toks);
 	size_t conn_data_size;
 };
 
-bool conn_disconnecting(struct conn *c);
-bool conn_established(struct conn *c);
-const char *conn_method(struct conn *c);
-const char *conn_host(struct conn *c);
-const char *conn_path(struct conn *c);
-enum conn_type conn_type(struct conn *c);
+bool websocket_disconnecting(struct websocket *);
+bool websocket_established(struct websocket *);
 
-struct conn *exchg_websocket_connect(struct exchg_client *cl,
-				     const char *host, const char *path,
-				     const struct exchg_websocket_ops *ops);
+const char *websocket_host(struct websocket *);
+const char *websocket_path(struct websocket *);
 
-int conn_printf(struct conn *conn, const char *fmt, ...)
+const char *http_method(struct http *);
+const char *http_host(struct http *);
+const char *http_path(struct http *);
+
+struct websocket *exchg_websocket_connect(struct exchg_client *cl,
+					  const char *host, const char *path,
+					  const struct exchg_websocket_ops *ops);
+
+int websocket_printf(struct websocket *, const char *fmt, ...)
 	__attribute__((format (printf, 2, 3)));
 
-int conn_http_body_sprintf(struct conn *conn, const char *fmt, ...)
+int http_body_sprintf(struct http *, const char *fmt, ...)
 	__attribute__((format (printf, 2, 3)));
-char *conn_http_body(struct conn *conn);
-size_t conn_http_body_len(struct conn *conn);
+char *http_body(struct http *http);
+size_t http_body_len(struct http *http);
 
-void *conn_private(struct conn *c);
+void *websocket_private(struct websocket *);
+void *http_private(struct http *);
 
-void for_each_conn(struct exchg_client *cl,
-		   int (*func)(struct conn *conn, void *private),
-		   void *private);
+void for_each_websocket(struct exchg_client *cl,
+			int (*func)(struct websocket *ws, void *private),
+			void *private);
 
 int exchg_parse_info_on_established(struct exchg_client *cl,
-				    struct conn *, int status);
-void exchg_parse_info_on_error(struct exchg_client *cl, struct conn *,
+				    struct http *, int status);
+void exchg_parse_info_on_error(struct exchg_client *cl, struct http *,
 			       const char *err);
-void exchg_parse_info_on_closed(struct exchg_client *cl, struct conn *);
+void exchg_parse_info_on_closed(struct exchg_client *cl, struct http *);
 
-int conn_add_header(struct conn *, const unsigned char *name,
+int http_add_header(struct http *, const unsigned char *name,
 		    const unsigned char *val, size_t len);
+int websocket_add_header(struct websocket *, const unsigned char *name,
+			 const unsigned char *val, size_t len);
 
 struct exchg_http_ops {
-	int (*add_headers)(struct exchg_client *, struct conn *);
+	int (*add_headers)(struct exchg_client *, struct http *);
 	// TODO: remove status param
-	int (*recv)(struct exchg_client *cl, struct conn *, int status,
+	int (*recv)(struct exchg_client *cl, struct http *, int status,
 		    char *js, int num_toks, jsmntok_t *toks);
 	int (*on_established)(struct exchg_client *cl,
-			      struct conn *, int status);
-	void (*on_closed)(struct exchg_client *cl, struct conn *);
-	void (*on_error)(struct exchg_client *cl, struct conn *, const char *err);
+			      struct http *, int status);
+	void (*on_closed)(struct exchg_client *cl, struct http *);
+	void (*on_error)(struct exchg_client *cl, struct http *, const char *err);
 	size_t conn_data_size;
 };
 
-struct conn *exchg_http_get(const char *host, const char *path,
+struct http *exchg_http_get(const char *host, const char *path,
 			    const struct exchg_http_ops *ops,
 			    struct exchg_client *cl);
-struct conn *exchg_http_post(const char *host, const char *path,
+struct http *exchg_http_post(const char *host, const char *path,
 			     const struct exchg_http_ops *ops,
 			     struct exchg_client *cl);
-struct conn *exchg_http_delete(const char *host, const char *path,
+struct http *exchg_http_delete(const char *host, const char *path,
 			       const struct exchg_http_ops *ops,
 			       struct exchg_client *cl);
 
-void conn_close(struct conn *);
+void http_close(struct http *);
+void websocket_close(struct websocket *);
 
 void exchg_log(const char *fmt, ...) __attribute__((format (printf, 1, 2)));
 

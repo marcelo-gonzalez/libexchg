@@ -22,102 +22,100 @@
 #include "exchanges/gemini.h"
 #include "exchanges/kraken.h"
 
-// TODO split into two structs, http vs websocket
-struct conn {
-	enum conn_type type;
-	char *method;
-	char *host;
-	char *path;
-	bool established;
-	bool disconnecting;
-	struct timer *retry;
-	struct timespec last_connected;
-	int retry_seconds_idx;
+struct json {
 	jsmn_parser parser;
 	jsmntok_t *tokens;
 	int num_tokens;
 	char *buf;
 	int buf_size;
 	int buf_pos;
+};
+
+struct websocket {
+	char *host;
+	char *path;
+	struct json json;
 	struct exchg_client *cl;
-	union {
-		struct conn_ws {
-			struct websocket_conn *conn;
-			const struct exchg_websocket_ops *ops;
-		} ws;
-		struct conn_http {
-			struct http_conn *req;
-			const struct exchg_http_ops *ops;
-			bool print_data;
-		} http;
-	};
-	LIST_ENTRY(conn) list;
+	struct websocket_conn *conn;
+	const struct exchg_websocket_ops *ops;
+	bool established;
+	bool disconnecting;
+	struct timer *retry;
+	struct timespec last_connected;
+	int retry_seconds_idx;
+	LIST_ENTRY(websocket) list;
 	char private[];
 };
 
-bool conn_disconnecting(struct conn *c) {
-	return c->disconnecting;
+struct http {
+	char *host;
+	char *path;
+	char *method;
+	struct json json;
+	struct exchg_client *cl;
+	struct http_conn *conn;
+	const struct exchg_http_ops *ops;
+	bool print_data;
+	LIST_ENTRY(http) list;
+	char private[];
+};
+
+bool websocket_disconnecting(struct websocket *w) {
+	return w->disconnecting;
 }
 
-bool conn_established(struct conn *c) {
-	if (!c)
+bool websocket_established(struct websocket *w) {
+	if (!w)
 		return false;
-	return c->established;
+	return w->established;
 }
 
-const char *conn_method(struct conn *c) {
-	return c->method;
+const char *websocket_host(struct websocket *w) {
+	return w->host;
 }
 
-const char *conn_host(struct conn *c) {
-	return c->host;
+const char *websocket_path(struct websocket *w) {
+	return w->path;
 }
 
-const char *conn_path(struct conn *c) {
-	return c->path;
+const char *http_method(struct http *h) {
+	return h->method;
 }
 
-static void conn_free(struct conn *conn) {
-	if (!conn)
-		return;
-	free(conn->method);
-	free(conn->host);
-	free(conn->path);
-	free(conn->buf);
-	free(conn->tokens);
-	free(conn);
+const char *http_host(struct http *h) {
+	return h->host;
 }
 
-void for_each_conn(struct exchg_client *cl,
-		   int (*func)(struct conn *conn, void *private),
+const char *http_path(struct http *h) {
+	return h->path;
+}
+
+void for_each_websocket(struct exchg_client *cl,
+		   int (*func)(struct websocket *w, void *private),
 		   void *private) {
-	struct conn *conn;
-	LIST_FOREACH(conn, &cl->conn_list, list) {
-		if (func(conn, private))
+	struct websocket *w;
+	LIST_FOREACH(w, &cl->websocket_list, list) {
+		if (func(w, private))
 			return;
 	}
 }
 
-int conn_printf(struct conn *conn, const char *fmt, ...) {
+int websocket_printf(struct websocket *ws, const char *fmt, ...) {
 	va_list ap;
 	va_start(ap, fmt);
 
-	int ret = ws_conn_vprintf(conn->ws.conn, fmt, ap);
+	int ret = ws_conn_vprintf(ws->conn, fmt, ap);
 	va_end(ap);
 	return ret;
 }
 
-static void conn_offline(struct conn *conn) {
-	struct exchg_context *ctx = conn->cl->ctx;
-
-	LIST_REMOVE(conn, list);
-	conn_free(conn);
-
+static void conn_offline(struct exchg_context *ctx) {
 	ctx->online = false;
 	for (enum exchg_id id = 0; id < EXCHG_ALL_EXCHANGES; id++) {
 		struct exchg_client *cl = ctx->clients[id];
 
-		if (cl && !LIST_EMPTY(&cl->conn_list)) {
+		if (cl && (!LIST_EMPTY(&cl->websocket_list) ||
+			   !LIST_EMPTY(&cl->http_list))) {
 			ctx->online = true;
 			return;
 		}
@@ -128,18 +126,51 @@ static void conn_offline(struct conn *conn) {
 	}
 }
 
-void conn_close(struct conn *conn) {
-	conn->disconnecting = true;
-	if (conn->type == CONN_TYPE_WS) {
-		if (conn->ws.conn) {
-			ws_conn_close(conn->ws.conn);
-		} else if (conn->retry) {
-			timer_cancel(conn->retry);
-			conn_offline(conn);
-		}
-		// else { we're inside the on_l2_disconnect() callback }
-	} else
-		http_conn_close(conn->http.req);
+static void json_free(struct json *json) {
+	free(json->buf);
+	free(json->tokens);
+}
+
+static void __http_free(struct http *h) {
+	json_free(&h->json);
+	free(h->method);
+	free(h->host);
+	free(h->path);
+	free(h);
+}
+
+static void http_free(struct http *h) {
+	LIST_REMOVE(h, list);
+	conn_offline(h->cl->ctx);
+	__http_free(h);
+}
+
+static void __websocket_free(struct websocket *w) {
+	json_free(&w->json);
+	free(w->host);
+	free(w->path);
+	free(w);
+}
+
+static void websocket_free(struct websocket *w) {
+	LIST_REMOVE(w, list);
+	conn_offline(w->cl->ctx);
+	__websocket_free(w);
+}
+
+void websocket_close(struct websocket *w) {
+	w->disconnecting = true;
+	if (w->conn) {
+		ws_conn_close(w->conn);
+	} else if (w->retry) {
+		timer_cancel(w->retry);
+		websocket_free(w);
+	}
+	// else { we're inside the on_l2_disconnect() callback }
+}
+
+void http_close(struct http *h) {
+	http_conn_close(h->conn);
 }
 
 #ifndef LIST_FOREACH_SAFE
@@ -153,9 +184,13 @@ void exchg_teardown(struct exchg_client *cl) {
 	// TODO: add a callback and call it here,
 	// send order cancels, etc. Set a bit and
 	// look at that bit in the main callback
-	struct conn *conn, *tmp;
-	LIST_FOREACH_SAFE(conn, &cl->conn_list, list, tmp)
-		conn_close(conn);
+	struct websocket *w, *wtmp;
+	struct http *h;
+
+	LIST_FOREACH_SAFE(w, &cl->websocket_list, list, wtmp)
+		websocket_close(w);
+	LIST_FOREACH(h, &cl->http_list, list)
+		http_close(h);
 }
 
 static void put_response(char *in, size_t len) {
@@ -163,111 +198,114 @@ static void put_response(char *in, size_t len) {
 	fputc('\n', stderr);
 }
 
-static int conn_buf_add(struct conn *conn, char *in,
-			size_t len) {
-	if (len + conn->buf_pos > conn->buf_size) {
-		size_t new_sz = 2 * (len+conn->buf_pos);
-		char *buf = realloc(conn->buf, new_sz);
+static int json_buf_add(struct json *json, char *in, size_t len) {
+	if (len + json->buf_pos > json->buf_size) {
+		size_t new_sz = 2 * (len+json->buf_pos);
+		char *buf = realloc(json->buf, new_sz);
 		if (!buf) {
 			exchg_log("%s: OOM\n", __func__);
-			return -1;
+			return -ENOMEM;
 		}
-		conn->buf = buf;
-		conn->buf_size = new_sz;
+		json->buf = buf;
+		json->buf_size = new_sz;
 	}
-	memcpy(conn->buf + conn->buf_pos, in, len);
-	conn->buf_pos += len;
+	memcpy(json->buf + json->buf_pos, in, len);
+	json->buf_pos += len;
 	return 0;
 }
 
-static void conn_json_init(struct conn *conn) {
-	jsmn_init(&conn->parser);
-	conn->buf_pos = 0;
+static void json_init(struct json *json) {
+	jsmn_init(&json->parser);
+	json->buf_pos = 0;
 }
 
-static int conn_parse_json(struct conn *conn, char *in,
-			   size_t len, char **json) {
+static int json_parse(struct json *j, char *in,
+		      size_t len, char **json, size_t *json_len) {
 	char *data = in;
 	size_t data_len = len;
 
-	if (conn->buf_pos > 0) {
-		if (conn_buf_add(conn, in, len))
-			return -1;
-		data = conn->buf;
-		data_len = conn->buf_pos;
+	if (j->buf_pos > 0) {
+		if (json_buf_add(j, in, len))
+			return -ENOMEM;
+		data = j->buf;
+		data_len = j->buf_pos;
 	}
 
 	int numtoks;
-	while ((numtoks = jsmn_parse(&conn->parser, data, data_len,
-				     conn->tokens, conn->num_tokens)) == JSMN_ERROR_NOMEM) {
-		int n = 2 * conn->num_tokens;
-		jsmntok_t *toks = realloc(conn->tokens, n * sizeof(jsmntok_t));
+	while ((numtoks = jsmn_parse(&j->parser, data, data_len,
+				     j->tokens, j->num_tokens)) == JSMN_ERROR_NOMEM) {
+		int n = 2 * j->num_tokens;
+		jsmntok_t *toks = realloc(j->tokens, n * sizeof(jsmntok_t));
 		if (!toks) {
 			exchg_log("%s: OOM\n", __func__);
-			return -1;
+			return -ENOMEM;
 		}
-		conn->tokens = toks;
-		conn->num_tokens = n;
+		j->tokens = toks;
+		j->num_tokens = n;
 	}
 
 	if (numtoks == JSMN_ERROR_PART) {
-		if (conn->buf_pos == 0)
-			return conn_buf_add(conn, in, len);
+		if (j->buf_pos == 0)
+			return json_buf_add(j, in, len);
 		return 0;
 	}
-	if (unlikely(numtoks < 0)) {
-		exchg_log("%s%s sent data that doesn't parse as JSON:\n",
-			  conn->host, conn->path);
-		put_response(data, data_len);
-		return -1;
-	}
 	*json = data;
-	conn_json_init(conn);
+	*json_len = data_len;
+	if (unlikely(numtoks < 0))
+		return -EINVAL;
+	json_init(j);
 	return numtoks;
 }
 
 static void ws_on_error(void *p) {
-	struct conn *conn = p;
+	struct websocket *w = p;
 
-	exchg_log("wss://%s%s error\n", conn->host, conn->path);
-	conn->established = false;
-	conn->disconnecting = true;
-	if (conn->ws.ops->on_disconnect)
-		conn->ws.ops->on_disconnect(conn->cl, conn, -1);
-	conn_offline(conn);
+	// TODO: websocket_log() and http_log() helpers
+	exchg_log("wss://%s%s error\n", w->host, w->path);
+	w->established = false;
+	w->disconnecting = true;
+	if (w->ops->on_disconnect)
+		w->ops->on_disconnect(w->cl, w, -1);
+	websocket_free(w);
 }
 
 static void ws_on_established(void *p) {
-	struct conn *conn = p;
+	struct websocket *w = p;
 
-	exchg_log("wss://%s%s established\n", conn->host, conn->path);
-	conn->established = true;
-	conn_json_init(conn);
-	if (conn->ws.ops->on_conn_established)
-		conn->ws.ops->on_conn_established(conn->cl, conn);
+	exchg_log("wss://%s%s established\n", w->host, w->path);
+	w->established = true;
+	json_init(&w->json);
+	if (w->ops->on_conn_established)
+		w->ops->on_conn_established(w->cl, w);
 }
 
 static int ws_add_headers(void *p, struct websocket_conn *ws) {
-	struct conn *conn = p;
-	if (conn->ws.ops->add_headers)
-		return conn->ws.ops->add_headers(conn->cl, conn);
+	struct websocket *w = p;
+	if (w->ops->add_headers)
+		return w->ops->add_headers(w->cl, w);
 	return 0;
 }
 
 static int ws_recv(void *p, char *in, size_t len) {
-	struct conn *conn = p;
+	struct websocket *w = p;
 	char *json;
-	int numtoks = conn_parse_json(conn, in, len, &json);
+	size_t json_len;
+	int numtoks = json_parse(&w->json, in, len, &json, &json_len);
 
-	if (numtoks < 0)
+	if (numtoks < 0) {
+		if (numtoks == -EINVAL) {
+			exchg_log("%s%s sent data that doesn't parse as JSON:\n",
+				  w->host, w->path);
+			put_response(json, json_len);
+		}
 		return -1;
+	}
 	if (numtoks == 0)
 		return 0;
 
 	// TODO: return code that says whether to try reconnecting or not
-	if (conn->ws.ops->recv(conn->cl, conn, json,
-			       numtoks, conn->tokens)) {
-		conn->disconnecting = true;
+	if (w->ops->recv(w->cl, w, json, numtoks, w->json.tokens)) {
+		w->disconnecting = true;
 		return -1;
 	}
 	return 0;
@@ -288,310 +326,296 @@ static void time_since(struct timespec *dst, const struct timespec *ts) {
 	dst->tv_sec = now.tv_sec - ts->tv_sec - carry;
 }
 
-static inline void conn_next_retry_seconds(struct conn *conn) {
+static inline void ws_next_retry_seconds(struct websocket *w) {
 	int last_idx = ARRAY_SIZE(retry_seconds)-1;
 	struct timespec since_last_connected;
 
-	time_since(&since_last_connected, &conn->last_connected);
+	time_since(&since_last_connected, &w->last_connected);
 	if (since_last_connected.tv_sec > retry_seconds[last_idx])
-		conn->retry_seconds_idx = 0;
-	else if (conn->retry_seconds_idx < last_idx)
-		conn->retry_seconds_idx++;
+		w->retry_seconds_idx = 0;
+	else if (w->retry_seconds_idx < last_idx)
+		w->retry_seconds_idx++;
 }
 
-static inline int conn_retry_seconds(struct conn *conn) {
-	if (conn->disconnecting)
+static inline int ws_retry_seconds(struct websocket *w) {
+	if (w->disconnecting)
 		return -1;
-	return retry_seconds[conn->retry_seconds_idx];
+	return retry_seconds[w->retry_seconds_idx];
 }
 
-static void ws_reconnect(struct conn *conn);
+static void ws_reconnect(struct websocket *w);
 
 static void reconnect_timer(void *p) {
-	struct conn *conn = p;
+	struct websocket *w = p;
 
-	conn->retry = NULL;
-	ws_reconnect(conn);
+	w->retry = NULL;
+	ws_reconnect(w);
 }
 
-static void conn_add_retry_timer(struct conn *conn) {
-	conn->retry = timer_new(conn->cl->ctx->net_context, reconnect_timer, conn,
-				retry_seconds[conn->retry_seconds_idx]);
+static void ws_add_retry_timer(struct websocket *w) {
+	w->retry = timer_new(w->cl->ctx->net_context, reconnect_timer, w,
+			     retry_seconds[w->retry_seconds_idx]);
 }
 
-void exchg_data_disconnect(struct exchg_client *cl, struct conn *conn,
+void exchg_data_disconnect(struct exchg_client *cl, struct websocket *w,
 			   int num_pairs_gone, enum exchg_pair *pairs_gone)
 {
 	if (cl->ctx->callbacks.on_l2_disconnect)
-		cl->ctx->callbacks.on_l2_disconnect(cl, conn_retry_seconds(conn),
+		cl->ctx->callbacks.on_l2_disconnect(cl, ws_retry_seconds(w),
 						    num_pairs_gone, pairs_gone,
 						    cl->ctx->user);
 }
 
-static void ws_reconnect(struct conn *conn) {
+static void ws_reconnect(struct websocket *w) {
 	do {
-		clock_gettime(CLOCK_MONOTONIC, &conn->last_connected);
-		conn->ws.conn = ws_dial(conn->cl->ctx->net_context, conn->host,
-					conn->path, conn);
-		if (conn->ws.conn)
+		clock_gettime(CLOCK_MONOTONIC, &w->last_connected);
+		w->conn = ws_dial(w->cl->ctx->net_context, w->host, w->path, w);
+		if (w->conn)
 			return;
 
-		conn_next_retry_seconds(conn);
-	} while (conn_retry_seconds(conn) == 0);
+		ws_next_retry_seconds(w);
+	} while (ws_retry_seconds(w) == 0);
 
-	conn_add_retry_timer(conn);
+	ws_add_retry_timer(w);
 }
 
 static void ws_on_closed(void *p) {
-	struct conn *conn = p;
+	struct websocket *w = p;
 
-	conn_next_retry_seconds(conn);
-	int reconnect_seconds = conn_retry_seconds(conn);
+	ws_next_retry_seconds(w);
+	int reconnect_seconds = ws_retry_seconds(w);
 
-	conn->established = false;
-	conn->ws.conn = NULL;
-	if (conn->ws.ops->on_disconnect &&
-	    conn->ws.ops->on_disconnect(conn->cl, conn, reconnect_seconds))
-		conn->disconnecting = true;
+	w->established = false;
+	w->conn = NULL;
+	if (w->ops->on_disconnect &&
+	    w->ops->on_disconnect(w->cl, w, reconnect_seconds))
+		w->disconnecting = true;
 
-	if (!conn->disconnecting) {
+	if (!w->disconnecting) {
 		if (reconnect_seconds == 0) {
 			exchg_log("wss://%s%s closed. Reconnecting now\n",
-				  conn->host, conn->path);
-			ws_reconnect(conn);
+				  w->host, w->path);
+			ws_reconnect(w);
 		} else {
 			exchg_log("wss://%s%s closed. Reconnecting in %d second%s\n",
-				  conn->host, conn->path, reconnect_seconds,
+				  w->host, w->path, reconnect_seconds,
 				  reconnect_seconds > 1 ? "s" : "");
-			conn_add_retry_timer(conn);
+			ws_add_retry_timer(w);
 		}
 	} else {
-		conn_offline(conn);
+		websocket_free(w);
 	}
 }
 
-int conn_add_header(struct conn *conn, const unsigned char *name,
+int http_add_header(struct http *h, const unsigned char *name,
 		    const unsigned char *val, size_t len) {
-	if (conn->type == CONN_TYPE_HTTP)
-		return http_conn_add_header(conn->http.req, name, val, len);
-	else
-		return ws_conn_add_header(conn->ws.conn, name, val, len);
+	return http_conn_add_header(h->conn, name, val, len);
+}
+
+int websocket_add_header(struct websocket *w, const unsigned char *name,
+			 const unsigned char *val, size_t len) {
+	return ws_conn_add_header(w->conn, name, val, len);
 }
 
 static void http_on_error(void *p, const char *err) {
-	struct conn *conn = p;
-	conn->established = false;
-	if (conn->http.ops->on_error)
-		conn->http.ops->on_error(conn->cl, conn, err);
-	conn_offline(conn);
+	struct http *h = p;
+	if (h->ops->on_error)
+		h->ops->on_error(h->cl, h, err);
+	http_free(h);
 }
 
 static void http_on_established(void *p, int status) {
-	struct conn *conn = p;
+	struct http *h = p;
 
 	if (status != 200)
 		exchg_log("https://%s%s established (status %d)\n",
-			  conn->host, conn->path, status);
+			  h->host, h->path, status);
 	else
 		exchg_log("https://%s%s established\n",
-			  conn->host, conn->path);
-	conn->established = true;
-	conn_json_init(conn);
-	if (conn->http.ops->on_established)
-		conn->http.ops->on_established(conn->cl, conn, status);
+			  h->host, h->path);
+	json_init(&h->json);
+	if (h->ops->on_established)
+		h->ops->on_established(h->cl, h, status);
 }
 
 static int http_add_headers(void *p, struct http_conn *req) {
-	struct conn *conn = p;
-	if (conn->http.ops->add_headers)
-		return conn->http.ops->add_headers(conn->cl, conn);
+	struct http *h = p;
+	if (h->ops->add_headers)
+		return h->ops->add_headers(h->cl, h);
 	return 0;
 }
 
-int conn_http_body_sprintf(struct conn *conn, const char *fmt, ...) {
+int http_body_sprintf(struct http *h, const char *fmt, ...) {
 	va_list ap;
 	int len;
 
 	va_start(ap, fmt);
-	len = http_conn_vsprintf(conn->http.req, fmt, ap);
+	len = http_conn_vsprintf(h->conn, fmt, ap);
 	va_end(ap);
 	return len;
 }
 
-char *conn_http_body(struct conn *conn) {
-	return http_conn_body(conn->http.req);
+char *http_body(struct http *h) {
+	return http_conn_body(h->conn);
 }
 
-size_t conn_http_body_len(struct conn *conn) {
-	return http_conn_body_len(conn->http.req);
+size_t http_body_len(struct http *h) {
+	return http_conn_body_len(h->conn);
 }
 
 static int http_recv(void *p, char *in, size_t len) {
-	struct conn *conn = p;
+	struct http *h = p;
 	char *json;
+	size_t json_len;
 	int numtoks;
 
-	if (unlikely(conn->http.print_data)) {
+	if (unlikely(h->print_data)) {
 		put_response(in, len);
 		return 0;
 	}
 
-	numtoks = conn_parse_json(conn, in, len, &json);
+	numtoks = json_parse(&h->json, in, len, &json, &json_len);
 	if (numtoks < 0) {
-		conn->http.print_data = true;
+		if (numtoks == -EINVAL) {
+			exchg_log("%s%s sent data that doesn't parse as JSON:\n",
+				  h->host, h->path);
+			put_response(json, json_len);
+			h->print_data = true;
+		}
 		return -1;
 	}
 	if (numtoks == 0)
 		return 0;
 
-	return conn->http.ops->recv(conn->cl, conn,
-				    http_conn_status(conn->http.req),
-				    json, numtoks, conn->tokens);
+	return h->ops->recv(h->cl, h, http_conn_status(h->conn),
+			    json, numtoks, h->json.tokens);
 }
 
 static void http_on_closed(void *p) {
-	struct conn *conn = p;
+	struct http *h = p;
 
-	exchg_log("https://%s%s closed\n", conn->host, conn->path);
-	conn->established = false;
-	conn->disconnecting = true;
-	if (conn->http.ops->on_closed)
-		conn->http.ops->on_closed(conn->cl, conn);
-	conn_offline(conn);
+	exchg_log("https://%s%s closed\n", h->host, h->path);
+	if (h->ops->on_closed)
+		h->ops->on_closed(h->cl, h);
+	http_free(h);
 }
 
-enum conn_type conn_type(struct conn *c) {
-	return c->type;
-}
-
-static int conn_init(struct conn *conn, struct exchg_client *cl,
-		     const char *method, const char *host, const char *path,
-		     enum conn_type type, struct conn_http *http, struct conn_ws *ws) {
-	if (type == CONN_TYPE_WS) {
-		memset(conn, 0, sizeof(struct conn) + ws->ops->conn_data_size);
-		memcpy(&conn->ws, ws, sizeof(*ws));
-	} else {
-		memset(conn, 0, sizeof(struct conn) + http->ops->conn_data_size);
-		memcpy(&conn->http, http, sizeof(*http));
-	}
-	LIST_INSERT_HEAD(&cl->conn_list, conn, list);
-	conn->cl = cl;
-	conn->type = type;
-	if (type == CONN_TYPE_HTTP) {
-		conn->method = strdup(method);
-		if (!conn->method) {
-			exchg_log("%s: OOM\n", __func__);
-			return -1;
-		}
-	}
-	conn->host = strdup(host);
-	if (!conn->host) {
-		exchg_log("%s: OOM\n", __func__);
+static int json_alloc(struct json *json) {
+	json->tokens = malloc(sizeof(jsmntok_t) * 500);
+	if (!json->tokens)
 		return -1;
-	}
-	conn->path = strdup(path);
-	if (!conn->path) {
-		exchg_log("%s: OOM\n", __func__);
-		return -1;
-	}
-	jsmn_init(&conn->parser);
-	conn->tokens = malloc(sizeof(jsmntok_t) * 500);
-	if (!conn->tokens) {
-		exchg_log("%s: OOM\n", __func__);
-		return -1;
-	}
-	conn->num_tokens = 500;
-	clock_gettime(CLOCK_MONOTONIC, &conn->last_connected);
+	json->num_tokens = 500;
+	json_init(json);
 	return 0;
 }
 
-static struct conn *exchg_http_dial(const char *host, const char *path,
+static struct http *exchg_http_dial(const char *host, const char *path,
 				    const struct exchg_http_ops *ops,
 				    struct exchg_client *cl, const char *method) {
-	struct conn *conn = malloc(sizeof(*conn) + ops->conn_data_size);
-	if (!conn) {
+	struct http *h = malloc(sizeof(*h) + ops->conn_data_size);
+	if (!h) {
 		exchg_log("%s: OOM\n", __func__);
 		return NULL;
 	}
-	struct http_conn *req = http_dial(cl->ctx->net_context, host,
-					  path, method, conn);
-	if (!req) {
-		free(conn);
-		return NULL;
-	}
-	struct conn_http h = {
-		.ops = ops,
-		.req = req,
-	};
-	if (conn_init(conn, cl, method, host, path, CONN_TYPE_HTTP, &h, NULL)) {
-		// important to note that here, conn was at least
-		// partially initialized by conn_init even though it
-		// failed, so the eventual call to conn_free() will
-		// not give nonsense. same goes for exchg_websocket_connect()
-		http_conn_close(req);
+	struct http_conn *conn = http_dial(cl->ctx->net_context, host,
+					   path, method, h);
+	if (!conn) {
+		free(h);
 		return NULL;
 	}
 	cl->ctx->online = true;
-	return conn;
+	memset(h, 0, sizeof(*h) + ops->conn_data_size);
+	h->ops = ops;
+	h->conn = conn;
+	LIST_INSERT_HEAD(&cl->http_list, h, list);
+	h->cl = cl;
+	h->method = strdup(method);
+	if (!h->method)
+		goto oom;
+	h->host = strdup(host);
+	if (!h->host)
+		goto oom;
+	h->path = strdup(path);
+	if (!h->path)
+		goto oom;
+	if (json_alloc(&h->json))
+		goto oom;
+	return h;
+
+oom:
+	// important to note that here conn was at least partially
+	// initialized even though it failed, so the eventual call to http_free()
+	// will not give nonsense. same goes for exchg_websocket_connect()
+	http_conn_close(h->conn);
+	return NULL;
 }
 
-struct conn *exchg_http_get(const char *host, const char *path,
+struct http *exchg_http_get(const char *host, const char *path,
 			    const struct exchg_http_ops *ops,
 			    struct exchg_client *cl) {
 	return exchg_http_dial(host, path, ops, cl, "GET");
 }
 
-struct conn *exchg_http_post(const char *host, const char *path,
+struct http *exchg_http_post(const char *host, const char *path,
 			     const struct exchg_http_ops *ops,
 			     struct exchg_client *cl) {
 	return exchg_http_dial(host, path, ops, cl, "POST");
 }
 
-struct conn *exchg_http_delete(const char *host, const char *path,
+struct http *exchg_http_delete(const char *host, const char *path,
 			       const struct exchg_http_ops *ops,
 			       struct exchg_client *cl) {
 	return exchg_http_dial(host, path, ops, cl, "DELETE");
 }
 
-struct conn *exchg_websocket_connect(struct exchg_client *cl,
-				     const char *host, const char *path,
-				     const struct exchg_websocket_ops *ops) {
-	struct conn *conn = malloc(sizeof(*conn) + ops->conn_data_size);
-	if (!conn) {
+struct websocket *exchg_websocket_connect(struct exchg_client *cl,
+					  const char *host, const char *path,
+					  const struct exchg_websocket_ops *ops) {
+	struct websocket *w = malloc(sizeof(*w) + ops->conn_data_size);
+	if (!w) {
 		exchg_log("%s: OOM\n", __func__);
 		return NULL;
 	}
-	struct websocket_conn *ws = ws_dial(cl->ctx->net_context, host, path, conn);
-	if (!ws) {
-		free(conn);
-		return NULL;
-	}
-
-	struct conn_ws w = {
-		.ops = ops,
-		.conn = ws,
-	};
-	if (conn_init(conn, cl, NULL, host, path, CONN_TYPE_WS, NULL, &w)) {
-		ws_conn_close(ws);
+	struct websocket_conn *conn = ws_dial(cl->ctx->net_context, host, path, w);
+	if (!conn) {
+		free(w);
 		return NULL;
 	}
 	cl->ctx->online = true;
-	return conn;
+	memset(w, 0, sizeof(*w) + ops->conn_data_size);
+	w->ops = ops;
+	w->conn = conn;
+	LIST_INSERT_HEAD(&cl->websocket_list, w, list);
+	w->cl = cl;
+	clock_gettime(CLOCK_MONOTONIC, &w->last_connected);
+	w->host = strdup(host);
+	if (!w->host)
+		goto oom;
+	w->path = strdup(path);
+	if (!w->path)
+		goto oom;
+	if (json_alloc(&w->json))
+		goto oom;
+	return w;
+
+oom:
+	ws_conn_close(w->conn);
+	return NULL;
 }
 
 int exchg_parse_info_on_established(struct exchg_client *cl,
-				    struct conn *conn, int status) {
+				    struct http *h, int status) {
 	if (status != 200)
 		cl->get_info_error = -1;
 	return 0;
 }
 
-void exchg_parse_info_on_error(struct exchg_client *cl, struct conn *conn,
+void exchg_parse_info_on_error(struct exchg_client *cl, struct http *h,
 			       const char *err) {
 	cl->get_info_error = -1;
 }
 
-void exchg_parse_info_on_closed(struct exchg_client *cl, struct conn *conn) {
+void exchg_parse_info_on_closed(struct exchg_client *cl, struct http *h) {
 	cl->getting_info = false;
 }
 
@@ -630,8 +654,12 @@ int exchg_get_balances(struct exchg_client *cl, void *req_private) {
 	return cl->get_balances(cl, req_private);
 }
 
-void *conn_private(struct conn *c) {
-	return c->private;
+void *websocket_private(struct websocket *w) {
+	return w->private;
+}
+
+void *http_private(struct http *h) {
+	return h->private;
 }
 
 struct order_info *__exchg_new_order(struct exchg_client *cl, const struct exchg_order *order,
@@ -824,7 +852,8 @@ struct exchg_client *alloc_exchg_client(struct exchg_context *ctx,
 	}
 	ret->orders = g_hash_table_new_full(g_int64_hash, g_int64_equal,
 					    NULL, free);
-	LIST_INIT(&ret->conn_list);
+	LIST_INIT(&ret->websocket_list);
+	LIST_INIT(&ret->http_list);
 	LIST_INIT(&ret->work);
 	ctx->clients[id] = ret;
 	return ret;
@@ -832,13 +861,18 @@ struct exchg_client *alloc_exchg_client(struct exchg_context *ctx,
 
 void free_exchg_client(struct exchg_client *cl) {
 	struct work *w, *tmp_w;
-	struct conn *c, *tmp_c;
+	struct websocket *ws, *tmp_ws;
+	struct http *h, *tmp_h;
 
 	cl->ctx->clients[cl->id] = NULL;
 	HMAC_CTX_free(cl->hmac_ctx);
-	LIST_FOREACH_SAFE(c, &cl->conn_list, list, tmp_c) {
-		LIST_REMOVE(c, list);
-		conn_free(c);
+	LIST_FOREACH_SAFE(ws, &cl->websocket_list, list, tmp_ws) {
+		LIST_REMOVE(ws, list);
+		__websocket_free(ws);
+	}
+	LIST_FOREACH_SAFE(h, &cl->http_list, list, tmp_h) {
+		LIST_REMOVE(h, list);
+		__http_free(h);
 	}
 	LIST_FOREACH_SAFE(w, &cl->work, list, tmp_w) {
 		LIST_REMOVE(w, list);

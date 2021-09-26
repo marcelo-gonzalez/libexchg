@@ -25,9 +25,9 @@ struct kraken_client {
 	SHA256_CTX sha_ctx;
 	GHashTable *channel_mapping;
 	GHashTable *cancelations;
-	struct conn *conn;
+	struct websocket *data_ws;
 	bool openorders_recvd;
-	struct conn *private_ws;
+	struct websocket *private_ws;
 	bool getting_token;
 	char *ws_token;
 };
@@ -36,11 +36,11 @@ static int kraken_subscribe(struct kraken_client *kkn, enum exchg_pair pair) {
 	struct kraken_pair_info *pi = &kkn->pair_info[pair];
 
 	pi->subbed = true;
-	if (conn_printf(kkn->conn, "{ \"event\": \"subscribe\", "
-			"\"pair\": [\"%s\"], "
-			"\"subscription\": {\"name\": \"book\", "
-			"\"depth\": 1000}}",
-			pi->wsname) < 0)
+	if (websocket_printf(kkn->data_ws, "{ \"event\": \"subscribe\", "
+			     "\"pair\": [\"%s\"], "
+			     "\"subscription\": {\"name\": \"book\", "
+			     "\"depth\": 1000}}",
+			     pi->wsname) < 0)
 		return -1;
 	return 0;
 }
@@ -122,7 +122,7 @@ struct event_msg {
 	unsigned int reqid;
 };
 
-static int parse_event(struct exchg_client *cl, struct conn *conn,
+static int parse_event(struct exchg_client *cl,
 		       const char *json, int num_toks, jsmntok_t *toks) {
 	struct kraken_client *kkn = client_private(cl);
 	const char *problem;
@@ -409,7 +409,7 @@ static int insert_orders(struct exchg_client *cl, const char *json,
 	return idx;
 }
 
-static int kraken_recv(struct exchg_client *cl, struct conn *conn,
+static int kraken_recv(struct exchg_client *cl, struct websocket *w,
 		       char *json, int num_toks, jsmntok_t *toks) {
 	struct kraken_client *kkn = client_private(cl);
 
@@ -417,7 +417,7 @@ static int kraken_recv(struct exchg_client *cl, struct conn *conn,
 		return 0;
 
 	if (toks[0].type == JSMN_OBJECT)
-		return parse_event(cl, conn, json, num_toks, toks);
+		return parse_event(cl, json, num_toks, toks);
 
 	if (toks[0].type != JSMN_ARRAY) {
 		exchg_log("Kraken sent non-object, non-array data\n");
@@ -489,7 +489,7 @@ static int book_sub(struct exchg_client *cl) {
 static bool book_sub_work(struct exchg_client *cl, void *p) {
 	struct kraken_client *kkn = client_private(cl);
 
-	if (!cl->pair_info_current || !conn_established(kkn->conn))
+	if (!cl->pair_info_current || !websocket_established(kkn->data_ws))
 		return false;
 
 	book_sub(cl);
@@ -497,20 +497,20 @@ static bool book_sub_work(struct exchg_client *cl, void *p) {
 }
 
 static int kraken_conn_established(struct exchg_client *cl,
-				   struct conn *conn) {
+				   struct websocket *w) {
 	if (!cl->pair_info_current)
 		return queue_work_exclusive(cl, book_sub_work, NULL);
 	else
 		return book_sub(cl);
 }
 
-static int kraken_on_disconnect(struct exchg_client *cl, struct conn *conn,
-				 int reconnect_seconds) {
+static int kraken_on_disconnect(struct exchg_client *cl, struct websocket *w,
+				int reconnect_seconds) {
 	struct kraken_client *kkn = client_private(cl);
 	int num_pairs_gone = 0;
 	enum exchg_pair pairs_gone[EXCHG_NUM_PAIRS];
 	if (reconnect_seconds < 0)
-		kkn->conn = NULL;
+		kkn->data_ws = NULL;
 	for (enum exchg_pair pair = 0; pair < EXCHG_NUM_PAIRS; pair++) {
 		struct exchg_pair_info *pi = &cl->pair_info[pair];
 		struct kraken_pair_info *kpi = &kkn->pair_info[pair];
@@ -520,7 +520,7 @@ static int kraken_on_disconnect(struct exchg_client *cl, struct conn *conn,
 		}
 		kpi->subbed = false;
 	}
-	exchg_data_disconnect(cl, conn, num_pairs_gone, pairs_gone);
+	exchg_data_disconnect(cl, w, num_pairs_gone, pairs_gone);
 	return 0;
 }
 
@@ -532,9 +532,9 @@ static const struct exchg_websocket_ops websocket_ops = {
 
 static int kraken_connect(struct exchg_client *cl) {
 	struct kraken_client *kkn = client_private(cl);
-	kkn->conn = exchg_websocket_connect(cl, "ws.kraken.com", "/",
-					    &websocket_ops);
-	if (kkn->conn)
+	kkn->data_ws = exchg_websocket_connect(cl, "ws.kraken.com", "/",
+					       &websocket_ops);
+	if (kkn->data_ws)
 		return 0;
 	return -1;
 }
@@ -769,7 +769,7 @@ static int parse_info_result(struct exchg_client *cl, const char *json,
 	return idx;
 }
 
-static int kraken_parse_info(struct exchg_client *cl, struct conn *conn,
+static int kraken_parse_info(struct exchg_client *cl, struct http *http,
 			     int status, char *json, int num_toks, jsmntok_t *toks) {
 	const char *url = "https://api.kraken.com/0/public/AssetPairs";
 	char problem[100];
@@ -834,8 +834,7 @@ static struct exchg_http_ops get_info_ops = {
 	.on_closed = exchg_parse_info_on_closed,
 };
 
-static int kraken_l2_subscribe(struct exchg_client *cl,
-			       enum exchg_pair pair) {
+static int kraken_l2_subscribe(struct exchg_client *cl, enum exchg_pair pair) {
 	struct kraken_client *kkn = client_private(cl);
 	struct kraken_pair_info *kpi = &kkn->pair_info[pair];
 
@@ -844,10 +843,10 @@ static int kraken_l2_subscribe(struct exchg_client *cl,
 
 	kpi->watching_l2 = true;
 
-	if (cl->pair_info_current && conn_established(kkn->conn))
+	if (cl->pair_info_current && websocket_established(kkn->data_ws))
 		return kraken_subscribe(kkn, pair);
 
-	if (!kkn->conn && kraken_connect(cl))
+	if (!kkn->data_ws && kraken_connect(cl))
 		return -1;
 	return 0;
 }
@@ -868,30 +867,30 @@ struct http_data {
 	};
 };
 
-static int private_http_add_headers(struct exchg_client *cl, struct conn *conn) {
-	struct http_data *h = conn_private(conn);
+static int private_http_add_headers(struct exchg_client *cl, struct http *http) {
+	struct http_data *h = http_private(http);
 
-	if (conn_add_header(conn, (unsigned char *)"API-Key:",
+	if (http_add_header(http, (unsigned char *)"API-Key:",
 			    (unsigned char *)cl->apikey_public,
 			    cl->apikey_public_len))
 		return 1;
-	if (conn_add_header(conn, (unsigned char *)"API-Sign:",
+	if (http_add_header(http, (unsigned char *)"API-Sign:",
 			    (unsigned char*)h->hmac, h->hmac_len))
 		return 1;
-	if (conn_add_header(conn, (unsigned char *)"Content-Type:",
+	if (http_add_header(http, (unsigned char *)"Content-Type:",
 			    (unsigned char *)
 			    "application/x-www-form-urlencoded",
 			    strlen("application/x-www-form-urlencoded")))
 		return 1;
 	char l[16];
-	size_t len = sprintf(l, "%zu", conn_http_body_len(conn));
-	if (conn_add_header(conn, (unsigned char *)"Content-Length:",
+	size_t len = sprintf(l, "%zu", http_body_len(http));
+	if (http_add_header(http, (unsigned char *)"Content-Length:",
 			    (unsigned char *)l, len))
 		return 1;
 	return 0;
 }
 
-static int balances_recv(struct exchg_client *cl, struct conn *conn,
+static int balances_recv(struct exchg_client *cl, struct http *http,
 			 int status, char *json, int num_toks, jsmntok_t *toks) {
 	const char *problem;
 
@@ -951,7 +950,7 @@ static int balances_recv(struct exchg_client *cl, struct conn *conn,
 			key_idx = json_skip(num_toks, toks, key_idx+1);
 	}
 
-	struct http_data *h = conn_private(conn);
+	struct http_data *h = http_private(http);
 	exchg_on_balances(cl, balances, h->request_private);
 
 	if (warn) {
@@ -972,12 +971,12 @@ static struct exchg_http_ops balances_ops = {
 	.conn_data_size = sizeof(struct http_data),
 };
 
-static int private_http_auth(struct exchg_client *cl, struct conn *http) {
-	struct http_data *h = conn_private(http);
+static int private_http_auth(struct exchg_client *cl, struct http *http) {
+	struct http_data *h = http_private(http);
 	struct kraken_client *k = client_private(cl);
 
 	// 123456{body}&nonce=123456
-	char *to_hash = malloc(20 + conn_http_body_len(http) + 27);
+	char *to_hash = malloc(20 + http_body_len(http) + 27);
 	if (!to_hash) {
 		fprintf(stderr, "%s: OOM\n", __func__);
 		return -1;
@@ -985,17 +984,17 @@ static int private_http_auth(struct exchg_client *cl, struct conn *http) {
 	char *p = to_hash;
 	int64_t nonce = current_micros();
 
-	if (conn_http_body_sprintf(http, "%snonce=%"PRId64,
-				   conn_http_body_len(http) > 0 ? "&" : "", nonce) < 0) {
+	if (http_body_sprintf(http, "%snonce=%"PRId64,
+			      http_body_len(http) > 0 ? "&" : "", nonce) < 0) {
 		free(to_hash);
 		return -1;
 	}
 	p += sprintf(p, "%"PRId64, nonce);
-	memcpy(p, conn_http_body(http), conn_http_body_len(http));
-	p += conn_http_body_len(http);
+	memcpy(p, http_body(http), http_body_len(http));
+	p += http_body_len(http);
 
 	unsigned char to_auth[200+SHA256_DIGEST_LENGTH];
-	const char *path = conn_path(http);
+	const char *path = http_path(http);
 	size_t path_len = strlen(path);
 	unsigned char *hash = to_auth + path_len;
 
@@ -1016,15 +1015,15 @@ static int private_http_auth(struct exchg_client *cl, struct conn *http) {
 }
 
 static int kraken_get_balances(struct exchg_client *cl, void *req_private) {
-	struct conn *http = exchg_http_post("api.kraken.com", "/0/private/Balance",
+	struct http *http = exchg_http_post("api.kraken.com", "/0/private/Balance",
 					    &balances_ops, cl);
 	if (!http)
 		return -1;
-	struct http_data *h = conn_private(http);
+	struct http_data *h = http_private(http);
 	h->request_private = req_private;
 
 	if (private_http_auth(cl, http)) {
-		conn_close(http);
+		http_close(http);
 		return -1;
 	}
 	return 0;
@@ -1050,7 +1049,7 @@ static int kraken_new_keypair(struct exchg_client *cl,
 	return 0;
 }
 
-static int token_recv(struct exchg_client *cl, struct conn *conn,
+static int token_recv(struct exchg_client *cl, struct http *http,
 		      int status, char *json, int num_toks, jsmntok_t *toks) {
 	struct kraken_client *kc = client_private(cl);
 	const char *problem;
@@ -1121,7 +1120,7 @@ bad:
 	return -1;
 }
 
-static void token_on_closed(struct exchg_client *cl, struct conn *conn) {
+static void token_on_closed(struct exchg_client *cl, struct http *http) {
 	struct kraken_client *kc = client_private(cl);
 
 	kc->getting_token = false;
@@ -1136,12 +1135,12 @@ static struct exchg_http_ops token_ops = {
 
 static int get_token(struct exchg_client *cl) {
 	struct kraken_client *kc = client_private(cl);
-	struct conn *http = exchg_http_post("api.kraken.com", "/0/private/GetWebSocketsToken",
+	struct http *http = exchg_http_post("api.kraken.com", "/0/private/GetWebSocketsToken",
 					    &token_ops, cl);
 	if (!http)
 		return -1;
 	if (private_http_auth(cl, http)) {
-		conn_close(http);
+		http_close(http);
 		return -1;
 	}
 	kc->getting_token = true;
@@ -1266,12 +1265,12 @@ bad:
 	return -1;
 }
 
-static int private_ws_recv(struct exchg_client *cl, struct conn *conn,
+static int private_ws_recv(struct exchg_client *cl, struct websocket *w,
 			   char *json, int num_toks, jsmntok_t *toks) {
 	const char *problem;
 
 	if (toks[0].type == JSMN_OBJECT)
-		return parse_event(cl, conn, json, num_toks, toks);
+		return parse_event(cl, json, num_toks, toks);
 
 	if (toks[0].type != JSMN_ARRAY) {
 		problem = "not an object or an array";
@@ -1298,10 +1297,10 @@ bad:
 }
 
 static int priv_sub(struct kraken_client *kkn) {
-	if (conn_printf(kkn->private_ws, "{ \"event\": "
-			"\"subscribe\", \"subscription\":"
-			" {\"name\": \"openOrders\", "
-			"\"token\": \"%s\"}}", kkn->ws_token) < 0)
+	if (websocket_printf(kkn->private_ws, "{ \"event\": "
+			     "\"subscribe\", \"subscription\":"
+			     " {\"name\": \"openOrders\", "
+			     "\"token\": \"%s\"}}", kkn->ws_token) < 0)
 		return -1;
 	return 0;
 }
@@ -1309,14 +1308,13 @@ static int priv_sub(struct kraken_client *kkn) {
 static bool priv_sub_work(struct exchg_client *cl, void *p) {
 	struct kraken_client *kkn = client_private(cl);
 
-	if (!kkn->ws_token || !conn_established(kkn->private_ws))
+	if (!kkn->ws_token || !websocket_established(kkn->private_ws))
 		return false;
 	priv_sub(kkn);
 	return true;
 }
 
-static int private_ws_on_established(struct exchg_client *cl,
-				     struct conn *conn) {
+static int private_ws_on_established(struct exchg_client *cl, struct websocket *w) {
 	struct kraken_client *kkn = client_private(cl);
 
 	if (kkn->ws_token)
@@ -1330,7 +1328,7 @@ static int private_ws_on_established(struct exchg_client *cl,
 }
 
 static int private_ws_on_disconnect(struct exchg_client *cl,
-				    struct conn *conn,
+				    struct websocket *w,
 				    int reconnect_seconds) {
 	struct kraken_client *kkn = client_private(cl);
 	if (reconnect_seconds < 0)
@@ -1399,33 +1397,33 @@ static int private_ws_add_order(struct exchg_client *cl,
 		     pi->price_decimals);
 	decimal_to_str(px, &info->order.price);
 
-	if (conn_printf(kkn->private_ws, "{\"event\": \"addOrder\", "
-			"\"token\": \"%s\", \"reqid\": %"PRId64", "
-			"\"userref\": \"%"PRId64"\", "
-			"\"ordertype\": \"limit\", "
-			"\"type\": \"%s\", "
-			"\"pair\": \"%s\", "
-			"\"price\": \"%s\", "
-			"\"volume\": \"%s\"%s}",
-			kkn->ws_token, info->id, info->id,
-			info->order.side == EXCHG_SIDE_BUY ?
-			"buy" : "sell", kpi->wsname, px, sz,
-			timeinforce) < 0)
+	if (websocket_printf(kkn->private_ws, "{\"event\": \"addOrder\", "
+			     "\"token\": \"%s\", \"reqid\": %"PRId64", "
+			     "\"userref\": \"%"PRId64"\", "
+			     "\"ordertype\": \"limit\", "
+			     "\"type\": \"%s\", "
+			     "\"pair\": \"%s\", "
+			     "\"price\": \"%s\", "
+			     "\"volume\": \"%s\"%s}",
+			     kkn->ws_token, info->id, info->id,
+			     info->order.side == EXCHG_SIDE_BUY ?
+			     "buy" : "sell", kpi->wsname, px, sz,
+			     timeinforce) < 0)
 		return -1;
 	info->status = EXCHG_ORDER_SUBMITTED;
 	return 0;
 }
 
-static int add_order_recv(struct exchg_client *cl, struct conn *conn,
+static int add_order_recv(struct exchg_client *cl, struct http *http,
 			  int status, char *json, int num_toks, jsmntok_t *toks) {
-	struct http_data *data = conn_private(conn);
+	struct http_data *data = http_private(http);
 	struct order_info *info = exchg_order_lookup(cl, data->order_id);
 
 	if (!info)
 		return 0;
 
 	if (toks[0].type != JSMN_OBJECT) {
-		exchg_log("%s%s sent non-object data:\n", conn_host(conn), conn_path(conn));
+		exchg_log("%s%s sent non-object data:\n", http_host(http), http_path(http));
 		json_fprintln(stderr, json, &toks[0]);
 		return 0;
 	}
@@ -1454,9 +1452,9 @@ static int add_order_recv(struct exchg_client *cl, struct conn *conn,
 	return 0;
 }
 
-static void add_order_on_err(struct exchg_client *cl, struct conn *conn,
-			       const char *err) {
-	struct http_data *data = conn_private(conn);
+static void add_order_on_err(struct exchg_client *cl, struct http *http,
+			     const char *err) {
+	struct http_data *data = http_private(http);
 	struct order_info *info = exchg_order_lookup(cl, data->order_id);
 
 	if (!info)
@@ -1490,7 +1488,7 @@ static int http_post_add_order(struct exchg_client *cl,
 		return -1;
 	}
 
-	struct conn *http = exchg_http_post("api.kraken.com", "/0/private/AddOrder",
+	struct http *http = exchg_http_post("api.kraken.com", "/0/private/AddOrder",
 					    &add_order_ops, cl);
 	if (!http) {
 		if (update_on_err)
@@ -1503,31 +1501,31 @@ static int http_post_add_order(struct exchg_client *cl,
 		     pi->price_decimals);
 	decimal_to_str(px, &info->order.price);
 
-	if (conn_http_body_sprintf(http, "userref=%"PRId64"&ordertype=limit&"
-				   "type=%s&pair=%s&price=%s&volume=%s",
-				   info->id, info->order.side == EXCHG_SIDE_BUY ?
-				   "buy" : "sell", kraken_pair_to_str(info->order.pair),
-				   px, sz) < 0) {
+	if (http_body_sprintf(http, "userref=%"PRId64"&ordertype=limit&"
+			      "type=%s&pair=%s&price=%s&volume=%s",
+			      info->id, info->order.side == EXCHG_SIDE_BUY ?
+			      "buy" : "sell", kraken_pair_to_str(info->order.pair),
+			      px, sz) < 0) {
 		if (update_on_err)
 			order_err_update(cl, oi, "OOM writing order");
-		conn_close(http);
+		http_close(http);
 		return -1;
 	}
 	if (info->opts.immediate_or_cancel &&
-	    conn_http_body_sprintf(http, "&timeinforce=IOC") < 0) {
+	    http_body_sprintf(http, "&timeinforce=IOC") < 0) {
 		if (update_on_err)
 			order_err_update(cl, oi, "OOM writing order");
-		conn_close(http);
+		http_close(http);
 		return -1;
 	}
 	if (private_http_auth(cl, http)) {
 		if (update_on_err)
 			order_err_update(cl, oi, "HMAC computation failed");
-		conn_close(http);
+		http_close(http);
 		return -1;
 	}
 	info->status = EXCHG_ORDER_SUBMITTED;
-	struct http_data *data = conn_private(http);
+	struct http_data *data = http_private(http);
 	data->order_id = info->id;
 	return 0;
 }
@@ -1583,9 +1581,9 @@ static int64_t kraken_place_order(struct exchg_client *cl, const struct exchg_or
 	return info->info.id;
 }
 
-static int cancel_order_recv(struct exchg_client *cl, struct conn *conn,
+static int cancel_order_recv(struct exchg_client *cl, struct http *http,
 			     int status, char *json, int num_toks, jsmntok_t *toks) {
-	struct http_data *data = conn_private(conn);
+	struct http_data *data = http_private(http);
 	struct order_info *oi = exchg_order_lookup(cl, data->order_id);
 	const char *problem = "";
 
@@ -1648,7 +1646,7 @@ static int cancel_order_recv(struct exchg_client *cl, struct conn *conn,
 		goto bad;
 	}
 	if (count != 1) {
-		exchg_log("%s%s sent data with \"result\":\"count\" != 1:\n", conn_host(conn), conn_path(conn));
+		exchg_log("%s%s sent data with \"result\":\"count\" != 1:\n", http_host(http), http_path(http));
 		json_fprintln(stderr, json, &toks[0]);
 	}
 	if (count > 0)
@@ -1657,16 +1655,16 @@ static int cancel_order_recv(struct exchg_client *cl, struct conn *conn,
 
 bad:
 	snprintf(oi->info.err, EXCHG_ORDER_ERR_SIZE, "%s%s sent bad data",
-		 conn_host(conn), conn_path(conn));
+		 http_host(http), http_path(http));
 	exchg_order_update(cl, oi, EXCHG_ORDER_SUBMITTED, NULL, true);
-	exchg_log("%s%s sent bad data: %s\n", conn_host(conn), conn_path(conn), problem);
+	exchg_log("%s%s sent bad data: %s\n", http_host(http), http_path(http), problem);
 	json_fprintln(stderr, json, &toks[0]);
 	return 0;
 }
 
-static void cancel_order_on_err(struct exchg_client *cl, struct conn *conn,
+static void cancel_order_on_err(struct exchg_client *cl, struct http *http,
 				const char *err) {
-	struct http_data *data = conn_private(conn);
+	struct http_data *data = http_private(http);
 	struct order_info *info = exchg_order_lookup(cl, data->order_id);
 
 	if (!info)
@@ -1679,8 +1677,8 @@ static void cancel_order_on_err(struct exchg_client *cl, struct conn *conn,
 	exchg_order_update(cl, info, EXCHG_ORDER_SUBMITTED, NULL, true);
 }
 
-static void cancel_order_on_closed(struct exchg_client *cl, struct conn *conn) {
-	struct http_data *data = conn_private(conn);
+static void cancel_order_on_closed(struct exchg_client *cl, struct http *http) {
+	struct http_data *data = http_private(http);
 	struct order_info *info = exchg_order_lookup(cl, data->order_id);
 
 	if (info)
@@ -1702,32 +1700,32 @@ static int kraken_cancel_order(struct exchg_client *cl, struct order_info *info)
 	if (unlikely(ko->canceling))
 		return 0;
 
-	if (conn_established(kkn->private_ws)) {
+	if (websocket_established(kkn->private_ws)) {
 		unsigned int reqid = get_reqid(cl);
 		// TODO: there should be an exchg_cancel_orders()
 		// function canceling multiple at once
-		if (conn_printf(kkn->private_ws, "{\"event\": \"cancelOrder\", \"reqid\": %u, "
-				"\"token\": \"%s\", \"txid\": [\"%"PRId64"\"]}",
-				reqid, kkn->ws_token, info->info.id) < 0)
+		if (websocket_printf(kkn->private_ws, "{\"event\": \"cancelOrder\", \"reqid\": %u, "
+				     "\"token\": \"%s\", \"txid\": [\"%"PRId64"\"]}",
+				     reqid, kkn->ws_token, info->info.id) < 0)
 			return -1;
 		ko->cancel_reqid = reqid;
 		// cast is fine since the id comes from ->next_reqid
 		g_hash_table_insert(kkn->cancelations, GUINT_TO_POINTER(reqid),
 				    GUINT_TO_POINTER((unsigned int)info->info.id));
 	} else {
-		struct conn *http = exchg_http_post("api.kraken.com", "/0/private/CancelOrder",
+		struct http *http = exchg_http_post("api.kraken.com", "/0/private/CancelOrder",
 						    &cancel_order_ops, cl);
 		if (!http)
 			return -1;
-		if (conn_http_body_sprintf(http, "txid=%"PRId64, info->info.id) < 0) {
-			conn_close(http);
+		if (http_body_sprintf(http, "txid=%"PRId64, info->info.id) < 0) {
+			http_close(http);
 			return -1;
 		}
 		if (private_http_auth(cl, http)) {
-			conn_close(http);
+			http_close(http);
 			return -1;
 		}
-		struct http_data *data = conn_private(http);
+		struct http_data *data = http_private(http);
 		data->order_id = info->info.id;
 	}
 	ko->canceling = true;

@@ -28,27 +28,27 @@ struct bitstamp_client {
 		int64_t last_diff_update;
 		int64_t first_full_update;
 	} pair_info[EXCHG_NUM_PAIRS];
-	struct conn *conn;
+	struct websocket *ws;
 	char *api_header;
 	size_t api_header_len;
 };
 
-static int bitstamp_subscribe_event(struct conn *conn,
+static int bitstamp_subscribe_event(struct websocket *w,
 				    enum exchg_pair pair,
 				    const char *event) {
-	if (conn_printf(conn, "{ \"event\": \"bts:subscribe\","
-			"\"data\": { \"channel\": \"%s_%s\"} }",
-			event, exchg_pair_to_str(pair)) < 0)
+	if (websocket_printf(w, "{ \"event\": \"bts:subscribe\","
+			     "\"data\": { \"channel\": \"%s_%s\"} }",
+			     event, exchg_pair_to_str(pair)) < 0)
 		return -1;
 	return 0;
 }
 
-static int bitstamp_unsubscribe_event(struct conn *conn,
+static int bitstamp_unsubscribe_event(struct websocket *w,
 				      enum exchg_pair pair,
 				      const char *event) {
-	if (conn_printf(conn, "{ \"event\": \"bts:unsubscribe\","
-			"\"data\": { \"channel\": \"%s_%s\"} }",
-			event, exchg_pair_to_str(pair)) < 0)
+	if (websocket_printf(w, "{ \"event\": \"bts:unsubscribe\","
+			     "\"data\": { \"channel\": \"%s_%s\"} }",
+			     event, exchg_pair_to_str(pair)) < 0)
 		return -1;
 	return 0;
 }
@@ -145,7 +145,7 @@ bad:
 	return -1;
 }
 
-static int parse_data(struct exchg_client *cl, struct conn *conn,
+static int parse_data(struct exchg_client *cl,
 		      struct bitstamp_msg *msg, const char *json,
 		      int num_toks, jsmntok_t *toks, int idx) {
 	jsmntok_t *data = &toks[idx];
@@ -231,7 +231,7 @@ static void do_update(struct exchg_client *cl, struct bitstamp_msg *msg) {
 	exchg_l2_update(cl, msg->pair);
 }
 
-static int msg_complete(struct exchg_client *cl, struct conn *conn,
+static int msg_complete(struct exchg_client *cl, struct websocket *w,
 			struct bitstamp_msg *msg) {
 	struct bitstamp_client *bts = client_private(cl);
 	struct bts_pair_info *pi;
@@ -250,8 +250,7 @@ static int msg_complete(struct exchg_client *cl, struct conn *conn,
 
 		if (!(pi->state & BTS_BOOK_COMPLETE)) {
 			if (!(pi->state & BTS_FULL_SUBBED)) {
-				if (bitstamp_subscribe_event(conn, msg->pair,
-							     "order_book"))
+				if (bitstamp_subscribe_event(w, msg->pair, "order_book"))
 					return -1;
 				pi->state |= BTS_FULL_SUBBED;
 			}
@@ -277,8 +276,7 @@ static int msg_complete(struct exchg_client *cl, struct conn *conn,
 
 			do_update(cl, msg);
 			pi->first_full_update = msg->timestamp;
-			if (bitstamp_unsubscribe_event(conn, msg->pair,
-						       "order_book"))
+			if (bitstamp_unsubscribe_event(w, msg->pair, "order_book"))
 				return -1;
 			else
 				return 1;
@@ -293,7 +291,7 @@ static int msg_complete(struct exchg_client *cl, struct conn *conn,
 	}
 }
 
-static int bitstamp_recv(struct exchg_client *cl, struct conn *conn,
+static int bitstamp_recv(struct exchg_client *cl, struct websocket *w,
 			 char *json, int num_toks, jsmntok_t *toks) {
 	if (num_toks < 3)
 		return 0;
@@ -317,7 +315,7 @@ static int bitstamp_recv(struct exchg_client *cl, struct conn *conn,
 		jsmntok_t *key = &toks[key_idx], *value = &toks[key_idx+1];
 
 		if (json_streq(json, key, "data")) {
-			key_idx = parse_data(cl, conn, &msg, json,
+			key_idx = parse_data(cl, &msg, json,
 					     num_toks, toks, key_idx+1);
 			if (key_idx < 0)
 				return -1;
@@ -369,7 +367,7 @@ static int bitstamp_recv(struct exchg_client *cl, struct conn *conn,
 			return 0;
 		}
 
-		int r = msg_complete(cl, conn, &msg);
+		int r = msg_complete(cl, w, &msg);
 		if (r < 0)
 			return -1;
 		if (r)
@@ -400,7 +398,7 @@ static int book_sub(struct exchg_client *cl) {
 				  exchg_pair_to_str(pair));
 			continue;
 		}
-		if (bitstamp_subscribe_event(bts->conn, pair, "diff_order_book"))
+		if (bitstamp_subscribe_event(bts->ws, pair, "diff_order_book"))
 			return -1;
 	}
 	return 0;
@@ -409,15 +407,14 @@ static int book_sub(struct exchg_client *cl) {
 static bool book_sub_work(struct exchg_client *cl, void *p) {
 	struct bitstamp_client *bts = client_private(cl);
 
-	if (!cl->pair_info_current || !conn_established(bts->conn))
+	if (!cl->pair_info_current || !websocket_established(bts->ws))
 		return false;
 
 	book_sub(cl);
 	return true;
 }
 
-static int bitstamp_conn_established(struct exchg_client *cl,
-				     struct conn *conn) {
+static int bitstamp_conn_established(struct exchg_client *cl, struct websocket *w) {
 	if (!cl->pair_info_current)
 		return queue_work_exclusive(cl, book_sub_work, NULL);
 	else
@@ -425,13 +422,13 @@ static int bitstamp_conn_established(struct exchg_client *cl,
 }
 
 static int bitstamp_on_disconnect(struct exchg_client *cl,
-				  struct conn *conn, int reconnect_seconds) {
+				  struct websocket *w, int reconnect_seconds) {
 	struct bitstamp_client *bts = client_private(cl);
 	int num_pairs_gone = 0;
 	enum exchg_pair pairs_gone[EXCHG_NUM_PAIRS];
 
 	if (reconnect_seconds < 0)
-		bts->conn = NULL;
+		bts->ws = NULL;
 
 	for (enum exchg_pair pair = 0; pair < EXCHG_NUM_PAIRS; pair++) {
 		struct exchg_pair_info *pi = &cl->pair_info[pair];
@@ -444,7 +441,7 @@ static int bitstamp_on_disconnect(struct exchg_client *cl,
 		bpi->first_full_update = 0;
 		bpi->state &= BTS_ACTIVE;
 	}
-	exchg_data_disconnect(cl, conn, num_pairs_gone, pairs_gone);
+	exchg_data_disconnect(cl, w, num_pairs_gone, pairs_gone);
 	return 0;
 }
 
@@ -457,9 +454,9 @@ static const struct exchg_websocket_ops websocket_ops = {
 static int bitstamp_connect(struct exchg_client *cl) {
 	struct bitstamp_client *bts = client_private(cl);
 
-	bts->conn = exchg_websocket_connect(cl, "ws.bitstamp.net", "/",
-					    &websocket_ops);
-	if (bts->conn)
+	bts->ws = exchg_websocket_connect(cl, "ws.bitstamp.net", "/",
+					  &websocket_ops);
+	if (bts->ws)
 		return 0;
 	return -1;
 }
@@ -542,7 +539,7 @@ static int parse_info_token(struct bitstamp_pair_info *info, char *json,
 		return json_skip(num_toks, toks, key_idx+1);
 }
 
-static int bitstamp_parse_info(struct exchg_client *cl, struct conn *conn,
+static int bitstamp_parse_info(struct exchg_client *cl, struct http *http,
 			       int status, char *json, int num_toks, jsmntok_t *toks) {
 	char problem[100];
 	if (status != 200) {
@@ -649,14 +646,14 @@ static int bitstamp_l2_subscribe(struct exchg_client *cl,
 	struct bitstamp_client *bts = client_private(cl);
 	struct bts_pair_info *bpi = &bts->pair_info[pair];
 
-	if (bpi->state & BTS_ACTIVE && bts->conn)
+	if (bpi->state & BTS_ACTIVE && bts->ws)
 		return 0;
 
 	bpi->state |= BTS_ACTIVE;
-	if (cl->pair_info_current && conn_established(bts->conn))
-		return bitstamp_subscribe_event(bts->conn, pair, "diff_order_book");
+	if (cl->pair_info_current && websocket_established(bts->ws))
+		return bitstamp_subscribe_event(bts->ws, pair, "diff_order_book");
 
-	if (!bts->conn)
+	if (!bts->ws)
 		return bitstamp_connect(cl);
 	return 0;
 }
@@ -675,7 +672,7 @@ struct http_data {
 	void *request_private;
 };
 
-static int balances_recv(struct exchg_client *cl, struct conn *conn,
+static int balances_recv(struct exchg_client *cl, struct http *http,
 			 int status, char *json, int num_toks, jsmntok_t *toks) {
 	if (num_toks < 1) {
 		exchg_log("Bitstamp sent bad balance info:"
@@ -722,7 +719,7 @@ static int balances_recv(struct exchg_client *cl, struct conn *conn,
 		}
 		key_idx += 2;
 	}
-	struct http_data *h = conn_private(conn);
+	struct http_data *h = http_private(http);
 	exchg_on_balances(cl, balances, h->request_private);
 	return 0;
 }
@@ -747,9 +744,9 @@ void bitstamp_get_nonce(char *dst) {
 	dst[36] = 0;
 }
 
-static int add_headers(struct exchg_client *cl, struct conn *conn) {
+static int add_headers(struct exchg_client *cl, struct http *http) {
 	struct bitstamp_client *bts = client_private(cl);
-	struct http_data *h = conn_private(conn);
+	struct http_data *h = http_private(http);
 	char millis[30], nonce[37];
 	size_t millis_len;
 	char to_auth[400];
@@ -759,37 +756,37 @@ static int add_headers(struct exchg_client *cl, struct conn *conn) {
 
 	int len = string_to_sign(to_auth, cl, millis, nonce,
 				 "www.bitstamp.net", h->path,
-				 conn_http_body(conn));
+				 http_body(http));
 	char hmac[HMAC_SHA256_HEX_LEN];
 	int hmac_len = hmac_hex(cl->hmac_ctx, (unsigned char *)to_auth,
 				len, hmac, HEX_UPPER);
 	if (hmac_len < 0)
 		return -1;
 
-	if (conn_add_header(conn, (unsigned char *)"X-Auth:",
+	if (http_add_header(http, (unsigned char *)"X-Auth:",
 			    (unsigned char *)bts->api_header, bts->api_header_len))
 		return 1;
-	if (conn_add_header(conn, (unsigned char *)"X-Auth-Signature:",
+	if (http_add_header(http, (unsigned char *)"X-Auth-Signature:",
 			    (unsigned char *)hmac, hmac_len))
 		return 1;
-	if (conn_add_header(conn, (unsigned char *)"X-Auth-Timestamp:",
+	if (http_add_header(http, (unsigned char *)"X-Auth-Timestamp:",
 			    (unsigned char *)millis, millis_len))
 		return 1;
-	if (conn_add_header(conn, (unsigned char *)"X-Auth-Nonce:",
+	if (http_add_header(http, (unsigned char *)"X-Auth-Nonce:",
 			    (unsigned char *)nonce, 36))
 		return 1;
-	if (conn_add_header(conn, (unsigned char *)"X-Auth-Version:",
+	if (http_add_header(http, (unsigned char *)"X-Auth-Version:",
 			    (unsigned char *)"v2", 2))
 		return 1;
 	if (h->payload_len > 0) {
-		if (conn_add_header(conn, (unsigned char *)"Content-Type:",
+		if (http_add_header(http, (unsigned char *)"Content-Type:",
 				    (unsigned char *)
 				    "application/x-www-form-urlencoded",
 				    strlen("application/x-www-form-urlencoded")))
 			return 1;
 		char l[16];
 		len = sprintf(l, "%zu", h->payload_len);
-		if (conn_add_header(conn, (unsigned char *)"Content-Length:",
+		if (http_add_header(http, (unsigned char *)"Content-Length:",
 				    (unsigned char *)l, len))
 			return 1;
 	}
@@ -803,11 +800,11 @@ static struct exchg_http_ops get_balances_ops = {
 };
 
 static int bitstamp_get_balances(struct exchg_client *cl, void *request_private) {
-	struct conn *c = exchg_http_post("www.bitstamp.net", "/api/v2/balance/",
-					 &get_balances_ops, cl);
-	if (!c)
+	struct http *http = exchg_http_post("www.bitstamp.net", "/api/v2/balance/",
+					    &get_balances_ops, cl);
+	if (!http)
 		return -1;
-	struct http_data *h = conn_private(c);
+	struct http_data *h = http_private(http);
 	snprintf(h->path, sizeof(h->path), "/api/v2/balance/");
 	h->payload_len = 0;
 	h->request_private = request_private;
@@ -815,9 +812,9 @@ static int bitstamp_get_balances(struct exchg_client *cl, void *request_private)
 }
 
 // UNTESTED!!!
-static int place_order_recv(struct exchg_client *cl, struct conn *conn,
+static int place_order_recv(struct exchg_client *cl, struct http *http,
 			    int status, char *json, int num_toks, jsmntok_t *toks) {
-	struct http_data *h = conn_private(conn);
+	struct http_data *h = http_private(http);
 	struct order_info *oi = h->p;
 	struct exchg_order_info *info = &oi->info;
 	const char *problem;
@@ -911,9 +908,9 @@ bad:
 	return 0;
 }
 
-static void place_order_on_err(struct exchg_client *cl, struct conn *conn,
+static void place_order_on_err(struct exchg_client *cl, struct http *http,
 			       const char *err) {
-	struct http_data *h = conn_private(conn);
+	struct http_data *h = http_private(http);
 	struct order_info *oi = h->p;
 	struct exchg_order_info *info = &oi->info;
 
@@ -939,11 +936,11 @@ static int64_t bitstamp_place_order(struct exchg_client *cl, const struct exchg_
 	snprintf(path, sizeof(path), "/api/v2/%s/%s/",
 		 order->side == EXCHG_SIDE_BUY ? "buy" : "sell",
 		 exchg_pair_to_str(order->pair));
-	struct conn *conn =  exchg_http_post("www.bitstamp.net", path,
+	struct http *http =  exchg_http_post("www.bitstamp.net", path,
 					     &place_order_ops, cl);
-	if (!conn)
+	if (!http)
 		return -1;
-	struct http_data *h = conn_private(conn);
+	struct http_data *h = http_private(http);
 	strncpy(h->path, path, sizeof(h->path)-1);
 
 	decimal_to_str(amount, &order->size);
@@ -951,19 +948,19 @@ static int64_t bitstamp_place_order(struct exchg_client *cl, const struct exchg_
 
 	struct order_info *info = exchg_new_order(cl, order, opts, private, 0);
 	if (!info) {
-		conn_close(conn);
+		http_close(http);
 		return -ENOMEM;
 	}
 	h->p = info;
 
-	h->payload_len = conn_http_body_sprintf(conn,
-						"amount=%s&price=%s%s",
-						amount, price,
-						opts->immediate_or_cancel ?
-						"&ioc_order=True" : "");
+	h->payload_len = http_body_sprintf(http,
+					   "amount=%s&price=%s%s",
+					   amount, price,
+					   opts->immediate_or_cancel ?
+					   "&ioc_order=True" : "");
 	if (h->payload_len < 0) {
 		order_info_free(cl, info);
-		conn_close(conn);
+		http_close(http);
 		return -ENOMEM;
 	}
 	info->info.status = EXCHG_ORDER_SUBMITTED;

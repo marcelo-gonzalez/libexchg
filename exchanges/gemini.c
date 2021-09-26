@@ -163,8 +163,8 @@ static int parse_events(struct exchg_client *cl, struct gemini_msg *msg,
 	return idx;
 }
 
-static int msg_finish(struct exchg_client *cl, struct conn *conn,
-		      struct gemini_msg *msg, enum exchg_pair pair) {
+static int msg_finish(struct exchg_client *cl, struct gemini_msg *msg,
+		      enum exchg_pair pair) {
 	switch (msg->type) {
 	case TYPE_INVALID:
 		return 0;
@@ -184,10 +184,10 @@ static int msg_finish(struct exchg_client *cl, struct conn *conn,
 	}
 }
 
-static int gemini_recv(struct exchg_client *cl, struct conn *conn,
+static int gemini_recv(struct exchg_client *cl, struct websocket *w,
 		       char *json, int num_toks, jsmntok_t *toks) {
 	char problem[100];
-	struct gemini_conn_info *gc = conn_private(conn);
+	struct gemini_conn_info *gc = websocket_private(w);
 	struct gemini_msg msg = {
 		.type = TYPE_INVALID,
 		.seq = -1,
@@ -252,7 +252,7 @@ static int gemini_recv(struct exchg_client *cl, struct conn *conn,
 			key_idx = json_skip(num_toks, toks, key_idx + 1);
 		}
 
-		int r = msg_finish(cl, conn, &msg, gc->pair);
+		int r = msg_finish(cl, &msg, gc->pair);
 		if (r < 0)
 			return -1;
 		if (r)
@@ -287,16 +287,16 @@ bad:
 }
 
 static int gemini_conn_established(struct exchg_client *cl,
-				   struct conn *conn) {
+				   struct websocket *w) {
 	return 0;
 }
 
 static int gemini_on_disconnect(struct exchg_client *cl,
-				struct conn *conn, int reconnect_seconds) {
-	struct gemini_conn_info *gc = conn_private(conn);
+				struct websocket *w, int reconnect_seconds) {
+	struct gemini_conn_info *gc = websocket_private(w);
 	exchg_book_clear(cl, gc->pair);
 	gc->last_socket_sequence = -1;
-	exchg_data_disconnect(cl, conn, 1, &gc->pair);
+	exchg_data_disconnect(cl, w, 1, &gc->pair);
 	return 0;
 }
 
@@ -318,11 +318,11 @@ static int gemini_connect(struct exchg_client *cl, enum exchg_pair pair) {
 	char path[50];
 	sprintf(path, "/v1/marketdata/%s?heartbeat=true", exchg_pair_to_str(pair));
 
-	struct conn *c = exchg_websocket_connect(cl, gemini_host(cl), path, &websocket_ops);
-	if (!c)
+	struct websocket *w = exchg_websocket_connect(cl, gemini_host(cl), path, &websocket_ops);
+	if (!w)
 		return -1;
 
-	struct gemini_conn_info *gc = conn_private(c);
+	struct gemini_conn_info *gc = websocket_private(w);
 	gc->last_socket_sequence = -1;
 	gc->pair = pair;
 	return 0;
@@ -361,12 +361,11 @@ struct find_conn_arg {
 	enum exchg_pair pair;
 };
 
-int find_conn(struct conn *conn, void *private) {
-	struct gemini_conn_info *gc = conn_private(conn);
+int find_conn(struct websocket *w, void *private) {
+	struct gemini_conn_info *gc = websocket_private(w);
 	struct find_conn_arg *arg = private;
 
-	if (conn_type(conn) == CONN_TYPE_WS &&
-	    !conn_disconnecting(conn) && gc->pair == arg->pair) {
+	if (!websocket_disconnecting(w) && gc->pair == arg->pair) {
 		arg->found = true;
 		return 1;
 	}
@@ -376,7 +375,7 @@ int find_conn(struct conn *conn, void *private) {
 static int gemini_l2_subscribe(struct exchg_client *cl,
 			       enum exchg_pair pair) {
 	struct find_conn_arg arg = { .pair = pair };
-	for_each_conn(cl, find_conn, &arg);
+	for_each_websocket(cl, find_conn, &arg);
 	if (arg.found)
 		return 0;
 
@@ -395,22 +394,21 @@ static void *http_data_private(struct http_data *d) {
 	return d->private;
 }
 
-static int http_add_headers(struct exchg_client *cl, struct conn *conn) {
-	struct http_data *data = conn_private(conn);
+static int http_add_headers(struct exchg_client *cl, struct http *h) {
+	struct http_data *data = http_private(h);
 
-	if (conn_add_header(conn, (unsigned char *)"X-GEMINI-APIKEY:",
+	if (http_add_header(h, (unsigned char *)"X-GEMINI-APIKEY:",
 			    cl->apikey_public, cl->apikey_public_len))
 		return 1;
-	if (conn_add_header(conn, (unsigned char *)"X-GEMINI-PAYLOAD:",
+	if (http_add_header(h, (unsigned char *)"X-GEMINI-PAYLOAD:",
 			    (unsigned char *)data->payload, data->payload_len))
 		return 1;
-
-	return conn_add_header(conn, (unsigned char *)"X-GEMINI-SIGNATURE:",
+	return http_add_header(h, (unsigned char *)"X-GEMINI-SIGNATURE:",
 			       (unsigned char *)data->hmac, data->hmac_len);
 }
 
-static void http_on_closed(struct exchg_client *cl, struct conn *conn) {
-	struct http_data *data = conn_private(conn);
+static void http_on_closed(struct exchg_client *cl, struct http *http) {
+	struct http_data *data = http_private(http);
 
 	free(data->payload);
 }
@@ -504,10 +502,10 @@ static int parse_order_update_field(struct gemini_order_update *msg, const char 
 	return json_skip(num_toks, toks, key_idx+1);
 }
 
-static int cancel_order_recv(struct exchg_client *cl, struct conn *conn,
+static int cancel_order_recv(struct exchg_client *cl, struct http *http,
 			     int status, char *json, int num_toks, jsmntok_t *toks) {
 	const char *problem = "";
-	struct http_data *data = conn_private(conn);
+	struct http_data *data = http_private(http);
 	int64_t id = *(int64_t *)http_data_private(data);
 	struct order_info *oi = exchg_order_lookup(cl, id);
 
@@ -541,12 +539,12 @@ static int cancel_order_recv(struct exchg_client *cl, struct conn *conn,
 	else {
 		order_update(cl, oi, EXCHG_ORDER_PENDING, &msg.size, false);
 		exchg_log("%s%s sent update that doesn't indicate is_cancelled=true:\n",
-			  conn_host(conn), conn_path(conn));
+			  http_host(http), http_path(http));
 		json_fprintln(stderr, json, &toks[0]);
 	}
 	return 0;
 bad:
-	exchg_log("%s%s sent bad data: %s:\n", conn_host(conn), conn_path(conn), problem);
+	exchg_log("%s%s sent bad data: %s:\n", http_host(http), http_path(http), problem);
 	json_fprintln(stderr, json, &toks[0]);
 	return 0;
 }
@@ -560,8 +558,8 @@ const static struct exchg_http_ops cancel_http_ops = {
 
 static int send_order_cancel(struct exchg_client *cl, struct order_info *info) {
 	struct gemini_order *g = order_info_private(info);
-	struct conn *conn = exchg_http_post(gemini_host(cl), "/v1/order/cancel", &cancel_http_ops, cl);
-	if (!conn)
+	struct http *http = exchg_http_post(gemini_host(cl), "/v1/order/cancel", &cancel_http_ops, cl);
+	if (!http)
 		return -1;
 
 	char request[100];
@@ -569,9 +567,9 @@ static int send_order_cancel(struct exchg_client *cl, struct order_info *info) {
 			  ", \"request\": \"/v1/order/cancel\"}",
 			  current_micros(), g->server_oid);
 
-	struct http_data *data = conn_private(conn);
+	struct http_data *data = http_private(http);
 	if (gemini_conn_auth(data, cl->hmac_ctx, request, len)) {
-		conn_close(conn);
+		http_close(http);
 		return -1;
 	}
 	*(int64_t *)http_data_private(data) = info->info.id;
@@ -589,10 +587,10 @@ static int gemini_cancel_order(struct exchg_client *cl, struct order_info *info)
 	}
 }
 
-static int place_order_recv(struct exchg_client *cl, struct conn *conn,
+static int place_order_recv(struct exchg_client *cl, struct http *http,
 			    int status, char *json, int num_toks, jsmntok_t *toks) {
 	const char *problem;
-	struct http_data *data = conn_private(conn);
+	struct http_data *data = http_private(http);
 	int64_t id = *(int64_t *)http_data_private(data);
 	struct order_info *oi = exchg_order_lookup(cl, id);
 	struct exchg_order_info *info = &oi->info;
@@ -628,7 +626,7 @@ static int place_order_recv(struct exchg_client *cl, struct conn *conn,
 			exchg_log("Gemini sent order update for "
 				  "for different client_order_id over POST to %s%s: "
 				  "expected: %"PRId64", got: %"PRId64"\n",
-				  conn_host(conn), conn_path(conn), id, msg.client_oid);
+				  http_host(http), http_path(http), id, msg.client_oid);
 			return -1;
 		}
 		if (msg.server_oid == -1) {
@@ -668,9 +666,9 @@ bad:
 	return 0;
 }
 
-static void place_order_on_err(struct exchg_client *cl, struct conn *conn,
+static void place_order_on_err(struct exchg_client *cl, struct http *http,
 			       const char *err) {
-	struct http_data *data = conn_private(conn);
+	struct http_data *data = http_private(http);
 	int64_t id = *(int64_t *)http_data_private(data);
 	struct order_info *info = exchg_order_lookup(cl, id);
 
@@ -693,12 +691,12 @@ const static struct exchg_http_ops trade_http_ops = {
 
 static int64_t gemini_place_order(struct exchg_client *cl, const struct exchg_order *order,
 				  const struct exchg_place_order_opts *opts, void *private) {
-	struct conn *conn = exchg_http_post(gemini_host(cl), "/v1/order/new", &trade_http_ops, cl);
-	if (!conn)
+	struct http *http = exchg_http_post(gemini_host(cl), "/v1/order/new", &trade_http_ops, cl);
+	if (!http)
 		return -1;
 	struct order_info *oi = exchg_new_order(cl, order, opts, private, sizeof(struct gemini_order));
 	if (!oi) {
-		conn_close(conn);
+		http_close(http);
 		return -ENOMEM;
 	}
 	struct exchg_order_info *info = &oi->info;
@@ -720,9 +718,9 @@ static int64_t gemini_place_order(struct exchg_client *cl, const struct exchg_or
 			  current_micros(), info->id, exchg_pair_to_str(info->order.pair),
 			  size_str, price_str, side, options);
 
-	struct http_data *data = conn_private(conn);
+	struct http_data *data = http_private(http);
 	if (gemini_conn_auth(data, cl->hmac_ctx, request, len)) {
-		conn_close(conn);
+		http_close(http);
 		order_info_free(cl, oi);
 		return -1;
 	}
@@ -734,7 +732,7 @@ static int64_t gemini_place_order(struct exchg_client *cl, const struct exchg_or
 	return info->id;
 }
 
-static int gemini_balances_recv(struct exchg_client *cl, struct conn *conn, int status,
+static int gemini_balances_recv(struct exchg_client *cl, struct http *http, int status,
 				char *json, int num_toks, jsmntok_t *toks) {
 	if (num_toks < 1)
 		return 0;
@@ -813,7 +811,7 @@ static int gemini_balances_recv(struct exchg_client *cl, struct conn *conn, int 
 		key_idx = json_skip(num_toks, toks, data_idx);
 	}
 
-	struct http_data *data = conn_private(conn);
+	struct http_data *data = http_private(http);
 	exchg_on_balances(cl, balances, *(void**)http_data_private(data));
 	return 0;
 }
@@ -828,16 +826,16 @@ const static struct exchg_http_ops balances_http_ops = {
 };
 
 static int gemini_get_balances(struct exchg_client *cl, void *req_private) {
-	struct conn *c = exchg_http_post(gemini_host(cl), "/v1/balances", &balances_http_ops, cl);
-	if (!c)
+	struct http *http = exchg_http_post(gemini_host(cl), "/v1/balances", &balances_http_ops, cl);
+	if (!http)
 		return -1;
-	struct http_data *data = conn_private(c);
+	struct http_data *data = http_private(http);
 	char request[100];
 
 	int len = sprintf(request, "{ \"nonce\": %lu, \"request\": \"/v1/balances\" }",
 			  current_micros());
 	if (gemini_conn_auth(data, cl->hmac_ctx, request, len)) {
-		conn_close(c);
+		http_close(http);
 		return -1;
 	}
 	*(void **)http_data_private(data) = req_private;
@@ -848,7 +846,7 @@ static void gemini_destroy(struct exchg_client *cli) {
 	free_exchg_client(cli);
 }
 
-static int parse_event_object(struct exchg_client *cl, struct conn *conn,
+static int parse_event_object(struct exchg_client *cl,
 			      char *json, int num_toks, jsmntok_t *toks) {
 	struct gemini_client *g = client_private(cl);
 	int key_idx = 1;
@@ -892,12 +890,12 @@ struct gemini_order_event {
 	struct gemini_order_update update;
 };
 
-static int order_events_recv(struct exchg_client *cl, struct conn *conn,
+static int order_events_recv(struct exchg_client *cl, struct websocket *w,
 			     char *json, int num_toks, jsmntok_t *toks) {
 	const char *problem = "";
 
 	if (toks[0].type == JSMN_OBJECT)
-		return parse_event_object(cl, conn, json, num_toks, toks);
+		return parse_event_object(cl, json, num_toks, toks);
 	if (toks[0].type != JSMN_ARRAY) {
 		problem = "not an object or array";
 		goto bad;
@@ -1011,19 +1009,19 @@ static int order_events_recv(struct exchg_client *cl, struct conn *conn,
 	}
 
 	if (warn) {
-		exchg_log("%s%s sent data with non-object elements:\n", conn_host(conn), conn_path(conn));
+		exchg_log("%s%s sent data with non-object elements:\n", websocket_host(w), websocket_path(w));
 		json_fprintln(stderr, json, &toks[0]);
 	}
 	return 0;
 bad:
-	exchg_log("%s%s sent bad update: %s:\n", conn_host(conn), conn_path(conn), problem);
+	exchg_log("%s%s sent bad update: %s:\n", websocket_host(w), websocket_path(w), problem);
 	json_fprintln(stderr, json, &toks[0]);
 	return -1;
 }
 
 static int order_events_on_disconnect(struct exchg_client *cl,
-				      struct conn *conn, int reconnect_seconds) {
-	struct http_data *data = conn_private(conn);
+				      struct websocket *w, int reconnect_seconds) {
+	struct http_data *data = websocket_private(w);
 	struct gemini_client *g = client_private(cl);
 
 	free(data->payload);
@@ -1042,8 +1040,21 @@ static int order_events_on_disconnect(struct exchg_client *cl,
 	return 0;
 }
 
+static int websocket_add_headers(struct exchg_client *cl, struct websocket *w) {
+	struct http_data *data = websocket_private(w);
+
+	if (websocket_add_header(w, (unsigned char *)"X-GEMINI-APIKEY:",
+				 cl->apikey_public, cl->apikey_public_len))
+		return 1;
+	if (websocket_add_header(w, (unsigned char *)"X-GEMINI-PAYLOAD:",
+				 (unsigned char *)data->payload, data->payload_len))
+		return 1;
+	return websocket_add_header(w, (unsigned char *)"X-GEMINI-SIGNATURE:",
+				    (unsigned char *)data->hmac, data->hmac_len);
+}
+
 static const struct exchg_websocket_ops order_events_ops = {
-	.add_headers = http_add_headers,
+	.add_headers = websocket_add_headers,
 	.recv = order_events_recv,
 	.on_disconnect = order_events_on_disconnect,
 	.conn_data_size = sizeof(struct http_data),
@@ -1056,16 +1067,16 @@ static int gemini_priv_ws_connect(struct exchg_client *cl) {
 		return 0;
 
 	g->priv_ws_connected = true;
-	struct conn *conn = exchg_websocket_connect(cl, gemini_host(cl),
-						    "/v1/order/events", &order_events_ops);
-	if (!conn)
+	struct websocket *w = exchg_websocket_connect(cl, gemini_host(cl),
+						      "/v1/order/events", &order_events_ops);
+	if (!w)
 		return -1;
 
 	char request[100];
 	int len = sprintf(request, "{ \"nonce\": %lu, \"request\": \"/v1/order/events\" }",
 			  current_micros());
-	if (gemini_conn_auth(conn_private(conn), cl->hmac_ctx, request, len)) {
-		conn_close(conn);
+	if (gemini_conn_auth(websocket_private(w), cl->hmac_ctx, request, len)) {
+		websocket_close(w);
 		return -1;
 	}
 	return 0;

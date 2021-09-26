@@ -24,7 +24,7 @@ struct coinbase_client {
 		bool subbed;
 		bool watching_l2;
 	} pair_info[EXCHG_NUM_PAIRS];
-	struct conn *ws;
+	struct websocket *ws;
 	GHashTable *orders;
 };
 
@@ -432,7 +432,7 @@ static int msg_finish(struct exchg_client *cl, struct ws_msg *msg,
 	return 0;
 }
 
-static int ws_recv(struct exchg_client *cl, struct conn *conn,
+static int ws_recv(struct exchg_client *cl, struct websocket *w,
 		   char *json, int num_toks, jsmntok_t *toks) {
 	struct coinbase_client *cb = client_private(cl);
 	const char *problem = "";
@@ -708,9 +708,9 @@ static int channel_sub(struct exchg_client *cl) {
 	} else {
 		auth_fields[0] = 0;
 	}
-	if (conn_printf(cb->ws, "{ \"type\": \"subscribe\", "
-			"\"channels\": [%s%s%s]%s}", level2,
-			level2_sub && user_sub ? "," : "", user, auth_fields) < 0)
+	if (websocket_printf(cb->ws, "{ \"type\": \"subscribe\", "
+			     "\"channels\": [%s%s%s]%s}", level2,
+			     level2_sub && user_sub ? "," : "", user, auth_fields) < 0)
 		return -1;
 	return 0;
 }
@@ -718,15 +718,14 @@ static int channel_sub(struct exchg_client *cl) {
 static bool sub_work(struct exchg_client *cl, void *p) {
 	struct coinbase_client *cb = client_private(cl);
 
-	if (!cl->pair_info_current || !conn_established(cb->ws))
+	if (!cl->pair_info_current || !websocket_established(cb->ws))
 		return false;
 
 	channel_sub(cl);
 	return true;
 }
 
-static int ws_on_established(struct exchg_client *cl,
-			     struct conn *conn) {
+static int ws_on_established(struct exchg_client *cl, struct websocket *w) {
 	if (!cl->pair_info_current)
 		return queue_work_exclusive(cl, sub_work, NULL);
 	else
@@ -734,7 +733,7 @@ static int ws_on_established(struct exchg_client *cl,
 }
 
 static int ws_on_disconnect(struct exchg_client *cl,
-			    struct conn *conn,
+			    struct websocket *ws,
 			    int reconnect_seconds) {
 	struct coinbase_client *cb = client_private(cl);
 	int num_pairs_gone = 0;
@@ -752,7 +751,7 @@ static int ws_on_disconnect(struct exchg_client *cl,
 	}
 	cb->user_chan_subbed = false;
 	cb->sub_acked = false;
-	exchg_data_disconnect(cl, conn, num_pairs_gone, pairs_gone);
+	exchg_data_disconnect(cl, ws, num_pairs_gone, pairs_gone);
 	return 0;
 }
 
@@ -772,7 +771,7 @@ static int coinbase_l2_subscribe(struct exchg_client *cl,
 
 	ci->watching_l2 = true;
 
-	if (cl->pair_info_current && conn_established(cb->ws))
+	if (cl->pair_info_current && websocket_established(cb->ws))
 		return channel_sub(cl);
 
 	if (!cb->ws) {
@@ -803,7 +802,7 @@ static int decimal_inc_to_places(const decimal_t *d) {
 	return d->places;
 }
 
-static int parse_info(struct exchg_client *cl, struct conn *conn,
+static int parse_info(struct exchg_client *cl, struct http *http,
 		      int status, char *json, int num_toks, jsmntok_t *toks) {
 	struct coinbase_client *cb = client_private(cl);
 	const char *problem = "";
@@ -821,7 +820,7 @@ static int parse_info(struct exchg_client *cl, struct conn *conn,
 		if (toks[obj_idx].type != JSMN_OBJECT) {
 			if (!non_obj_warned) {
 				exchg_log("%s%s gave non-object array member (idx %d):\n",
-					  conn_host(conn), conn_path(conn), i);
+					  http_host(http), http_path(http), i);
 				json_fprintln(stderr, json, &toks[0]);
 				non_obj_warned = true;
 			}
@@ -977,14 +976,14 @@ static int parse_info(struct exchg_client *cl, struct conn *conn,
 bad:
 	cl->get_info_error = 1;
 	exchg_log("Received bad data from %s%s %s:\n",
-		  conn_host(conn), conn_path(conn), problem);
+		  http_host(http), http_path(http), problem);
 	json_fprintln(stderr, json, bad_tok);
 	return -1;
 }
 
-static int add_user_agent(struct exchg_client *cl, struct conn *conn) {
+static int add_user_agent(struct exchg_client *cl, struct http *http) {
 	// libwebsockets sets User-agent and coinbase complains
-	if (conn_add_header(conn, (unsigned char *)"User-Agent:",
+	if (http_add_header(http, (unsigned char *)"User-Agent:",
 			    (unsigned char *)"lws", 3))
 		return 1;
 	return 0;
@@ -1010,37 +1009,37 @@ struct http_data {
 	};
 };
 
-static int private_add_headers(struct exchg_client *cl, struct conn *conn) {
-	if (add_user_agent(cl, conn))
+static int private_add_headers(struct exchg_client *cl, struct http *http) {
+	if (add_user_agent(cl, http))
 		return 1;
 
-	struct http_data *data = conn_private(conn);
-	if (conn_add_header(conn, (unsigned char *)"CB-ACCESS-KEY:",
+	struct http_data *data = http_private(http);
+	if (http_add_header(http, (unsigned char *)"CB-ACCESS-KEY:",
 			    cl->apikey_public, cl->apikey_public_len))
 		return 1;
-	if (conn_add_header(conn, (unsigned char *)"CB-ACCESS-SIGN:",
+	if (http_add_header(http, (unsigned char *)"CB-ACCESS-SIGN:",
 			    (unsigned char *)data->auth.hmac, data->auth.hmac_len))
 		return 1;
-	if (conn_add_header(conn, (unsigned char *)"CB-ACCESS-PASSPHRASE:",
+	if (http_add_header(http, (unsigned char *)"CB-ACCESS-PASSPHRASE:",
 			    (unsigned char *)cl->password, cl->password_len))
 		return 1;
-	if (conn_add_header(conn, (unsigned char *)"CB-ACCESS-TIMESTAMP:",
+	if (http_add_header(http, (unsigned char *)"CB-ACCESS-TIMESTAMP:",
 			    (unsigned char *)data->auth.timestamp, data->auth.timestamp_len))
 		return 1;
-	if (conn_http_body_len(conn) > 0) {
-		if (conn_add_header(conn, (unsigned char *)"Content-Type:",
+	if (http_body_len(http) > 0) {
+		if (http_add_header(http, (unsigned char *)"Content-Type:",
 				    (unsigned char *)"application/json", strlen("application/json")))
 			return 1;
 		char l[16];
-		int len = sprintf(l, "%zu", conn_http_body_len(conn));
-		if (conn_add_header(conn, (unsigned char *)"Content-Length:",
+		int len = sprintf(l, "%zu", http_body_len(http));
+		if (http_add_header(http, (unsigned char *)"Content-Length:",
 				    (unsigned char *)l, len))
 			return 1;
 	}
 	return 0;
 }
 
-static int balances_recv(struct exchg_client *cl, struct conn *conn,
+static int balances_recv(struct exchg_client *cl, struct http *http,
 			 int status, char *json, int num_toks, jsmntok_t *toks) {
 	const char *problem = "";
 	jsmntok_t *bad_tok = &toks[0];
@@ -1061,7 +1060,7 @@ static int balances_recv(struct exchg_client *cl, struct conn *conn,
 		if (toks[obj_idx].type != JSMN_OBJECT) {
 			if (!non_obj_warned) {
 				exchg_log("%s%s gave non-object array member (idx %d):\n",
-					  conn_host(conn), conn_path(conn), i);
+					  http_host(http), http_path(http), i);
 				json_fprintln(stderr, json, &toks[0]);
 				non_obj_warned = true;
 			}
@@ -1092,7 +1091,7 @@ static int balances_recv(struct exchg_client *cl, struct conn *conn,
 		}
 		if (ccy == -1) {
 			exchg_log("%s%s sent account info with no currency:\n",
-				  conn_host(conn), conn_path(conn));
+				  http_host(http), http_path(http));
 			json_fprintln(stderr, json, bad_tok);
 			goto skip;
 		}
@@ -1108,13 +1107,13 @@ static int balances_recv(struct exchg_client *cl, struct conn *conn,
 		obj_idx = json_skip(num_toks, toks, obj_idx);
 	}
 
-	struct http_data *h = conn_private(conn);
+	struct http_data *h = http_private(http);
 	exchg_on_balances(cl, balances, h->private);
 	return 0;
 
 bad:
 	exchg_log("Received bad data from %s%s %s:\n",
-		  conn_host(conn), conn_path(conn), problem);
+		  http_host(http), http_path(http), problem);
 	json_fprintln(stderr, json, bad_tok);
 	return -1;
 }
@@ -1125,20 +1124,20 @@ static struct exchg_http_ops get_balances_ops = {
 	.conn_data_size = sizeof(struct http_data),
 };
 
-static int coinbase_conn_auth(struct coinbase_auth *auth, HMAC_CTX *hmac_ctx, struct conn *http) {
-	return coinbase_auth(auth, hmac_ctx, conn_path(http), conn_method(http),
-			     conn_http_body(http), conn_http_body_len(http));
+static int coinbase_http_auth(struct coinbase_auth *auth, HMAC_CTX *hmac_ctx, struct http *http) {
+	return coinbase_auth(auth, hmac_ctx, http_path(http), http_method(http),
+			     http_body(http), http_body_len(http));
 
 }
 
 static int coinbase_get_balances(struct exchg_client *cl, void *req_private) {
-	struct conn *conn = exchg_http_get("api.pro.coinbase.com", "/accounts", &get_balances_ops, cl);
-	if (!conn)
+	struct http *http = exchg_http_get("api.pro.coinbase.com", "/accounts", &get_balances_ops, cl);
+	if (!http)
 		return -1;
-	struct http_data *data = conn_private(conn);
+	struct http_data *data = http_private(http);
 	data->private = req_private;
-	if (coinbase_conn_auth(&data->auth, cl->hmac_ctx, conn)) {
-		conn_close(conn);
+	if (coinbase_http_auth(&data->auth, cl->hmac_ctx, http)) {
+		http_close(http);
 		return -1;
 	}
 	return 0;
@@ -1151,10 +1150,10 @@ struct order_ack {
 	jsmntok_t *message;
 };
 
-static int orders_recv(struct exchg_client *cl, struct conn *conn,
+static int orders_recv(struct exchg_client *cl, struct http *http,
 		       int status, char *json, int num_toks, jsmntok_t *toks) {
 	const char *problem = "";
-	struct http_data *data = conn_private(conn);
+	struct http_data *data = http_private(http);
 	struct order_info *info = exchg_order_lookup(cl, data->id);
 
 	// We received a "done" message on the websocket and freed it already
@@ -1222,7 +1221,7 @@ static int orders_recv(struct exchg_client *cl, struct conn *conn,
 
 bad:
 	exchg_log("Received bad update from %s%s: %s:\n",
-		  conn_host(conn), conn_path(conn), problem);
+		  http_host(http), http_path(http), problem);
 	json_fprintln(stderr, json, &toks[0]);
 	strncpy(info->info.err, "bad update from Coinbase", EXCHG_ORDER_ERR_SIZE);
 	order_update(cl, info, EXCHG_ORDER_ERROR, NULL, false);
@@ -1263,10 +1262,10 @@ static void write_oid(char *dst, uint64_t id) {
 	dst[len-twelve_left] = 0;
 }
 
-static int place_order(struct exchg_client *cl, struct conn *http,
+static int place_order(struct exchg_client *cl, struct http *http,
 		       struct order_info *oi, bool update_on_err) {
 	struct coinbase_client *cb = client_private(cl);
-	struct http_data *data = conn_private(http);
+	struct http_data *data = http_private(http);
 	struct exchg_order_info *info = &oi->info;
 	struct exchg_pair_info *pinfo = &cl->pair_info[info->order.pair];
 	struct coinbase_pair_info *cb_info = &cb->pair_info[info->order.pair];
@@ -1289,15 +1288,15 @@ static int place_order(struct exchg_client *cl, struct conn *http,
 	write_oid(oid, info->id);
 	decimal_to_str(price, &info->order.price);
 	decimal_to_str(size, &info->order.size);
-	if (conn_http_body_sprintf(http, "{ \"client_oid\": \"%s\", "
-				   "\"product_id\": \"%s\", "
-				   "\"type\": \"limit\", \"side\": \"%s\", "
-				   "\"price\": \"%s\", \"size\": \"%s\", "
-				   "\"time_in_force\": \"%s\"}",
-				   oid, cb_info->id,
-				   info->order.side == EXCHG_SIDE_BUY ? "buy" : "sell",
-				   price, size,
-				   info->opts.immediate_or_cancel ? "IOC" : "GTC") < 0) {
+	if (http_body_sprintf(http, "{ \"client_oid\": \"%s\", "
+			      "\"product_id\": \"%s\", "
+			      "\"type\": \"limit\", \"side\": \"%s\", "
+			      "\"price\": \"%s\", \"size\": \"%s\", "
+			      "\"time_in_force\": \"%s\"}",
+			      oid, cb_info->id,
+			      info->order.side == EXCHG_SIDE_BUY ? "buy" : "sell",
+			      price, size,
+			      info->opts.immediate_or_cancel ? "IOC" : "GTC") < 0) {
 		if (update_on_err) {
 			snprintf(info->err, EXCHG_ORDER_ERR_SIZE, "Out-Of-Memory");
 			order_update(cl, oi, EXCHG_ORDER_ERROR, NULL, false);
@@ -1305,7 +1304,7 @@ static int place_order(struct exchg_client *cl, struct conn *http,
 		return -1;
 	}
 	data->id = info->id;
-	int ret = coinbase_conn_auth(&data->auth, cl->hmac_ctx, http);
+	int ret = coinbase_http_auth(&data->auth, cl->hmac_ctx, http);
 	if (!ret) {
 		info->status = EXCHG_ORDER_SUBMITTED;
 	} else if (ret && update_on_err) {
@@ -1321,7 +1320,7 @@ static bool place_order_work(struct exchg_client *cl, void *p) {
 	if (!cl->pair_info_current)
 		return false;
 
-	struct conn *http = exchg_http_post("api.pro.coinbase.com", "/orders",
+	struct http *http = exchg_http_post("api.pro.coinbase.com", "/orders",
 					    &place_order_ops, cl);
 	if (!http) {
 		strncpy(info->info.err, "HTTP POST failed", EXCHG_ORDER_ERR_SIZE);
@@ -1329,7 +1328,7 @@ static bool place_order_work(struct exchg_client *cl, void *p) {
 		return true;
 	}
 	if (place_order(cl, http, info, true))
-		conn_close(http);
+		http_close(http);
 	return true;
 }
 
@@ -1347,18 +1346,18 @@ static int64_t coinbase_place_order(struct exchg_client *cl, const struct exchg_
 	struct order_info *info;
 
 	if (likely(cl->pair_info_current)) {
-		struct conn *http = exchg_http_post("api.pro.coinbase.com", "/orders",
+		struct http *http = exchg_http_post("api.pro.coinbase.com", "/orders",
 						    &place_order_ops, cl);
 		if (!http)
 			return -1;
 		info = new_order(cl, order, opts, private);
 		if (!info) {
-			conn_close(http);
+			http_close(http);
 			return -1;
 		}
 		if (place_order(cl, http, info, false)) {
 			order_info_free(cl, info);
-			conn_close(http);
+			http_close(http);
 			return -1;
 		}
 	} else {
@@ -1375,12 +1374,12 @@ static int64_t coinbase_place_order(struct exchg_client *cl, const struct exchg_
 	return info->info.id;
 }
 
-static int cancel_order_recv(struct exchg_client *cl, struct conn *conn,
+static int cancel_order_recv(struct exchg_client *cl, struct http *http,
 			     int status, char *json, int num_toks, jsmntok_t *toks) {
 	if (num_toks > 1) {
 		// TODO: retry if we sent the cancel very soon after sending the
 		// order and the requests might have raced
-		struct http_data *data = conn_private(conn);
+		struct http_data *data = http_private(http);
 		struct order_info *oi = exchg_order_lookup(cl, data->id);
 
 		if (oi) {
@@ -1414,13 +1413,13 @@ static int coinbase_cancel_order(struct exchg_client *cl, struct order_info *inf
 	sprintf(&path[strlen("/orders/client:")+36],
 		"?product_id=%s", cb->pair_info[info->info.order.pair].id);
 
-	struct conn *http = exchg_http_delete("api.pro.coinbase.com", path,
+	struct http *http = exchg_http_delete("api.pro.coinbase.com", path,
 					      &cancel_order_ops, cl);
 	if (!http)
 		return -1;
-	struct http_data *data = conn_private(http);
-	if (coinbase_conn_auth(&data->auth, cl->hmac_ctx, http)) {
-		conn_close(http);
+	struct http_data *data = http_private(http);
+	if (coinbase_http_auth(&data->auth, cl->hmac_ctx, http)) {
+		http_close(http);
 		return -1;
 	}
 	data->id = info->info.id;
