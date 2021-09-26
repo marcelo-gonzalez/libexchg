@@ -380,6 +380,7 @@ struct exchg_net_context *net_new(struct net_callbacks *c) {
 		.protocols = protocols,
 		.user = c,
 	};
+	lws_set_log_level(LLL_WARN | LLL_ERR, NULL);
 	ret->ctx = lws_create_context(&info);
 	if (!ret->ctx) {
 		free(ret);
