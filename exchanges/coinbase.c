@@ -279,6 +279,11 @@ static int64_t parse_oid(const char *json, jsmntok_t *tok) {
 	return n;
 }
 
+struct coinbase_order {
+	char *id;
+	bool cancel_retried;
+};
+
 static int set_order_id(struct coinbase_client *cb, struct order_info *info,
 			char *json, jsmntok_t *order_id) {
 	json[order_id->end] = 0;
@@ -288,10 +293,10 @@ static int set_order_id(struct coinbase_client *cb, struct order_info *info,
 	}
 	json[order_id->end] = '\"';
 
-	char **id = order_info_private(info);
-	if (json_strdup(id, json, order_id))
+	struct coinbase_order *c = order_info_private(info);
+	if (json_strdup(&c->id, json, order_id))
 		return -1;
-	g_hash_table_insert(cb->orders, *id, info);
+	g_hash_table_insert(cb->orders, c->id, info);
 	return 0;
 }
 
@@ -299,10 +304,10 @@ static void order_update(struct exchg_client *cl, struct order_info *oi,
 			 enum exchg_order_status new_status, const decimal_t *new_size,
 			 bool cancel_failed) {
 	struct coinbase_client *cb = client_private(cl);
-	char **id = order_info_private(oi);
+	struct coinbase_order *c = order_info_private(oi);
 
-	if (order_status_done(new_status) && *id)
-		g_hash_table_remove(cb->orders, *id);
+	if (order_status_done(new_status) && c->id)
+		g_hash_table_remove(cb->orders, c->id);
 	exchg_order_update(cl, oi, new_status, new_size, cancel_failed);
 }
 
@@ -1288,8 +1293,7 @@ static int place_order(struct exchg_client *cl, struct http *http,
 	write_oid(oid, info->id);
 	decimal_to_str(price, &info->order.price);
 	decimal_to_str(size, &info->order.size);
-	if (http_body_sprintf(http, "{ \"client_oid\": \"%s\", "
-			      "\"product_id\": \"%s\", "
+	if (http_body_sprintf(http, "{ \"client_oid\": \"%s\", " "\"product_id\": \"%s\", "
 			      "\"type\": \"limit\", \"side\": \"%s\", "
 			      "\"price\": \"%s\", \"size\": \"%s\", "
 			      "\"time_in_force\": \"%s\"}",
@@ -1334,10 +1338,11 @@ static bool place_order_work(struct exchg_client *cl, void *p) {
 
 static struct order_info *new_order(struct exchg_client *cl, const struct exchg_order *order,
 				    const struct exchg_place_order_opts *opts, void *private) {
-	struct order_info *oi = exchg_new_order(cl, order, opts, private, sizeof(char *));
+	struct order_info *oi = exchg_new_order(cl, order, opts, private,
+						sizeof(struct coinbase_order));
 	if (!oi)
 		return NULL;
-	*(char **)order_info_private(oi) = NULL;
+	memset(order_info_private(oi), 0, sizeof(struct coinbase_order));
 	return oi;
 }
 
@@ -1377,15 +1382,25 @@ static int64_t coinbase_place_order(struct exchg_client *cl, const struct exchg_
 static int cancel_order_recv(struct exchg_client *cl, struct http *http,
 			     int status, char *json, int num_toks, jsmntok_t *toks) {
 	if (num_toks > 1) {
-		// TODO: retry if we sent the cancel very soon after sending the
-		// order and the requests might have raced
 		struct http_data *data = http_private(http);
 		struct order_info *oi = exchg_order_lookup(cl, data->id);
+		const char *retrying = "";
 
 		if (oi) {
+			struct coinbase_order *c = order_info_private(oi);
+
 			order_update(cl, oi, EXCHG_ORDER_PENDING, NULL, true);
+			// TODO: would make sense for http_retry() to take care of
+			// redoing the auth stuff
+			if (!c->cancel_retried &&
+			    !coinbase_http_auth(&data->auth, cl->hmac_ctx, http)) {
+				http_retry(http);
+				c->cancel_retried = true;
+				retrying = "Retrying cancelation. ";
+			}
 		}
-		exchg_log("Cancelation of order %"PRId64" failed:\n", data->id);
+		exchg_log("Cancelation of order %"PRId64" failed. %sReceived:\n",
+			  data->id, retrying);
 		json_fprintln(stderr, json, &toks[0]);
 	}
 	return 0;

@@ -217,10 +217,12 @@ struct websocket *exchg_websocket_connect(struct exchg_client *cl,
 int websocket_printf(struct websocket *, const char *fmt, ...)
 	__attribute__((format (printf, 2, 3)));
 
+int http_body_vsprintf(struct http *, const char *fmt, va_list args);
 int http_body_sprintf(struct http *, const char *fmt, ...)
 	__attribute__((format (printf, 2, 3)));
 char *http_body(struct http *http);
 size_t http_body_len(struct http *http);
+void http_body_trunc(struct http *http, size_t len);
 
 void *websocket_private(struct websocket *);
 void *http_private(struct http *);
@@ -249,6 +251,7 @@ struct exchg_http_ops {
 			      struct http *, int status);
 	void (*on_closed)(struct exchg_client *cl, struct http *);
 	void (*on_error)(struct exchg_client *cl, struct http *, const char *err);
+	void (*on_free)(struct exchg_client *cl, struct http *);
 	size_t conn_data_size;
 };
 
@@ -261,6 +264,8 @@ struct http *exchg_http_post(const char *host, const char *path,
 struct http *exchg_http_delete(const char *host, const char *path,
 			       const struct exchg_http_ops *ops,
 			       struct exchg_client *cl);
+
+void http_retry(struct http *);
 
 void http_close(struct http *);
 void websocket_close(struct websocket *);

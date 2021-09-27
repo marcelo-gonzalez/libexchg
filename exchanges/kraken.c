@@ -861,6 +861,7 @@ static int kraken_get_pair_info(struct exchg_client *cl) {
 struct http_data {
 	size_t hmac_len;
 	char hmac[HMAC_SHA512_B64_LEN];
+	size_t body_len;
 	union {
 		void *request_private;
 		int64_t order_id;
@@ -976,7 +977,7 @@ static int private_http_auth(struct exchg_client *cl, struct http *http) {
 	struct kraken_client *k = client_private(cl);
 
 	// 123456{body}&nonce=123456
-	char *to_hash = malloc(20 + http_body_len(http) + 27);
+	char *to_hash = malloc(20 + h->body_len + 27);
 	if (!to_hash) {
 		fprintf(stderr, "%s: OOM\n", __func__);
 		return -1;
@@ -984,6 +985,7 @@ static int private_http_auth(struct exchg_client *cl, struct http *http) {
 	char *p = to_hash;
 	int64_t nonce = current_micros();
 
+	http_body_trunc(http, h->body_len);
 	if (http_body_sprintf(http, "%snonce=%"PRId64,
 			      http_body_len(http) > 0 ? "&" : "", nonce) < 0) {
 		free(to_hash);
@@ -1012,6 +1014,38 @@ static int private_http_auth(struct exchg_client *cl, struct http *http) {
 	}
 	free(to_hash);
 	return 0;
+}
+
+static bool error_is_set(const char *json, jsmntok_t *err) {
+	return err->type == JSMN_STRING || err->size > 0;
+}
+
+static void do_retry(struct exchg_client *cl, struct http *http,
+		    const char *json, jsmntok_t *err) {
+	if (private_http_auth(cl, http))
+		return;
+	exchg_log("Kraken: retrying https://%s%s %s after receiving error:\n",
+		  http_host(http), http_path(http), http_method(http));
+	json_fprintln(stderr, json, err);
+	http_retry(http);
+}
+
+static bool retry_invalid_nonce(struct exchg_client *cl, struct http *http,
+				const char *json, jsmntok_t *err) {
+	if (err->type == JSMN_ARRAY) {
+		for (int i = 1; i <= err->size; i++) {
+			if (json_streq(json, err+i, "EAPI:Invalid nonce")) {
+				do_retry(cl, http, json, err);
+				return true;
+			}
+		}
+	} else if (err->type == JSMN_STRING) {
+		if (json_streq(json, err, "EAPI:Invalid nonce")) {
+			do_retry(cl, http, json, err);
+			return true;
+		}
+	}
+	return false;
 }
 
 static int kraken_get_balances(struct exchg_client *cl, void *req_private) {
@@ -1055,13 +1089,6 @@ static int token_recv(struct exchg_client *cl, struct http *http,
 	const char *problem;
 	const char *url = "api.kraken.com/0/private/GetWebSocketsTokeninfo";
 
-	kc->getting_token = false;
-
-	if (num_toks < 1) {
-		exchg_log("%s returned no data\n", url);
-		return -1;
-	}
-
 	if (toks[0].type != JSMN_OBJECT) {
 		problem = "non-object info";
 		goto bad;
@@ -1073,9 +1100,14 @@ static int token_recv(struct exchg_client *cl, struct http *http,
 		jsmntok_t *key = &toks[key_idx];
 		jsmntok_t *value = key + 1;
 
-		if (json_streq(json, key, "error") && value->size > 0) {
-			problem = "error field set";
-			goto bad;
+		if (json_streq(json, key, "error")) {
+			if (error_is_set(json, value)) {
+				if (retry_invalid_nonce(cl, http, json, value))
+					return 0;
+				problem = "error field set";
+				goto bad;
+			}
+			key_idx = json_skip(num_toks, toks, key_idx+1);
 		} else if (json_streq(json, key, "result")) {
 			if (value->type != JSMN_OBJECT) {
 				problem = "non-object \"result\"";
@@ -1091,6 +1123,7 @@ static int token_recv(struct exchg_client *cl, struct http *http,
 					int err = json_strdup(&token, json, value);
 					if (err == ENOMEM) {
 						exchg_log("%s: OOM\n", __func__);
+						kc->getting_token = false;
 						return -1;
 					} else if (err) {
 						problem = "bad \"token\"";
@@ -1109,18 +1142,20 @@ static int token_recv(struct exchg_client *cl, struct http *http,
 		problem = "no token given";
 		goto bad;
 	}
+	kc->getting_token = false;
 	free(kc->ws_token);
 	kc->ws_token = token;
 	exchg_do_work(cl);
 	return 0;
 
 bad:
+	kc->getting_token = false;
 	exchg_log("%s: %s\n", url, problem);
 	json_fprintln(stderr, json, &toks[0]);
 	return -1;
 }
 
-static void token_on_closed(struct exchg_client *cl, struct http *http) {
+static void token_on_free(struct exchg_client *cl, struct http *http) {
 	struct kraken_client *kc = client_private(cl);
 
 	kc->getting_token = false;
@@ -1129,7 +1164,7 @@ static void token_on_closed(struct exchg_client *cl, struct http *http) {
 static struct exchg_http_ops token_ops = {
 	.recv = token_recv,
 	.add_headers = private_http_add_headers,
-	.on_closed = token_on_closed,
+	.on_free = token_on_free,
 	.conn_data_size = sizeof(struct http_data),
 };
 
@@ -1466,6 +1501,20 @@ static void add_order_on_err(struct exchg_client *cl, struct http *http,
 	order_update(cl, info, EXCHG_ORDER_ERROR, NULL, false);
 }
 
+static int __attribute__((format (printf, 2, 3)))
+kraken_body_sprintf(struct http *http, const char *fmt, ...) {
+	va_list ap;
+	int len;
+	struct http_data *data = http_private(http);
+
+	va_start(ap, fmt);
+	len = http_body_vsprintf(http, fmt, ap);
+	if (len > 0)
+		data->body_len += len;
+	va_end(ap);
+	return len;
+}
+
 static struct exchg_http_ops add_order_ops = {
 	.recv = add_order_recv,
 	.on_error = add_order_on_err,
@@ -1501,18 +1550,18 @@ static int http_post_add_order(struct exchg_client *cl,
 		     pi->price_decimals);
 	decimal_to_str(px, &info->order.price);
 
-	if (http_body_sprintf(http, "userref=%"PRId64"&ordertype=limit&"
-			      "type=%s&pair=%s&price=%s&volume=%s",
-			      info->id, info->order.side == EXCHG_SIDE_BUY ?
-			      "buy" : "sell", kraken_pair_to_str(info->order.pair),
-			      px, sz) < 0) {
+	if (kraken_body_sprintf(http, "userref=%"PRId64"&ordertype=limit&"
+				"type=%s&pair=%s&price=%s&volume=%s",
+				info->id, info->order.side == EXCHG_SIDE_BUY ?
+				"buy" : "sell", kraken_pair_to_str(info->order.pair),
+				px, sz) < 0) {
 		if (update_on_err)
 			order_err_update(cl, oi, "OOM writing order");
 		http_close(http);
 		return -1;
 	}
 	if (info->opts.immediate_or_cancel &&
-	    http_body_sprintf(http, "&timeinforce=IOC") < 0) {
+	    kraken_body_sprintf(http, "&timeinforce=IOC") < 0) {
 		if (update_on_err)
 			order_err_update(cl, oi, "OOM writing order");
 		http_close(http);
@@ -1717,7 +1766,7 @@ static int kraken_cancel_order(struct exchg_client *cl, struct order_info *info)
 						    &cancel_order_ops, cl);
 		if (!http)
 			return -1;
-		if (http_body_sprintf(http, "txid=%"PRId64, info->info.id) < 0) {
+		if (kraken_body_sprintf(http, "txid=%"PRId64, info->info.id) < 0) {
 			http_close(http);
 			return -1;
 		}

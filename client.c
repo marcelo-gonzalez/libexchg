@@ -62,6 +62,8 @@ struct http {
 	struct http_conn *conn;
 	const struct exchg_http_ops *ops;
 	bool print_data;
+	bool want_retry;
+	struct retry retry;
 	LIST_ENTRY(http) list;
 	char private[];
 };
@@ -174,6 +176,8 @@ static void json_free(struct json *json) {
 }
 
 static void __http_free(struct http *h) {
+	if (h->ops->on_free)
+		h->ops->on_free(h->cl, h);
 	json_free(&h->json);
 	free(h->method);
 	free(h->host);
@@ -213,7 +217,12 @@ void websocket_close(struct websocket *w) {
 }
 
 void http_close(struct http *h) {
-	http_conn_close(h->conn);
+	if (h->conn)
+		http_conn_close(h->conn);
+	else {
+		timer_cancel(h->retry.timer);
+		http_free(h);
+	}
 }
 
 #ifndef LIST_FOREACH_SAFE
@@ -228,11 +237,11 @@ void exchg_teardown(struct exchg_client *cl) {
 	// send order cancels, etc. Set a bit and
 	// look at that bit in the main callback
 	struct websocket *w, *wtmp;
-	struct http *h;
+	struct http *h, *htmp;
 
 	LIST_FOREACH_SAFE(w, &cl->websocket_list, list, wtmp)
 		websocket_close(w);
-	LIST_FOREACH(h, &cl->http_list, list)
+	LIST_FOREACH_SAFE(h, &cl->http_list, list, htmp)
 		http_close(h);
 }
 
@@ -394,7 +403,7 @@ static inline int ws_retry_seconds(struct websocket *w) {
 
 static void ws_reconnect(struct websocket *w);
 
-static void reconnect_timer(void *p) {
+static void ws_retry_timer(void *p) {
 	struct websocket *w = p;
 
 	w->retry.timer = NULL;
@@ -402,7 +411,7 @@ static void reconnect_timer(void *p) {
 }
 
 static void ws_add_retry_timer(struct websocket *w) {
-	w->retry.timer = timer_new(w->cl->ctx->net_context, reconnect_timer, w,
+	w->retry.timer = timer_new(w->cl->ctx->net_context, ws_retry_timer, w,
 				   retry_seconds(&w->retry));
 }
 
@@ -462,6 +471,39 @@ int websocket_add_header(struct websocket *w, const unsigned char *name,
 	return ws_conn_add_header(w->conn, name, val, len);
 }
 
+static void http_reconnect(struct http *h);
+
+static void http_retry_timer(void *p) {
+	struct http *h = p;
+
+	h->retry.timer = NULL;
+	http_reconnect(h);
+}
+
+static void http_add_retry_timer(struct http *h) {
+	h->retry.timer = timer_new(h->cl->ctx->net_context, http_retry_timer, h,
+				   retry_seconds(&h->retry));
+}
+
+static void http_reconnect(struct http *h) {
+	do {
+		retry_connected(&h->retry);
+		h->conn = http_dial(h->cl->ctx->net_context, h->host,
+				    h->path, h->method, h);
+		if (h->conn) {
+			if (h->body.len > 0)
+				http_conn_want_write(h->conn);
+			return;
+		}
+	} while (retry_seconds(&h->retry) == 0);
+
+	http_add_retry_timer(h);
+}
+
+void http_retry(struct http *h) {
+	h->want_retry = true;
+}
+
 static void http_on_error(void *p, const char *err) {
 	struct http *h = p;
 	if (h->ops->on_error)
@@ -490,17 +532,21 @@ static int http_add_headers(void *p, struct http_conn *req) {
 	return 0;
 }
 
+int http_body_vsprintf(struct http *h, const char *fmt, va_list args) {
+	if (!h->body.buf && buf_alloc(&h->body, 200, _net_write_buf_padding))
+		return -1;
+	int len = buf_vsprintf(&h->body, fmt, args);
+	if (len > 0)
+		http_conn_want_write(h->conn);
+	return len;
+}
+
 int http_body_sprintf(struct http *h, const char *fmt, ...) {
 	va_list ap;
 	int len;
 
 	va_start(ap, fmt);
-
-	if (!h->body.buf && buf_alloc(&h->body, 200, _net_write_buf_padding))
-		return -1;
-	len = buf_vsprintf(&h->body, fmt, ap);
-	if (len > 0)
-		http_conn_want_write(h->conn);
+	len = http_body_vsprintf(h, fmt, ap);
 	va_end(ap);
 	return len;
 }
@@ -511,6 +557,11 @@ char *http_body(struct http *h) {
 
 size_t http_body_len(struct http *h) {
 	return h->body.len;
+}
+
+void http_body_trunc(struct http *h, size_t len) {
+	if (len < h->body.len)
+		h->body.len = len;
 }
 
 static int http_recv(void *p, char *in, size_t len) {
@@ -554,7 +605,21 @@ static void http_on_closed(void *p) {
 	exchg_log("https://%s%s closed\n", h->host, h->path);
 	if (h->ops->on_closed)
 		h->ops->on_closed(h->cl, h);
-	http_free(h);
+	h->conn = NULL;
+
+	if (h->want_retry) {
+		if (retry_seconds(&h->retry) == 0) {
+			exchg_log("Retrying https://%s%s %s now.\n", h->host, h->path, h->method);
+			http_reconnect(h);
+		} else {
+			exchg_log("Retrying https://%s%s %s in %d seconds.\n", h->host, h->path,
+				  h->method, retry_seconds(&h->retry));
+			http_add_retry_timer(h);
+		}
+		h->want_retry = false;
+	} else {
+		http_free(h);
+	}
 }
 
 static int json_alloc(struct json *json) {
@@ -582,6 +647,7 @@ static struct http *exchg_http_dial(const char *host, const char *path,
 	}
 	cl->ctx->online = true;
 	memset(h, 0, sizeof(*h) + ops->conn_data_size);
+	retry_connected(&h->retry);
 	h->ops = ops;
 	h->conn = conn;
 	LIST_INSERT_HEAD(&cl->http_list, h, list);
