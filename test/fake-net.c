@@ -16,80 +16,14 @@
 #include "fake-kraken.h"
 #include "fake-coinbase.h"
 
+const int _net_write_buf_padding = 16;
+
 static void buf_init(struct buf *buf, size_t size) {
-	buf->buf = malloc(size);
-	if (!buf->buf) {
-		fprintf(stderr, "%s: OOM\n", __func__);
+	if (buf_alloc(buf, size, 0))
 		exit(1);
-	}
-	buf->size = size;
-	buf->len = 0;
 }
 
-static int buf_vsprintf(struct buf *buf, const char *fmt, va_list ap) {
-	int len;
-	va_list a;
-
-	va_copy(a, ap);
-	while ((len = vsnprintf(&buf->buf[buf->len],
-				buf->size - buf->len, fmt, ap)) >=
-	       buf->size - buf->len) {
-		int sz = 2*(buf->len + len + 1);
-		char *b = realloc(buf->buf, sz);
-		if (!b) {
-			fprintf(stderr, "%s: OOM\n", __func__);
-			return -1;
-		}
-		buf->buf = b;
-		buf->size = sz;
-		va_copy(ap, a);
-		va_copy(a, ap);
-	}
-	buf->len += len;
-	return len;
-}
-
-int buf_xsprintf(struct buf *buf, const char *fmt, ...) {
-	va_list ap;
-
-	va_start(ap, fmt);
-	int ret = buf_vsprintf(buf, fmt, ap);
-	if (ret < 0)
-		exit(1);
-	va_end(ap);
-
-	return ret;
-}
-
-void buf_xcpy(struct buf *buf, void *src, size_t len) {
-	if (buf->size < len + buf->len) {
-		int sz = 2 * (len + buf->len);
-		char *b = realloc(buf->buf, sz);
-		if (!b) {
-			fprintf(stderr, "%s: OOM\n", __func__);
-			exit(1);
-		}
-		buf->buf = b;
-		buf->size = sz;
-	}
-	memcpy(&buf->buf[buf->len], src, len);
-	buf->len += len;
-}
-
-int http_conn_vsprintf(struct http_conn *req, const char *fmt, va_list ap) {
-	if (!req->body.buf)
-		buf_init(&req->body, 200);
-
-	return buf_vsprintf(&req->body, fmt, ap);
-}
-
-char *http_conn_body(struct http_conn *req) {
-	return req->body.buf;
-}
-
-size_t http_conn_body_len(struct http_conn *req) {
-	return req->body.len;
-}
+void http_conn_want_write(struct http_conn *req) {}
 
 static int ws_matches(struct websocket_conn *ws, struct exchg_test_event *ev) {
 	return ev->type == EXCHG_EVENT_BOOK_UPDATE &&
@@ -427,6 +361,8 @@ static bool service(struct exchg_net_context *ctx) {
 	struct http_callbacks *http = &ctx->callbacks->http;
 	struct http_conn *http_conn;
 	struct websocket_conn *wsock;
+	char *body;
+	size_t body_len;
 
 	ev = TAILQ_FIRST(&ctx->events);
 	if (ev)
@@ -478,7 +414,7 @@ static bool service(struct exchg_net_context *ctx) {
 		default:
 			buf_init(&buf, 1<<10);
 			wsock->read(wsock, &buf, event);
-			ws->recv(wsock->user, buf.buf, buf.len);
+			ws->recv(wsock->user, buf_start(&buf), buf.len);
 			free(buf.buf);
 			break;
 		}
@@ -489,8 +425,8 @@ static bool service(struct exchg_net_context *ctx) {
 		case EXCHG_EVENT_HTTP_PREP:
 			ret = http->add_headers(http_conn->user, http_conn);
 			// TODO: if (ret) close(req);
-			if (!ret)
-				http_conn->write(http_conn);
+			http->write(http_conn->user, &body, &body_len);
+			http_conn->write(http_conn, body, body_len);
 			if (!ret)
 				http->on_established(http_conn->user,
 						     http_conn->status);
@@ -510,7 +446,7 @@ static bool service(struct exchg_net_context *ctx) {
 		default:
 			buf_init(&buf, 1<<10);
 			http_conn->read(http_conn, event, &buf);
-			http->recv(http_conn->user, buf.buf, buf.len);
+			http->recv(http_conn->user, buf_start(&buf), buf.len);
 			free(buf.buf);
 			http_conn_close(http_conn);
 			http_conn->read_event = NULL;
@@ -599,12 +535,12 @@ void net_destroy(struct exchg_net_context *ctx) {
 	free(ctx);
 }
 
-void no_ws_write(struct websocket_conn *w, char *buf, size_t len) {}
+void no_ws_write(struct websocket_conn *w, const char *buf, size_t len) {}
 
 void no_http_add_header(struct http_conn *req, const unsigned char *name,
 			const unsigned char *val, size_t len) {}
 
-void no_http_write(struct http_conn *req) {}
+void no_http_write(struct http_conn *req, const char *body, size_t len) {}
 
 int http_conn_add_header(struct http_conn *req, const unsigned char *name,
 			 const unsigned char *val, size_t len) {
@@ -615,7 +551,6 @@ int http_conn_add_header(struct http_conn *req, const unsigned char *name,
 void fake_http_conn_free(struct http_conn *req) {
 	free(req->host);
 	free(req->path);
-	free(req->body.buf);
 	free(req);
 }
 
@@ -699,28 +634,9 @@ void http_conn_close(struct http_conn *http) {
 	TAILQ_INSERT_HEAD(&http->ctx->events, event, list);
 }
 
-int ws_conn_vprintf(struct websocket_conn *ws, const char *fmt, va_list ap) {
-	va_list a;
-	va_copy(a, ap);
-	char buf[1024];
-	size_t len = vsnprintf(buf, sizeof(buf), fmt, ap);
-
-	if (len < sizeof(buf)) {
-		ws->write(ws, buf, len);
-		return len;
-	} else {
-		struct buf b;
-
-		buf_init(&b, len+1);
-		len = buf_vsprintf(&b, fmt, a);
-		if (len < 0) {
-			free(b.buf);
-			return len;
-		}
-		ws->write(ws, b.buf, len);
-		free(b.buf);
-		return len;
-	}
+int ws_conn_write(struct websocket_conn *ws, const char *buf, size_t len) {
+	ws->write(ws, buf, len);
+	return len;
 }
 
 int ws_conn_add_header(struct websocket_conn *req, const unsigned char *name,

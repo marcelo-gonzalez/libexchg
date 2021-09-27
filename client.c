@@ -9,6 +9,7 @@
 #include <sys/queue.h>
 
 #include "auth.h"
+#include "buf.h"
 #include "compiler.h"
 #include "exchg/currency.h"
 #include "client.h"
@@ -55,6 +56,7 @@ struct http {
 	char *host;
 	char *path;
 	char *method;
+	struct buf body;
 	struct json json;
 	struct exchg_client *cl;
 	struct http_conn *conn;
@@ -95,8 +97,8 @@ const char *http_path(struct http *h) {
 }
 
 void for_each_websocket(struct exchg_client *cl,
-		   int (*func)(struct websocket *w, void *private),
-		   void *private) {
+			int (*func)(struct websocket *w, void *private),
+			void *private) {
 	struct websocket *w;
 	LIST_FOREACH(w, &cl->websocket_list, list) {
 		if (func(w, private))
@@ -104,13 +106,49 @@ void for_each_websocket(struct exchg_client *cl,
 	}
 }
 
-int websocket_printf(struct websocket *ws, const char *fmt, ...) {
-	va_list ap;
-	va_start(ap, fmt);
+static int websocket_buf_write(struct websocket *ws, const char *fmt,
+			       va_list ap, int len) {
+	struct buf b;
 
-	int ret = ws_conn_vprintf(ws->conn, fmt, ap);
+	if (buf_alloc(&b, len+1, _net_write_buf_padding))
+		return -1;
+	len = buf_vsprintf(&b, fmt, ap);
+	if (len < 0) {
+		free(b.buf);
+		return len;
+	}
+	len = ws_conn_write(ws->conn, buf_start(&b), b.len);
+	free(b.buf);
+	return len;
+}
+
+int websocket_printf(struct websocket *ws, const char *fmt, ...) {
+	va_list a, ap;
+	int len;
+	char buf[1024];
+
+	va_start(ap, fmt);
+	va_copy(a, ap);
+
+	// paranoid...
+	if (unlikely(_net_write_buf_padding >= sizeof(buf))) {
+		len = websocket_buf_write(ws, fmt, ap, 1024);
+		va_end(ap);
+		va_end(a);
+		return len;
+	}
+
+	len = vsnprintf(&buf[_net_write_buf_padding],
+			sizeof(buf)-_net_write_buf_padding, fmt, ap);
+
+	if (len < sizeof(buf)-_net_write_buf_padding)
+		len = ws_conn_write(ws->conn, &buf[_net_write_buf_padding], len);
+	else
+		len = websocket_buf_write(ws, fmt, a, len);
+
 	va_end(ap);
-	return ret;
+	va_end(a);
+	return len;
 }
 
 static void conn_offline(struct exchg_context *ctx) {
@@ -140,6 +178,7 @@ static void __http_free(struct http *h) {
 	free(h->method);
 	free(h->host);
 	free(h->path);
+	free(h->body.buf);
 	free(h);
 }
 
@@ -456,17 +495,22 @@ int http_body_sprintf(struct http *h, const char *fmt, ...) {
 	int len;
 
 	va_start(ap, fmt);
-	len = http_conn_vsprintf(h->conn, fmt, ap);
+
+	if (!h->body.buf && buf_alloc(&h->body, 200, _net_write_buf_padding))
+		return -1;
+	len = buf_vsprintf(&h->body, fmt, ap);
+	if (len > 0)
+		http_conn_want_write(h->conn);
 	va_end(ap);
 	return len;
 }
 
 char *http_body(struct http *h) {
-	return http_conn_body(h->conn);
+	return buf_start(&h->body);
 }
 
 size_t http_body_len(struct http *h) {
-	return http_conn_body_len(h->conn);
+	return h->body.len;
 }
 
 static int http_recv(void *p, char *in, size_t len) {
@@ -495,6 +539,13 @@ static int http_recv(void *p, char *in, size_t len) {
 
 	return h->ops->recv(h->cl, h, http_conn_status(h->conn),
 			    json, numtoks, h->json.tokens);
+}
+
+static void http_write(void *p, char **buf, size_t *len) {
+	struct http *h = p;
+
+	*buf = buf_start(&h->body);
+	*len = h->body.len;
 }
 
 static void http_on_closed(void *p) {
@@ -1034,6 +1085,7 @@ static struct net_callbacks net_callbacks = {
 		.on_established = http_on_established,
 		.add_headers = http_add_headers,
 		.recv = http_recv,
+		.write = http_write,
 		.on_closed = http_on_closed,
 	},
 	{

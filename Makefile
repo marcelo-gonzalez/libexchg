@@ -23,7 +23,7 @@ CFLAGS+=$(EXTRA_CFLAGS)
 JSMN_DEFINE := -D JSMN_STATIC -U JSMN_HEADER
 
 obj = decimal.o auth.o currency.o client.o
-obj += json-helpers.o order-book.o
+obj += json-helpers.o order-book.o buf.o
 exchange-obj = exchanges/bitstamp.o exchanges/coinbase.o exchanges/gemini.o exchanges/kraken.o
 
 public-hdrs = include/exchg/exchanges.h include/exchg/exchg.h include/exchg/currency.h
@@ -110,6 +110,7 @@ exchanges/coinbase.o: $(hdrs)
 client.o: $(hdrs) client.c
 	$(CC) $(CFLAGS) $(JSMN_DEFINE) -c -o $@ client.c
 
+buf.o: buf.h
 json-helpers.o: json-helpers.h
 order-book.o: include/exchg/decimal.h include/exchg/exchanges.h order-book.h
 lws.o: net-backend.h

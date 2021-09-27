@@ -4,18 +4,21 @@
 #ifndef NET_BACKEND_H
 #define NET_BACKEND_H
 
-#include <stdarg.h>
-#include <stdbool.h>
+#include <sys/types.h>
 
 struct exchg_net_context;
 
 struct http_conn;
+
+extern const int _net_write_buf_padding;
 
 struct http_callbacks {
 	void (*on_error)(void *p, const char *err);
 	void (*on_established)(void *p, int status);
 	int (*add_headers)(void *p, struct http_conn *);
 	int (*recv)(void *p, char *in, size_t len);
+	// if len > 0, buf must be preceded by _net_write_buf_padding
+	void (*write)(void *p, char **buf, size_t *len);
 	void (*on_closed)(void *p);
 };
 
@@ -43,9 +46,7 @@ extern void net_destroy(struct exchg_net_context *);
 int http_conn_add_header(struct http_conn *req, const unsigned char *name,
 			 const unsigned char *val, size_t len);
 
-int http_conn_vsprintf(struct http_conn *req, const char *fmt, va_list ap);
-char *http_conn_body(struct http_conn *req);
-size_t http_conn_body_len(struct http_conn *req);
+void http_conn_want_write(struct http_conn *req);
 
 struct http_conn *http_dial(struct exchg_net_context *,
 			    const char *host, const char *path,
@@ -54,7 +55,8 @@ int http_conn_status(struct http_conn *);
 
 void http_conn_close(struct http_conn *req);
 
-extern int ws_conn_vprintf(struct websocket_conn *, const char *fmt, va_list ap);
+// buf must be preceded by _net_write_buf_padding
+extern int ws_conn_write(struct websocket_conn *, const char *buf, size_t len);
 
 int ws_conn_add_header(struct websocket_conn *req, const unsigned char *name,
 		       const unsigned char *val, size_t len);

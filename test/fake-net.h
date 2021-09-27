@@ -9,6 +9,7 @@
 #include <sys/queue.h>
 
 #include "auth.h"
+#include "buf.h"
 #include "exchg/exchg.h"
 #include "exchg/test.h"
 
@@ -26,12 +27,6 @@
 	     (var) = (tmp))
 #endif
 
-struct buf {
-	char *buf;
-	size_t len;
-	size_t size;
-};
-
 struct http_conn {
 	char *host;
 	char *path;
@@ -40,9 +35,8 @@ struct http_conn {
 	void *user;
 	struct exchg_net_context *ctx;
 	struct exchg_test_event *read_event;
-	struct buf body;
 	void (*read)(struct http_conn *req, struct exchg_test_event *ev, struct buf *buf);
-	void (*write)(struct http_conn *req);
+	void (*write)(struct http_conn *req, const char *body, size_t len);
 	void (*add_header)(struct http_conn *req, const unsigned char *name,
 			   const unsigned char *val, size_t len);
 	void (*destroy)(struct http_conn *req);
@@ -59,15 +53,11 @@ struct websocket_conn {
 	void *user;
 	struct exchg_net_context *ctx;
 	void (*read)(struct websocket_conn *, struct buf *buf, struct exchg_test_event *);
-	void (*write)(struct websocket_conn *, char *buf, size_t len);
+	void (*write)(struct websocket_conn *, const char *buf, size_t len);
 	int (*matches)(struct websocket_conn *, enum exchg_pair );
 	void (*destroy)(struct websocket_conn *);
 	void *priv;
 };
-
-int buf_xsprintf(struct buf *buf, const char *fmt, ...)
-	__attribute__((format (printf, 2, 3)));
-void buf_xcpy(struct buf *buf, void *src, size_t len);
 
 struct exchg_test_event *exchg_fake_queue_ws_event(
 	struct websocket_conn *w, enum exchg_test_event_type type, size_t private_size);
@@ -80,7 +70,7 @@ struct exchg_test_event *exchg_fake_queue_ws_event_after(
 	struct websocket_conn *w, enum exchg_test_event_type type, size_t private_size,
 	struct exchg_test_event *event);
 
-void no_ws_write(struct websocket_conn *, char *, size_t);
+void no_ws_write(struct websocket_conn *, const char *, size_t);
 
 enum auth_status {
 	AUTH_UNSET,
@@ -113,7 +103,7 @@ void auth_check_set_public(struct auth_check *, const unsigned char *c, size_t l
 void auth_check_set_payload(struct auth_check *a, const unsigned char *c, size_t len);
 void auth_check_set_hmac(struct auth_check *a, const unsigned char *c, size_t len);
 
-void no_http_write(struct http_conn *req);
+void no_http_write(struct http_conn *req, const char *, size_t);
 void no_http_add_header(struct http_conn *req, const unsigned char *name,
 			const unsigned char *val, size_t len);
 

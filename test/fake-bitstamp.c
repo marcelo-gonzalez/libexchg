@@ -111,8 +111,8 @@ static int bitstamp_ws_matches(struct websocket_conn *w, enum exchg_pair p) {
 	return b->channels[p].diff_subbed || b->channels[p].full_subbed;
 }
 
-static int get_channel(char *c, enum exchg_pair *p, bool *is_full) {
-	char *quote = c;
+static int get_channel(const char *c, enum exchg_pair *p, bool *is_full) {
+	const char *quote = c;
 
 	while (*quote && *quote != '\"')
 		quote++;
@@ -142,7 +142,7 @@ static int get_channel(char *c, enum exchg_pair *p, bool *is_full) {
 	return 0;
 }
 
-static void bitstamp_ws_write(struct websocket_conn *w, char *buf, size_t len) {
+static void bitstamp_ws_write(struct websocket_conn *w, const char *buf, size_t len) {
 	struct bitstamp_websocket *b = w->priv;
 	enum exchg_pair p;
 	bool is_full;

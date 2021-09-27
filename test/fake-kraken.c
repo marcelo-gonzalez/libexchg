@@ -213,7 +213,7 @@ static int kraken_ws_matches(struct websocket_conn *w, enum exchg_pair p) {
 	return k->channels[p].subbed;
 }
 
-static void kraken_ws_write(struct websocket_conn *w, char *buf, size_t len) {
+static void kraken_ws_write(struct websocket_conn *w, const char *buf, size_t len) {
 	struct kraken_websocket *k = w->priv;
 	const char *problem;
 
@@ -449,7 +449,7 @@ static void cancel_order(struct exchg_net_context *ctx, int64_t userref,
 	snprintf(cancel->err, sizeof(cancel->err), "order id %"PRId64" not recognized", userref);
 }
 
-static void private_ws_write(struct websocket_conn *w, char *buf, size_t len) {
+static void private_ws_write(struct websocket_conn *w, const char *buf, size_t len) {
 	struct private_ws *pw = w->priv;
 	const char *problem;
 
@@ -691,7 +691,7 @@ static void balances_add_header(struct http_conn *req, const unsigned char *name
 	// TODO:
 }
 
-static void balances_write(struct http_conn *req) {
+static void balances_write(struct http_conn *req, const char *body, size_t len) {
 	// TODO
 }
 
@@ -783,15 +783,15 @@ struct add_order_post {
 	bool got_size;
 };
 
-static int find_char(struct buf *buf, int idx, char c) {
-	for (; idx < buf->len; idx++) {
-		if (buf->buf[idx] == c)
+static int find_char(const char *buf, int len, int idx, char c) {
+	for (; idx < len; idx++) {
+		if (buf[idx] == c)
 			return idx;
 	}
 	return -1;
 }
 
-static enum exchg_pair asset_name_to_pair(char *c, int start, int end) {
+static enum exchg_pair asset_name_to_pair(const char *c, int start, int end) {
 	if (!strncmp(&c[start], "XXBTZUSD", strlen("XXBTZUSD")))
 		return EXCHG_PAIR_BTCUSD;
 	else if (!strncmp(&c[start], "XETHZUSD", strlen("XETHZUSD")))
@@ -827,71 +827,71 @@ static enum exchg_pair asset_name_to_pair(char *c, int start, int end) {
 	return -1;
 }
 
-static void add_order_write(struct http_conn *req) {
+static void add_order_write(struct http_conn *req, const char *body, size_t len) {
 	const char *problem = "";
 	struct add_order_post request = {};
 	int key = 0, key_end, val, val_end;
 	struct exchg_order_info *ack = &req->read_event->data.order_ack;
 
 	while (1) {
-		key_end = find_char(&req->body, key, '=');
+		key_end = find_char(body, len, key, '=');
 		if (key_end < 0)
 			break;
 		val = key_end + 1;
-		val_end = find_char(&req->body, val, '&');
+		val_end = find_char(body, len, val, '&');
 		if (val_end < 0)
-			val_end = req->body.len-1;
+			val_end = len-1;
 		if (val == val_end) {
 			exchg_log("Kraken test: bad urlencoded HTTP Body:\n");
-			fwrite(req->body.buf, 1, req->body.len, stderr);
+			fwrite(body, 1, len, stderr);
 			fputc('\n', stderr);
 			return;
 		}
-		if (!strncmp(&req->body.buf[key], "userref", strlen("userref"))) {
+		if (!strncmp(&body[key], "userref", strlen("userref"))) {
 			char s[22];
 			char *end;
 			if (val_end-val > 21) {
 				problem = "bad userref";
 				goto bad;
 			}
-			memcpy(s, &req->body.buf[val], val_end-val);
+			memcpy(s, &body[val], val_end-val);
 			s[val_end-val] = 0;
 			request.userref = strtoll(s, &end, 10);
 			if (*end) {
 				problem = "bad userref";
 				goto bad;
 			}
-		} else if (!strncmp(&req->body.buf[key], "pair", strlen("pair"))) {
-			ack->order.pair = asset_name_to_pair(req->body.buf, val, val_end);
+		} else if (!strncmp(&body[key], "pair", strlen("pair"))) {
+			ack->order.pair = asset_name_to_pair(body, val, val_end);
 			if (ack->order.pair == -1) {
 				problem = "bad pair";
 				goto bad;
 			}
 			request.got_pair = true;
-		} else if (!strncmp(&req->body.buf[key], "price", strlen("price"))) {
-			if (decimal_from_str_n(&ack->order.price, &req->body.buf[val], val_end-val)) {
+		} else if (!strncmp(&body[key], "price", strlen("price"))) {
+			if (decimal_from_str_n(&ack->order.price, &body[val], val_end-val)) {
 				problem = "bad price";
 				goto bad;
 			}
 			request.got_price = true;
-		} else if (!strncmp(&req->body.buf[key], "volume", strlen("volume"))) {
-			if (decimal_from_str_n(&ack->order.size, &req->body.buf[val], val_end-val)) {
+		} else if (!strncmp(&body[key], "volume", strlen("volume"))) {
+			if (decimal_from_str_n(&ack->order.size, &body[val], val_end-val)) {
 				problem = "bad size";
 				goto bad;
 			}
 			request.got_size = true;
-		} else if (!strncmp(&req->body.buf[key], "type", strlen("type"))) {
-			if (!strncmp(&req->body.buf[val], "buy", strlen("buy"))) {
+		} else if (!strncmp(&body[key], "type", strlen("type"))) {
+			if (!strncmp(&body[val], "buy", strlen("buy"))) {
 				ack->order.side = EXCHG_SIDE_BUY;
-			} else if (!strncmp(&req->body.buf[val], "sell", strlen("sell"))) {
+			} else if (!strncmp(&body[val], "sell", strlen("sell"))) {
 				ack->order.side = EXCHG_SIDE_SELL;
 			} else {
 				problem = "bad type";
 				goto bad;
 			}
 			request.got_side = true;
-		} else if (!strncmp(&req->body.buf[key], "timeinforce", strlen("timeinforce"))) {
-			if (!strncmp(&req->body.buf[val], "IOC", strlen("IOC")))
+		} else if (!strncmp(&body[key], "timeinforce", strlen("timeinforce"))) {
+			if (!strncmp(&body[val], "IOC", strlen("IOC")))
 				ack->opts.immediate_or_cancel = true;
 		}
 		key = val_end + 1;
@@ -915,7 +915,7 @@ static void add_order_write(struct http_conn *req) {
 	}
 	if (!request.userref) {
 		exchg_log("FIXME: kraken test expects to get a \"userref\" with orders for now. HTTP POST data:\n");
-		fwrite(req->body.buf, 1, req->body.len, stderr);
+		fwrite(body, 1, len, stderr);
 		fputc('\n', stderr);
 		return;
 	}
@@ -933,7 +933,7 @@ static void add_order_write(struct http_conn *req) {
 
 bad:
 	exchg_log("Kraken test: %s%s bad HTTP POST body: %s:\n", req->host, req->path, problem);
-	fwrite(req->body.buf, 1, req->body.len, stderr);
+	fwrite(body, 1, len, stderr);
 	fputc('\n', stderr);
 }
 
@@ -964,34 +964,34 @@ static void cancel_order_read(struct http_conn *req, struct exchg_test_event *ev
 	}
 }
 
-static void cancel_order_write(struct http_conn *req) {
+static void cancel_order_write(struct http_conn *req, const char *body, size_t len) {
 	const char *problem = "";
 	int key = 0, key_end, val, val_end;
 	unsigned int txid;
 	bool got_txid = false;
 
 	while (1) {
-		key_end = find_char(&req->body, key, '=');
+		key_end = find_char(body, len, key, '=');
 		if (key_end < 0)
 			break;
 		val = key_end + 1;
-		val_end = find_char(&req->body, val, '&');
+		val_end = find_char(body, len, val, '&');
 		if (val_end < 0)
-			val_end = req->body.len-1;
+			val_end = len-1;
 		if (val == val_end) {
 			exchg_log("Kraken test: bad urlencoded HTTP Body:\n");
-			fwrite(req->body.buf, 1, req->body.len, stderr);
+			fwrite(body, 1, len, stderr);
 			fputc('\n', stderr);
 			return;
 		}
-		if (!strncmp(&req->body.buf[key], "txid", strlen("txid"))) {
+		if (!strncmp(&body[key], "txid", strlen("txid"))) {
 			char s[22];
 			char *end;
 			if (val_end-val > 21) {
 				problem = "bad txid";
 				goto bad;
 			}
-			memcpy(s, &req->body.buf[val], val_end-val);
+			memcpy(s, &body[val], val_end-val);
 			s[val_end-val] = 0;
 			txid = strtol(s, &end, 10);
 			if (*end) {
@@ -1012,7 +1012,7 @@ static void cancel_order_write(struct http_conn *req) {
 
 bad:
 	exchg_log("Kraken test: %s%s bad HTTP POST body: %s:\n", req->host, req->path, problem);
-	fwrite(req->body.buf, 1, req->body.len, stderr);
+	fwrite(body, 1, len, stderr);
 	fputc('\n', stderr);
 }
 

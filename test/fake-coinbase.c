@@ -260,20 +260,20 @@ static void write_oid(char *dst, uint64_t id) {
 	dst[len-twelve_left] = 0;
 }
 
-static void orders_write(struct http_conn *req) {
+static void orders_write(struct http_conn *req, const char *body, size_t len) {
 	const char *problem = "";
 	jsmn_parser parser;
 	jsmntok_t toks[100];
 	struct exchg_order_info *ack = &req->read_event->data.order_ack;
 
-	if (req->body.len < 1) {
+	if (len < 1) {
 		fprintf(stderr, "no body given with POST to "
 			"https://api.pro.coinbase.com/orders\n");
 		return;
 	}
 
 	jsmn_init(&parser);
-	int num_toks = jsmn_parse(&parser, req->body.buf, req->body.len, toks, 100);
+	int num_toks = jsmn_parse(&parser, body, len, toks, 100);
 	if (num_toks < 0) {
 		problem = "could not parse JSON";
 		goto bad;
@@ -294,35 +294,35 @@ static void orders_write(struct http_conn *req) {
 		jsmntok_t *key = &toks[key_idx];
 		jsmntok_t *value = key + 1;
 
-		if (json_streq(req->body.buf, key, "price")) {
-			if (json_get_decimal(&ack->order.price, req->body.buf, value)) {
+		if (json_streq(body, key, "price")) {
+			if (json_get_decimal(&ack->order.price, body, value)) {
 				problem = "bad price";
 				goto bad;
 			}
 			got_price = true;
-		} else if (json_streq(req->body.buf, key, "size")) {
-			if (json_get_decimal(&ack->order.size, req->body.buf, value)) {
+		} else if (json_streq(body, key, "size")) {
+			if (json_get_decimal(&ack->order.size, body, value)) {
 				problem = "bad size";
 				goto bad;
 			}
 			got_size = true;
-		} else if (json_streq(req->body.buf, key, "side")) {
-			if (json_streq(req->body.buf, value, "buy"))
+		} else if (json_streq(body, key, "side")) {
+			if (json_streq(body, value, "buy"))
 				ack->order.side = EXCHG_SIDE_BUY;
-			else if (json_streq(req->body.buf, value, "sell"))
+			else if (json_streq(body, value, "sell"))
 				ack->order.side = EXCHG_SIDE_SELL;
 			else {
 				problem = "bad side";
 				goto bad;
 			}
 			got_side = true;
-		} else if (json_streq(req->body.buf, key, "product_id")) {
-			if (coinbase_str_to_pair(&ack->order.pair, req->body.buf, value)) {
+		} else if (json_streq(body, key, "product_id")) {
+			if (coinbase_str_to_pair(&ack->order.pair, body, value)) {
 				problem = "bad product_id";
 				goto bad;
 			}
 			got_pair = true;
-		} else if (json_streq(req->body.buf, key, "client_oid")) {
+		} else if (json_streq(body, key, "client_oid")) {
 			if (value->type != JSMN_STRING) {
 				problem = "bad client_oid";
 				goto bad;
@@ -332,8 +332,8 @@ static void orders_write(struct http_conn *req) {
 				goto bad;
 			}
 			client_oid = value;
-		} else if (json_streq(req->body.buf, key, "time_in_force")) {
-			if (json_streq(req->body.buf, value, "IOC"))
+		} else if (json_streq(body, key, "time_in_force")) {
+			if (json_streq(body, value, "IOC"))
 				ack->opts.immediate_or_cancel = true;
 		}
 
@@ -362,11 +362,11 @@ static void orders_write(struct http_conn *req) {
 	if (!client_oid) {
 		exchg_log("FIXME: Coinbase test code requires a \"client_oid\" to"
 			  " be present for now, but received an order request without one:\n");
-		json_fprintln(stderr, req->body.buf, &toks[0]);
+		json_fprintln(stderr, body, &toks[0]);
 		exit(1);
 	}
 	struct order_ids *ids = test_order_private(o);
-	memcpy(ids->client_oid, &req->body.buf[client_oid->start], 36);
+	memcpy(ids->client_oid, &body[client_oid->start], 36);
 	write_oid(ids->server_oid, ack->id);
 
 	struct order_ids *req_ids = req->priv;
@@ -376,7 +376,7 @@ static void orders_write(struct http_conn *req) {
 
 bad:
 	fprintf(stderr, "%s: %s:\n", __func__, problem);
-	fwrite(req->body.buf, 1, req->body.len, stderr);
+	fwrite(body, 1, len, stderr);
 	fputc('\n', stderr);
 }
 
@@ -467,7 +467,7 @@ static bool cancel_order(struct exchg_net_context *ctx, struct test_order *o) {
 	return true;
 }
 
-static void cancel_order_write(struct http_conn *req) {
+static void cancel_order_write(struct http_conn *req, const char *body, size_t len) {
 	struct order_cancel *cancel = req->priv;
 
 	if (strlen(req->path) < strlen("/orders/client:") + 36) {
@@ -708,7 +708,7 @@ static void ws_read(struct websocket_conn *ws, struct buf *buf,
 	}
 }
 
-static void ws_write(struct websocket_conn *w, char *json, size_t len) {
+static void ws_write(struct websocket_conn *w, const char *json, size_t len) {
 	struct coinbase_websocket *c = w->priv;
 	const char *problem = "";
 

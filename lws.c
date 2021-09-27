@@ -16,88 +16,15 @@ struct websocket_conn {
 	unsigned char *headers_end;
 };
 
-struct buf {
-	char *buf;
-	size_t len;
-	size_t size;
-};
+const int _net_write_buf_padding = LWS_PRE;
 
-static int buf_alloc(struct buf *buf, size_t size) {
-	size += LWS_PRE;
-	buf->buf = malloc(size);
-	if (!buf->buf) {
-		fprintf(stderr, "%s: OOM\n", __func__);
+int ws_conn_write(struct websocket_conn *ws, const char *buf, size_t len) {
+	if (lws_write(ws->wsi, (unsigned char *)buf, len, LWS_WRITE_TEXT) < len) {
+		// TODO: exchg_log() should be accessible here without including exchg.h
+		fprintf(stderr, "lws_write() error writing %zu bytes:\n%s\n", len, buf);
 		return -1;
 	}
-	buf->size = size;
-	buf->len = 0;
-	return 0;
-}
-
-static char *buf_start(struct buf *buf) {
-	if (!buf->buf)
-		return NULL;
-	return buf->buf + LWS_PRE;
-}
-
-static int buf_vsprintf(struct buf *buf, const char *fmt, va_list ap) {
-	int len;
-	va_list a;
-
-	va_copy(a, ap);
-	while ((len = vsnprintf(&buf->buf[buf->len + LWS_PRE],
-				buf->size - buf->len - LWS_PRE, fmt, ap)) >=
-	       buf->size - buf->len - LWS_PRE) {
-		int sz = LWS_PRE + buf->len + len + 1;
-		char *b = realloc(buf->buf, sz);
-		if (!b) {
-			fprintf(stderr, "%s: OOM\n", __func__);
-			return -1;
-		}
-		buf->buf = b;
-		buf->size = sz;
-		va_copy(ap, a);
-		va_copy(a, ap);
-	}
-	buf->len += len;
 	return len;
-}
-
-int ws_conn_vprintf(struct websocket_conn *ws, const char *fmt, va_list ap) {
-	va_list a;
-	char buf[1024 + LWS_PRE];
-	va_copy(a, ap);
-
-	int len = vsnprintf(buf + LWS_PRE, 1024, fmt, ap);
-	if (len < 1024) {
-		if (lws_write(ws->wsi, (unsigned char *)buf+LWS_PRE,
-			      len, LWS_WRITE_TEXT) < len) {
-			// TODO: exchg_log() should be accessible here without including exchg.h
-			fprintf(stderr, "lws_write() error writing %d bytes:\n%s\n", len, buf);
-			return -1;
-		} else {
-			return len;
-		}
-	} else {
-		struct buf b;
-
-		if (buf_alloc(&b, len+1))
-			return -1;
-		len = buf_vsprintf(&b, fmt, a);
-		if (len < 0) {
-			free(b.buf);
-			return len;
-		}
-		if (lws_write(ws->wsi, (unsigned char *)buf_start(&b),
-			      len, LWS_WRITE_TEXT) < len) {
-			fprintf(stderr, "lws_write() error writing %d bytes:\n%s\n",
-				len, buf_start(&b));
-			free(b.buf);
-			return -1;
-		}
-		free(b.buf);
-		return len;
-	}
 }
 
 int ws_conn_add_header(struct websocket_conn *ws, const unsigned char *name,
@@ -166,29 +93,14 @@ struct http_conn {
 	char *host;
 	char *path;
 	int status;
+	bool want_write;
 	unsigned char **headers_start;
 	unsigned char *headers_end;
-	struct buf body;
 	void *user;
 };
 
-int http_conn_vsprintf(struct http_conn *req, const char *fmt, va_list ap) {
-	if (!req->body.buf && buf_alloc(&req->body, 200))
-		return -1;
-
-	return buf_vsprintf(&req->body, fmt, ap);
-}
-
 int http_conn_status(struct http_conn *req) {
 	return req->status;
-}
-
-char *http_conn_body(struct http_conn *req) {
-	return buf_start(&req->body);
-}
-
-size_t http_conn_body_len(struct http_conn *req) {
-	return req->body.len;
 }
 
 int http_conn_add_header(struct http_conn *req, const unsigned char *name,
@@ -206,18 +118,24 @@ void http_conn_close(struct http_conn *req) {
 			LWS_TO_KILL_ASYNC);
 }
 
+void http_conn_want_write(struct http_conn *req) {
+	req->want_write = true;
+}
+
 static int http_callback(struct lws *wsi, enum lws_callback_reasons reason,
 			 void *user, void *in, size_t len) {
 	const struct net_callbacks *c = lws_context_user(lws_get_context(wsi));
 	const struct http_callbacks *http = &c->http;
 	struct http_conn *req = user;
+	char *body;
+	size_t body_len;
+	int ret;
 
 	switch (reason) {
 	case LWS_CALLBACK_CLIENT_CONNECTION_ERROR:
 		lwsl_err("HTTP CONNECTION ERROR: %s%s: %s\n",
 			 req->host, req->path, in ? (char *)in : "(null)");
 		http->on_error(req->user, (char *)in);
-		free(req->body.buf);
 		free(req->host);
 		free(req->path);
 		free(req);
@@ -227,7 +145,7 @@ static int http_callback(struct lws *wsi, enum lws_callback_reasons reason,
 		http->on_established(req->user, req->status);
 		break;
 	case LWS_CALLBACK_CLIENT_APPEND_HANDSHAKE_HEADER:
-		if (req->body.len > 0) {
+		if (req->want_write) {
 			lws_client_http_body_pending(wsi, 1);
 			lws_callback_on_writable(wsi);
 		}
@@ -235,17 +153,16 @@ static int http_callback(struct lws *wsi, enum lws_callback_reasons reason,
 		req->headers_end = *req->headers_start + len;
 		return http->add_headers(req->user, req);
 	case LWS_CALLBACK_CLIENT_HTTP_WRITEABLE:
-		if (req->body.len < 1) {
-			lws_client_http_body_pending(wsi, 0);
-			return 0;
-		}
-		if (lws_write(req->wsi, (unsigned char *)buf_start(&req->body),
-			      req->body.len, LWS_WRITE_TEXT) < req->body.len) {
+		http->write(req->user, &body, &body_len);
+		if (lws_write(req->wsi, (unsigned char *)body,
+			      body_len, LWS_WRITE_TEXT) < body_len) {
 			lwsl_err("%s%s: write error\n", req->host, req->path);
-			return -1;
+			ret = -1;
+		} else {
+			ret = 0;
 		}
 		lws_client_http_body_pending(wsi, 0);
-		return 0;
+		return ret;
 	case LWS_CALLBACK_RECEIVE_CLIENT_HTTP:
 		return prepare_http_client_read(wsi);
 	case LWS_CALLBACK_RECEIVE_CLIENT_HTTP_READ:
@@ -254,7 +171,6 @@ static int http_callback(struct lws *wsi, enum lws_callback_reasons reason,
 		// in context_create_info, or set hostname to garbage
 	case LWS_CALLBACK_CLOSED_CLIENT_HTTP:
 		http->on_closed(req->user);
-		free(req->body.buf);
 		free(req->host);
 		free(req->path);
 		free(req);
