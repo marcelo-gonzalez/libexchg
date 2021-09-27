@@ -32,6 +32,232 @@ struct kraken_client {
 	char *ws_token;
 };
 
+struct http_data {
+	size_t hmac_len;
+	char hmac[HMAC_SHA512_B64_LEN];
+	size_t body_len;
+	union {
+		void *request_private;
+		int64_t order_id;
+	};
+};
+
+static int private_http_add_headers(struct exchg_client *cl, struct http *http) {
+	struct http_data *h = http_private(http);
+
+	if (http_add_header(http, (unsigned char *)"API-Key:",
+			    (unsigned char *)cl->apikey_public,
+			    cl->apikey_public_len))
+		return 1;
+	if (http_add_header(http, (unsigned char *)"API-Sign:",
+			    (unsigned char*)h->hmac, h->hmac_len))
+		return 1;
+	if (http_add_header(http, (unsigned char *)"Content-Type:",
+			    (unsigned char *)
+			    "application/x-www-form-urlencoded",
+			    strlen("application/x-www-form-urlencoded")))
+		return 1;
+	char l[16];
+	size_t len = sprintf(l, "%zu", http_body_len(http));
+	if (http_add_header(http, (unsigned char *)"Content-Length:",
+			    (unsigned char *)l, len))
+		return 1;
+	return 0;
+}
+
+static int private_http_auth(struct exchg_client *cl, struct http *http) {
+	struct http_data *h = http_private(http);
+	struct kraken_client *k = client_private(cl);
+
+	// 123456{body}&nonce=123456
+	char *to_hash = malloc(20 + h->body_len + 27);
+	if (!to_hash) {
+		fprintf(stderr, "%s: OOM\n", __func__);
+		return -1;
+	}
+	char *p = to_hash;
+	int64_t nonce = current_micros();
+
+	http_body_trunc(http, h->body_len);
+	if (http_body_sprintf(http, "%snonce=%"PRId64,
+			      http_body_len(http) > 0 ? "&" : "", nonce) < 0) {
+		free(to_hash);
+		return -1;
+	}
+	p += sprintf(p, "%"PRId64, nonce);
+	memcpy(p, http_body(http), http_body_len(http));
+	p += http_body_len(http);
+
+	unsigned char to_auth[200+SHA256_DIGEST_LENGTH];
+	const char *path = http_path(http);
+	size_t path_len = strlen(path);
+	unsigned char *hash = to_auth + path_len;
+
+	memcpy(to_auth, path, path_len);
+
+	SHA256_Init(&k->sha_ctx);
+	SHA256_Update(&k->sha_ctx, to_hash, p-to_hash);
+	SHA256_Final(hash, &k->sha_ctx);
+
+	h->hmac_len = hmac_b64(cl->hmac_ctx, to_auth,
+			       path_len + SHA256_DIGEST_LENGTH, h->hmac);
+	if (h->hmac_len < 0) {
+		free(to_hash);
+		return -1;
+	}
+	free(to_hash);
+	return 0;
+}
+
+static bool error_is_set(const char *json, jsmntok_t *err) {
+	return err->type == JSMN_STRING || err->size > 0;
+}
+
+static void do_retry(struct exchg_client *cl, struct http *http,
+		    const char *json, jsmntok_t *err) {
+	if (private_http_auth(cl, http))
+		return;
+	exchg_log("Kraken: retrying https://%s%s %s after receiving error:\n",
+		  http_host(http), http_path(http), http_method(http));
+	json_fprintln(stderr, json, err);
+	http_retry(http);
+}
+
+static bool retry_invalid_nonce(struct exchg_client *cl, struct http *http,
+				const char *json, jsmntok_t *err) {
+	if (err->type == JSMN_ARRAY) {
+		for (int i = 1; i <= err->size; i++) {
+			if (json_streq(json, err+i, "EAPI:Invalid nonce")) {
+				do_retry(cl, http, json, err);
+				return true;
+			}
+		}
+	} else if (err->type == JSMN_STRING) {
+		if (json_streq(json, err, "EAPI:Invalid nonce")) {
+			do_retry(cl, http, json, err);
+			return true;
+		}
+	}
+	return false;
+}
+
+static int token_recv(struct exchg_client *cl, struct http *http,
+		      int status, char *json, int num_toks, jsmntok_t *toks) {
+	struct kraken_client *kc = client_private(cl);
+	const char *problem;
+	const char *url = "api.kraken.com/0/private/GetWebSocketsTokeninfo";
+
+	if (toks[0].type != JSMN_OBJECT) {
+		problem = "non-object info";
+		goto bad;
+	}
+
+	char *token = NULL;
+	int key_idx = 1;
+	for (int i = 0; i < toks[0].size; i++) {
+		jsmntok_t *key = &toks[key_idx];
+		jsmntok_t *value = key + 1;
+
+		if (json_streq(json, key, "error")) {
+			if (error_is_set(json, value)) {
+				if (retry_invalid_nonce(cl, http, json, value))
+					return 0;
+				problem = "error field set";
+				goto bad;
+			}
+			key_idx = json_skip(num_toks, toks, key_idx+1);
+		} else if (json_streq(json, key, "result")) {
+			if (value->type != JSMN_OBJECT) {
+				problem = "non-object \"result\"";
+				goto bad;
+			}
+			int n = value->size;
+			key_idx += 2;
+			for (int j = 0; j < n; j++) {
+				key = &toks[key_idx];
+				value = key + 1;
+
+				if (json_streq(json, key, "token")) {
+					int err = json_strdup(&token, json, value);
+					if (err == ENOMEM) {
+						exchg_log("%s: OOM\n", __func__);
+						kc->getting_token = false;
+						return -1;
+					} else if (err) {
+						problem = "bad \"token\"";
+						goto bad;
+					}
+					key_idx += 2;
+				} else
+					key_idx = json_skip(num_toks,
+							    toks, key_idx+1);
+			}
+		} else
+			key_idx = json_skip(num_toks, toks, key_idx+1);
+	}
+
+	if (!token) {
+		problem = "no token given";
+		goto bad;
+	}
+	kc->getting_token = false;
+	free(kc->ws_token);
+	kc->ws_token = token;
+	exchg_do_work(cl);
+	return 0;
+
+bad:
+	kc->getting_token = false;
+	exchg_log("%s: %s\n", url, problem);
+	json_fprintln(stderr, json, &toks[0]);
+	return -1;
+}
+
+static void token_on_free(struct exchg_client *cl, struct http *http) {
+	struct kraken_client *kc = client_private(cl);
+
+	kc->getting_token = false;
+}
+
+static struct exchg_http_ops token_ops = {
+	.recv = token_recv,
+	.add_headers = private_http_add_headers,
+	.on_free = token_on_free,
+	.conn_data_size = sizeof(struct http_data),
+};
+
+static int get_token(struct exchg_client *cl) {
+	struct kraken_client *kc = client_private(cl);
+	struct http *http = exchg_http_post("api.kraken.com", "/0/private/GetWebSocketsToken",
+					    &token_ops, cl);
+	if (!http)
+		return -1;
+	if (private_http_auth(cl, http)) {
+		http_close(http);
+		return -1;
+	}
+	kc->getting_token = true;
+	return 0;
+}
+
+static int priv_sub(struct kraken_client *kkn) {
+	if (websocket_printf(kkn->private_ws, "{ \"event\": "
+			     "\"subscribe\", \"subscription\":"
+			     " {\"name\": \"openOrders\", "
+			     "\"token\": \"%s\"}}", kkn->ws_token) < 0)
+		return -1;
+	return 0;
+}
+
+static bool priv_sub_work(struct exchg_client *cl, void *p) {
+	struct kraken_client *kkn = client_private(cl);
+
+	if (!kkn->ws_token || !websocket_established(kkn->private_ws))
+		return false;
+	priv_sub(kkn);
+	return true;
+}
+
 static int kraken_subscribe(struct kraken_client *kkn, enum exchg_pair pair) {
 	struct kraken_pair_info *pi = &kkn->pair_info[pair];
 
@@ -113,8 +339,7 @@ enum channel_name {
 
 struct event_msg {
 	int channel_id;
-	bool got_status;
-	bool status_ok;
+	jsmntok_t *status;
 	jsmntok_t *error_msg;
 	enum event_type type;
 	enum channel_name name;
@@ -128,8 +353,7 @@ static int parse_event(struct exchg_client *cl,
 	const char *problem;
 	struct event_msg status = {
 		.channel_id = -1,
-		.got_status = false,
-		.status_ok = false,
+		.status = NULL,
 		.error_msg = NULL,
 		.type = EVENT_UNKNOWN,
 		.name = CHAN_UNSET,
@@ -180,12 +404,8 @@ static int parse_event(struct exchg_client *cl,
 			}
 			key_idx += 2;
 		} else if (json_streq(json, key, "status")) {
-			status.got_status = true;
-			if (json_streq(json, value, "subscribed") ||
-			    json_streq(json, value, "ok")) {
-				status.status_ok = true;
-			}
-			key_idx += 2;
+			status.status = value;
+			key_idx = json_skip(num_toks, toks, key_idx+1);
 		} else if (json_streq(json, key, "errorMessage")) {
 			status.error_msg = value;
 			key_idx = json_skip(num_toks, toks, key_idx+1);
@@ -219,13 +439,27 @@ static int parse_event(struct exchg_client *cl,
 		problem = "missing \"event\"";
 		goto bad;
 	}
-	if (!status.got_status) {
+	if (!status.status) {
 		problem = "missing \"status\"";
 		goto bad;
 	}
 
 	if (status.type == EVENT_SUB_STATUS) {
-		if (!status.status_ok) {
+		if (!json_streq(json, status.status, "subscribed")) {
+			// TODO: also probly should check that subscription:name:
+			// is "openOrders"
+			if (kkn->private_ws && !kkn->openorders_recvd &&
+			    status.error_msg &&
+			    json_streq(json, status.error_msg,
+				       "ESession:Invalid session")) {
+				exchg_log("Getting new token after subscription error:\n");
+				json_fprintln(stderr, json, &toks[0]);
+				free(kkn->ws_token);
+				kkn->ws_token = NULL;
+				get_token(cl);
+				queue_work_exclusive(cl, priv_sub_work, NULL);
+				return 0;
+			}
 			problem = "bad \"status\"";
 			goto bad;
 		}
@@ -258,7 +492,7 @@ static int parse_event(struct exchg_client *cl,
 			return 0;
 		}
 		enum exchg_order_status new_status;
-		if (status.status_ok) {
+		if (json_streq(json, status.status, "ok")) {
 			new_status = EXCHG_ORDER_PENDING;
 		} else {
 			new_status = EXCHG_ORDER_ERROR;
@@ -280,7 +514,7 @@ static int parse_event(struct exchg_client *cl,
 			return 0;
 		}
 		cancel_done(cl, oi);
-		if (status.status_ok) {
+		if (json_streq(json, status.status, "ok")) {
 			exchg_order_update(cl, oi, EXCHG_ORDER_CANCELED, NULL, false);
 		} else {
 			order_err_cpy(&oi->info, json, status.error_msg);
@@ -858,115 +1092,6 @@ static int kraken_get_pair_info(struct exchg_client *cl) {
 	return 0;
 }
 
-struct http_data {
-	size_t hmac_len;
-	char hmac[HMAC_SHA512_B64_LEN];
-	size_t body_len;
-	union {
-		void *request_private;
-		int64_t order_id;
-	};
-};
-
-static int private_http_add_headers(struct exchg_client *cl, struct http *http) {
-	struct http_data *h = http_private(http);
-
-	if (http_add_header(http, (unsigned char *)"API-Key:",
-			    (unsigned char *)cl->apikey_public,
-			    cl->apikey_public_len))
-		return 1;
-	if (http_add_header(http, (unsigned char *)"API-Sign:",
-			    (unsigned char*)h->hmac, h->hmac_len))
-		return 1;
-	if (http_add_header(http, (unsigned char *)"Content-Type:",
-			    (unsigned char *)
-			    "application/x-www-form-urlencoded",
-			    strlen("application/x-www-form-urlencoded")))
-		return 1;
-	char l[16];
-	size_t len = sprintf(l, "%zu", http_body_len(http));
-	if (http_add_header(http, (unsigned char *)"Content-Length:",
-			    (unsigned char *)l, len))
-		return 1;
-	return 0;
-}
-
-static int private_http_auth(struct exchg_client *cl, struct http *http) {
-	struct http_data *h = http_private(http);
-	struct kraken_client *k = client_private(cl);
-
-	// 123456{body}&nonce=123456
-	char *to_hash = malloc(20 + h->body_len + 27);
-	if (!to_hash) {
-		fprintf(stderr, "%s: OOM\n", __func__);
-		return -1;
-	}
-	char *p = to_hash;
-	int64_t nonce = current_micros();
-
-	http_body_trunc(http, h->body_len);
-	if (http_body_sprintf(http, "%snonce=%"PRId64,
-			      http_body_len(http) > 0 ? "&" : "", nonce) < 0) {
-		free(to_hash);
-		return -1;
-	}
-	p += sprintf(p, "%"PRId64, nonce);
-	memcpy(p, http_body(http), http_body_len(http));
-	p += http_body_len(http);
-
-	unsigned char to_auth[200+SHA256_DIGEST_LENGTH];
-	const char *path = http_path(http);
-	size_t path_len = strlen(path);
-	unsigned char *hash = to_auth + path_len;
-
-	memcpy(to_auth, path, path_len);
-
-	SHA256_Init(&k->sha_ctx);
-	SHA256_Update(&k->sha_ctx, to_hash, p-to_hash);
-	SHA256_Final(hash, &k->sha_ctx);
-
-	h->hmac_len = hmac_b64(cl->hmac_ctx, to_auth,
-			       path_len + SHA256_DIGEST_LENGTH, h->hmac);
-	if (h->hmac_len < 0) {
-		free(to_hash);
-		return -1;
-	}
-	free(to_hash);
-	return 0;
-}
-
-static bool error_is_set(const char *json, jsmntok_t *err) {
-	return err->type == JSMN_STRING || err->size > 0;
-}
-
-static void do_retry(struct exchg_client *cl, struct http *http,
-		    const char *json, jsmntok_t *err) {
-	if (private_http_auth(cl, http))
-		return;
-	exchg_log("Kraken: retrying https://%s%s %s after receiving error:\n",
-		  http_host(http), http_path(http), http_method(http));
-	json_fprintln(stderr, json, err);
-	http_retry(http);
-}
-
-static bool retry_invalid_nonce(struct exchg_client *cl, struct http *http,
-				const char *json, jsmntok_t *err) {
-	if (err->type == JSMN_ARRAY) {
-		for (int i = 1; i <= err->size; i++) {
-			if (json_streq(json, err+i, "EAPI:Invalid nonce")) {
-				do_retry(cl, http, json, err);
-				return true;
-			}
-		}
-	} else if (err->type == JSMN_STRING) {
-		if (json_streq(json, err, "EAPI:Invalid nonce")) {
-			do_retry(cl, http, json, err);
-			return true;
-		}
-	}
-	return false;
-}
-
 static int balances_recv(struct exchg_client *cl, struct http *http,
 			 int status, char *json, int num_toks, jsmntok_t *toks) {
 	const char *problem;
@@ -1082,105 +1207,6 @@ static int kraken_new_keypair(struct exchg_client *cl,
 		return -1;
 	}
 	free(k);
-	return 0;
-}
-
-static int token_recv(struct exchg_client *cl, struct http *http,
-		      int status, char *json, int num_toks, jsmntok_t *toks) {
-	struct kraken_client *kc = client_private(cl);
-	const char *problem;
-	const char *url = "api.kraken.com/0/private/GetWebSocketsTokeninfo";
-
-	if (toks[0].type != JSMN_OBJECT) {
-		problem = "non-object info";
-		goto bad;
-	}
-
-	char *token = NULL;
-	int key_idx = 1;
-	for (int i = 0; i < toks[0].size; i++) {
-		jsmntok_t *key = &toks[key_idx];
-		jsmntok_t *value = key + 1;
-
-		if (json_streq(json, key, "error")) {
-			if (error_is_set(json, value)) {
-				if (retry_invalid_nonce(cl, http, json, value))
-					return 0;
-				problem = "error field set";
-				goto bad;
-			}
-			key_idx = json_skip(num_toks, toks, key_idx+1);
-		} else if (json_streq(json, key, "result")) {
-			if (value->type != JSMN_OBJECT) {
-				problem = "non-object \"result\"";
-				goto bad;
-			}
-			int n = value->size;
-			key_idx += 2;
-			for (int j = 0; j < n; j++) {
-				key = &toks[key_idx];
-				value = key + 1;
-
-				if (json_streq(json, key, "token")) {
-					int err = json_strdup(&token, json, value);
-					if (err == ENOMEM) {
-						exchg_log("%s: OOM\n", __func__);
-						kc->getting_token = false;
-						return -1;
-					} else if (err) {
-						problem = "bad \"token\"";
-						goto bad;
-					}
-					key_idx += 2;
-				} else
-					key_idx = json_skip(num_toks,
-							    toks, key_idx+1);
-			}
-		} else
-			key_idx = json_skip(num_toks, toks, key_idx+1);
-	}
-
-	if (!token) {
-		problem = "no token given";
-		goto bad;
-	}
-	kc->getting_token = false;
-	free(kc->ws_token);
-	kc->ws_token = token;
-	exchg_do_work(cl);
-	return 0;
-
-bad:
-	kc->getting_token = false;
-	exchg_log("%s: %s\n", url, problem);
-	json_fprintln(stderr, json, &toks[0]);
-	return -1;
-}
-
-static void token_on_free(struct exchg_client *cl, struct http *http) {
-	struct kraken_client *kc = client_private(cl);
-
-	kc->getting_token = false;
-}
-
-static struct exchg_http_ops token_ops = {
-	.recv = token_recv,
-	.add_headers = private_http_add_headers,
-	.on_free = token_on_free,
-	.conn_data_size = sizeof(struct http_data),
-};
-
-static int get_token(struct exchg_client *cl) {
-	struct kraken_client *kc = client_private(cl);
-	struct http *http = exchg_http_post("api.kraken.com", "/0/private/GetWebSocketsToken",
-					    &token_ops, cl);
-	if (!http)
-		return -1;
-	if (private_http_auth(cl, http)) {
-		http_close(http);
-		return -1;
-	}
-	kc->getting_token = true;
 	return 0;
 }
 
@@ -1331,24 +1357,6 @@ bad:
 	exchg_log("ws-auth.kraken.com returned bad data: %s:\n", problem);
 	json_fprintln(stderr, json, &toks[0]);
 	return -1;
-}
-
-static int priv_sub(struct kraken_client *kkn) {
-	if (websocket_printf(kkn->private_ws, "{ \"event\": "
-			     "\"subscribe\", \"subscription\":"
-			     " {\"name\": \"openOrders\", "
-			     "\"token\": \"%s\"}}", kkn->ws_token) < 0)
-		return -1;
-	return 0;
-}
-
-static bool priv_sub_work(struct exchg_client *cl, void *p) {
-	struct kraken_client *kkn = client_private(cl);
-
-	if (!kkn->ws_token || !websocket_established(kkn->private_ws))
-		return false;
-	priv_sub(kkn);
-	return true;
 }
 
 static int private_ws_on_established(struct exchg_client *cl, struct websocket *w) {
@@ -1618,7 +1626,7 @@ static int64_t kraken_place_order(struct exchg_client *cl, const struct exchg_or
 		return 0;
 	}
 
-	if (kkn->openorders_recvd) {
+	if (kkn->openorders_recvd && kkn->ws_token) {
 		if (private_ws_add_order(cl, &info->info)) {
 			order_info_free(cl, info);
 			return -1;
@@ -1751,7 +1759,7 @@ static int kraken_cancel_order(struct exchg_client *cl, struct order_info *info)
 	if (unlikely(ko->canceling))
 		return 0;
 
-	if (websocket_established(kkn->private_ws)) {
+	if (websocket_established(kkn->private_ws) && kkn->ws_token) {
 		unsigned int reqid = get_reqid(cl);
 		// TODO: there should be an exchg_cancel_orders()
 		// function canceling multiple at once
