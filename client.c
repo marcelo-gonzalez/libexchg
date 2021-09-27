@@ -31,6 +31,12 @@ struct json {
 	int buf_pos;
 };
 
+struct retry {
+	struct timer *timer;
+	struct timespec last_connected;
+	int seconds_idx;
+};
+
 struct websocket {
 	char *host;
 	char *path;
@@ -40,9 +46,7 @@ struct websocket {
 	const struct exchg_websocket_ops *ops;
 	bool established;
 	bool disconnecting;
-	struct timer *retry;
-	struct timespec last_connected;
-	int retry_seconds_idx;
+	struct retry retry;
 	LIST_ENTRY(websocket) list;
 	char private[];
 };
@@ -162,8 +166,8 @@ void websocket_close(struct websocket *w) {
 	w->disconnecting = true;
 	if (w->conn) {
 		ws_conn_close(w->conn);
-	} else if (w->retry) {
-		timer_cancel(w->retry);
+	} else if (w->retry.timer) {
+		timer_cancel(w->retry.timer);
 		websocket_free(w);
 	}
 	// else { we're inside the on_l2_disconnect() callback }
@@ -313,7 +317,11 @@ static int ws_recv(void *p, char *in, size_t len) {
 
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof(*x))
 
-static const int retry_seconds[] = {0, 1, 3, 10, 60, 300};
+static const int _retry_seconds[] = {0, 1, 3, 10, 60, 300};
+
+static int retry_seconds(struct retry *r) {
+	return _retry_seconds[r->seconds_idx];
+}
 
 static void time_since(struct timespec *dst, const struct timespec *ts) {
 	struct timespec now;
@@ -326,21 +334,23 @@ static void time_since(struct timespec *dst, const struct timespec *ts) {
 	dst->tv_sec = now.tv_sec - ts->tv_sec - carry;
 }
 
-static inline void ws_next_retry_seconds(struct websocket *w) {
-	int last_idx = ARRAY_SIZE(retry_seconds)-1;
+static inline void retry_connected(struct retry *r) {
+	int last_idx = ARRAY_SIZE(_retry_seconds)-1;
 	struct timespec since_last_connected;
 
-	time_since(&since_last_connected, &w->last_connected);
-	if (since_last_connected.tv_sec > retry_seconds[last_idx])
-		w->retry_seconds_idx = 0;
-	else if (w->retry_seconds_idx < last_idx)
-		w->retry_seconds_idx++;
+	time_since(&since_last_connected, &r->last_connected);
+	if (since_last_connected.tv_sec > _retry_seconds[last_idx])
+		r->seconds_idx = 0;
+	else if (r->seconds_idx < last_idx)
+		r->seconds_idx++;
+	clock_gettime(CLOCK_MONOTONIC, &r->last_connected);
 }
 
 static inline int ws_retry_seconds(struct websocket *w) {
 	if (w->disconnecting)
 		return -1;
-	return retry_seconds[w->retry_seconds_idx];
+
+	return retry_seconds(&w->retry);
 }
 
 static void ws_reconnect(struct websocket *w);
@@ -348,13 +358,13 @@ static void ws_reconnect(struct websocket *w);
 static void reconnect_timer(void *p) {
 	struct websocket *w = p;
 
-	w->retry = NULL;
+	w->retry.timer = NULL;
 	ws_reconnect(w);
 }
 
 static void ws_add_retry_timer(struct websocket *w) {
-	w->retry = timer_new(w->cl->ctx->net_context, reconnect_timer, w,
-			     retry_seconds[w->retry_seconds_idx]);
+	w->retry.timer = timer_new(w->cl->ctx->net_context, reconnect_timer, w,
+				   retry_seconds(&w->retry));
 }
 
 void exchg_data_disconnect(struct exchg_client *cl, struct websocket *w,
@@ -368,13 +378,11 @@ void exchg_data_disconnect(struct exchg_client *cl, struct websocket *w,
 
 static void ws_reconnect(struct websocket *w) {
 	do {
-		clock_gettime(CLOCK_MONOTONIC, &w->last_connected);
+		retry_connected(&w->retry);
 		w->conn = ws_dial(w->cl->ctx->net_context, w->host, w->path, w);
 		if (w->conn)
 			return;
-
-		ws_next_retry_seconds(w);
-	} while (ws_retry_seconds(w) == 0);
+	} while (retry_seconds(&w->retry) == 0);
 
 	ws_add_retry_timer(w);
 }
@@ -382,24 +390,22 @@ static void ws_reconnect(struct websocket *w) {
 static void ws_on_closed(void *p) {
 	struct websocket *w = p;
 
-	ws_next_retry_seconds(w);
-	int reconnect_seconds = ws_retry_seconds(w);
-
 	w->established = false;
 	w->conn = NULL;
+
 	if (w->ops->on_disconnect &&
-	    w->ops->on_disconnect(w->cl, w, reconnect_seconds))
+	    w->ops->on_disconnect(w->cl, w, ws_retry_seconds(w)))
 		w->disconnecting = true;
 
 	if (!w->disconnecting) {
-		if (reconnect_seconds == 0) {
+		if (retry_seconds(&w->retry) == 0) {
 			exchg_log("wss://%s%s closed. Reconnecting now\n",
 				  w->host, w->path);
 			ws_reconnect(w);
 		} else {
 			exchg_log("wss://%s%s closed. Reconnecting in %d second%s\n",
-				  w->host, w->path, reconnect_seconds,
-				  reconnect_seconds > 1 ? "s" : "");
+				  w->host, w->path, retry_seconds(&w->retry),
+				  retry_seconds(&w->retry) > 1 ? "s" : "");
 			ws_add_retry_timer(w);
 		}
 	} else {
@@ -583,11 +589,11 @@ struct websocket *exchg_websocket_connect(struct exchg_client *cl,
 	}
 	cl->ctx->online = true;
 	memset(w, 0, sizeof(*w) + ops->conn_data_size);
+	retry_connected(&w->retry);
 	w->ops = ops;
 	w->conn = conn;
 	LIST_INSERT_HEAD(&cl->websocket_list, w, list);
 	w->cl = cl;
-	clock_gettime(CLOCK_MONOTONIC, &w->last_connected);
 	w->host = strdup(host);
 	if (!w->host)
 		goto oom;
