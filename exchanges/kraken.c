@@ -891,87 +891,6 @@ static int private_http_add_headers(struct exchg_client *cl, struct http *http) 
 	return 0;
 }
 
-static int balances_recv(struct exchg_client *cl, struct http *http,
-			 int status, char *json, int num_toks, jsmntok_t *toks) {
-	const char *problem;
-
-	if (num_toks < 1) {
-		exchg_log("Kraken sent balance info with no data\n");
-		return -1;
-	}
-
-	if (toks[0].type != JSMN_OBJECT) {
-		problem = "non-object info";
-		goto bad;
-	}
-
-	decimal_t balances[EXCHG_NUM_CCYS];
-	memset(balances, 0, sizeof(balances));
-
-	bool warn = false;
-	int key_idx = 1;
-	for (int i = 0; i < toks[0].size; i++) {
-		jsmntok_t *key = &toks[key_idx];
-		jsmntok_t *value = key + 1;
-
-		if (json_streq(json, key, "error")) {
-			if (value->size > 0) {
-				exchg_log("Kraken balances error:\n");
-				json_fprintln(stderr, json, value);
-				return -1;
-			}
-			key_idx = json_skip(num_toks, toks, key_idx+1);
-		} else if (json_streq(json, key, "result")) {
-			if (value->type != JSMN_OBJECT) {
-				problem = "non-object \"result\"";
-				goto bad;
-			}
-
-			enum exchg_currency c;
-			int n = value->size;
-			key_idx += 2;
-			for (int j = 0; j < n; j++) {
-				key = &toks[key_idx];
-				value = key + 1;
-
-				if (kraken_str_to_ccy(&c, json, key)) {
-					warn = true;
-					key_idx = json_skip(
-						num_toks, toks, key_idx+1);
-					continue;
-				}
-				if (json_get_decimal(&balances[c],
-						     json, value)) {
-					problem = "bad balance value";
-					goto bad;
-				}
-				key_idx += 2;
-			}
-		} else
-			key_idx = json_skip(num_toks, toks, key_idx+1);
-	}
-
-	struct http_data *h = http_private(http);
-	exchg_on_balances(cl, balances, h->request_private);
-
-	if (warn) {
-		exchg_log("Some Kraken balances couldn't be parsed:\n");
-		json_fprintln(stderr, json, &toks[0]);
-	}
-	return 0;
-
-bad:
-	exchg_log("Kraken sent bad balance info: %s:\n", problem);
-	json_fprintln(stderr, json, &toks[0]);
-	return -1;
-}
-
-static struct exchg_http_ops balances_ops = {
-	.recv = balances_recv,
-	.add_headers = private_http_add_headers,
-	.conn_data_size = sizeof(struct http_data),
-};
-
 static int private_http_auth(struct exchg_client *cl, struct http *http) {
 	struct http_data *h = http_private(http);
 	struct kraken_client *k = client_private(cl);
@@ -1047,6 +966,89 @@ static bool retry_invalid_nonce(struct exchg_client *cl, struct http *http,
 	}
 	return false;
 }
+
+static int balances_recv(struct exchg_client *cl, struct http *http,
+			 int status, char *json, int num_toks, jsmntok_t *toks) {
+	const char *problem;
+
+	if (num_toks < 1) {
+		exchg_log("Kraken sent balance info with no data\n");
+		return -1;
+	}
+
+	if (toks[0].type != JSMN_OBJECT) {
+		problem = "non-object info";
+		goto bad;
+	}
+
+	decimal_t balances[EXCHG_NUM_CCYS];
+	memset(balances, 0, sizeof(balances));
+
+	bool warn = false;
+	int key_idx = 1;
+	for (int i = 0; i < toks[0].size; i++) {
+		jsmntok_t *key = &toks[key_idx];
+		jsmntok_t *value = key + 1;
+
+		if (json_streq(json, key, "error")) {
+			if (error_is_set(json, value)) {
+				if (retry_invalid_nonce(cl, http, json, value))
+					return 0;
+				exchg_log("Kraken balances error:\n");
+				json_fprintln(stderr, json, value);
+				return -1;
+			}
+			key_idx = json_skip(num_toks, toks, key_idx+1);
+		} else if (json_streq(json, key, "result")) {
+			if (value->type != JSMN_OBJECT) {
+				problem = "non-object \"result\"";
+				goto bad;
+			}
+
+			enum exchg_currency c;
+			int n = value->size;
+			key_idx += 2;
+			for (int j = 0; j < n; j++) {
+				key = &toks[key_idx];
+				value = key + 1;
+
+				if (kraken_str_to_ccy(&c, json, key)) {
+					warn = true;
+					key_idx = json_skip(
+						num_toks, toks, key_idx+1);
+					continue;
+				}
+				if (json_get_decimal(&balances[c],
+						     json, value)) {
+					problem = "bad balance value";
+					goto bad;
+				}
+				key_idx += 2;
+			}
+		} else
+			key_idx = json_skip(num_toks, toks, key_idx+1);
+	}
+
+	struct http_data *h = http_private(http);
+	exchg_on_balances(cl, balances, h->request_private);
+
+	if (warn) {
+		exchg_log("Some Kraken balances couldn't be parsed:\n");
+		json_fprintln(stderr, json, &toks[0]);
+	}
+	return 0;
+
+bad:
+	exchg_log("Kraken sent bad balance info: %s:\n", problem);
+	json_fprintln(stderr, json, &toks[0]);
+	return -1;
+}
+
+static struct exchg_http_ops balances_ops = {
+	.recv = balances_recv,
+	.add_headers = private_http_add_headers,
+	.conn_data_size = sizeof(struct http_data),
+};
 
 static int kraken_get_balances(struct exchg_client *cl, void *req_private) {
 	struct http *http = exchg_http_post("api.kraken.com", "/0/private/Balance",
