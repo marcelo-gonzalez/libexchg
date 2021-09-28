@@ -6,7 +6,6 @@
 
 #include <glib.h>
 #include <jsmn/jsmn.h>
-#include <libwebsockets.h>
 #include <openssl/hmac.h>
 #include <stdarg.h>
 #include <stdbool.h>
