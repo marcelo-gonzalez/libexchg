@@ -723,11 +723,13 @@ static void ws_write(struct websocket_conn *w, const char *json, size_t len) {
 		goto bad;
 	}
 
-	bool level2_subbed = false;
-	bool user_subbed = false;
+	bool level2_global = false;
+	bool user_global = false;
+	bool global_pair[EXCHG_NUM_PAIRS];
 	bool l2_pair_sub[EXCHG_NUM_PAIRS];
 	bool user_pair_sub[EXCHG_NUM_PAIRS];
 
+	memset(global_pair, 0, sizeof(l2_pair_sub));
 	memset(l2_pair_sub, 0, sizeof(l2_pair_sub));
 	memset(user_pair_sub, 0, sizeof(user_pair_sub));
 
@@ -754,8 +756,7 @@ static void ws_write(struct websocket_conn *w, const char *json, size_t len) {
 					problem = "bad product_ids";
 					goto bad;
 				}
-				l2_pair_sub[pair] = true;
-				user_pair_sub[pair] = true;
+				global_pair[pair] = true;
 			}
 			key_idx = json_skip(r, c->toks, key_idx+1);
 		} else if (json_streq(json, key, "channels")) {
@@ -770,9 +771,9 @@ static void ws_write(struct websocket_conn *w, const char *json, size_t len) {
 
 				if (channel->type == JSMN_STRING) {
 					if (json_streq(json, channel, "level2"))
-						level2_subbed = true;
+						level2_global = true;
 					else if (json_streq(json, channel, "user"))
-						user_subbed = true;
+						user_global = true;
 					key_idx++;
 					continue;
 				}
@@ -793,10 +794,10 @@ static void ws_write(struct websocket_conn *w, const char *json, size_t len) {
 					if (json_streq(json, key, "name")) {
 						if (json_streq(json, value, "level2")) {
 							parsing_level2 = true;
-							level2_subbed = true;
+							parsing_user = false;
 						} else if (json_streq(json, value, "user")) {
 							parsing_user = true;
-							user_subbed = true;
+							parsing_level2 = false;
 						} else {
 							problem = "unknown channel name";
 							goto bad;
@@ -840,11 +841,14 @@ static void ws_write(struct websocket_conn *w, const char *json, size_t len) {
 
 	for (enum exchg_pair pair = 0; pair < EXCHG_NUM_PAIRS; pair++) {
 		struct coinbase_channel *chan = &c->channels[pair];
+
+		l2_pair_sub[pair] |= global_pair[pair] && level2_global;
 		if (!chan->l2_subbed && l2_pair_sub[pair]) {
 			new_l2 = true;
 			new_l2_sub[pair] = true;
 			chan->l2_subbed = true;
 		}
+		user_pair_sub[pair] |= global_pair[pair] && user_global;
 		if (!chan->user_subbed && user_pair_sub[pair]) {
 			new_user = true;
 			new_user_sub[pair] = true;
