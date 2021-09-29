@@ -205,11 +205,12 @@ struct websocket *bitstamp_ws_dial(struct exchg_net_context *ctx,
 }
 
 extern char _binary_test_json_bitstamp_pairs_info_json_start[];
-extern char _binary_test_json_bitstamp_pairs_info_json_size[];
+extern char _binary_test_json_bitstamp_pairs_info_json_end[];
 
 static void bitstamp_pair_info_read(struct http_req *req, struct exchg_test_event *ev,
 				      struct buf *buf) {
-	size_t size = (size_t)_binary_test_json_bitstamp_pairs_info_json_size;
+	size_t size = _binary_test_json_bitstamp_pairs_info_json_end -
+		_binary_test_json_bitstamp_pairs_info_json_start;
 	buf_xcpy(buf, _binary_test_json_bitstamp_pairs_info_json_start, size);
 }
 
