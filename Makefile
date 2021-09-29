@@ -138,7 +138,7 @@ test/fake-net.o: $(hdrs) $(test-hdrs)
 test/context.o: $(hdrs) $(test-hdrs)
 
 test/fake-bitstamp.o: $(hdrs) $(test-hdrs) test/fake-bitstamp.c
-	$(CC) $(CFLAGS) $(JSMN_DEFINE) -c -o $@ test/fake-bitstamp.c
+	$(CC) $(CFLAGS) -c -o $@ test/fake-bitstamp.c
 
 test/fake-gemini.o: $(hdrs) $(test-hdrs) test/fake-gemini.c
 	$(CC) $(CFLAGS) $(JSMN_DEFINE) -c -o $@ test/fake-gemini.c

@@ -6,7 +6,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "json-helpers.h"
 #include "exchg/exchg.h"
 #include "fake-net.h"
 #include "fake-bitstamp.h"
