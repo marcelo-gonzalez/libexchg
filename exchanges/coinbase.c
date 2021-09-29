@@ -314,7 +314,7 @@ static void order_update(struct exchg_client *cl, struct order_info *oi,
 static int msg_finish(struct exchg_client *cl, struct ws_msg *msg,
 		      char *json, jsmntok_t *first_tok, const char **problem) {
 	struct coinbase_client *cb = client_private(cl);
-	struct order_info *info;
+	struct order_info *info = NULL;
 	enum exchg_order_status status = EXCHG_ORDER_PENDING;
 	decimal_t filled_size = {};
 

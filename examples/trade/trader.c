@@ -206,6 +206,9 @@ static void on_order_update(struct exchg_client *cl,
 		case EXCHG_ORDER_ERROR:
 			status = "ERROR";
 			break;
+		default:
+			status = "<Unknown>";
+			break;
 		}
 		char filled[30], out_of[30];
 		decimal_to_str(filled, &info->filled_size);

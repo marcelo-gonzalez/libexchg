@@ -116,14 +116,13 @@ static void events_read(struct websocket_conn *ws, struct buf *buf,
 
 	struct exchg_order_info *ack = &msg->data.order_ack;
 	struct gemini_ack *g = test_event_private(msg);
-	const char *type;
-	const char *is_live;
+	const char *type = "";
+	const char *is_live = "true";
 	const char *reason = "";
 
 	switch (g->type) {
 	case ORDER_ACCEPTED:
 		type = "accepted";
-		is_live = "true";
 		break;
 	case ORDER_REJECTED:
 		type = "rejected";
@@ -132,11 +131,9 @@ static void events_read(struct websocket_conn *ws, struct buf *buf,
 		break;
 	case ORDER_BOOKED:
 		type = "booked";
-		is_live = "true";
 		break;
 	case ORDER_FILL:
 		type = "fill";
-		is_live = "true";
 		break;
 	case ORDER_CANCELLED:
 		type = "cancelled";

@@ -1300,7 +1300,7 @@ static int parse_openorders(struct exchg_client *cl,
 		if (!oi)
 			continue;
 
-		enum exchg_order_status status;
+		enum exchg_order_status status = EXCHG_ORDER_PENDING;
 
 		switch (upd.status) {
 		case STATUS_CLOSED:
