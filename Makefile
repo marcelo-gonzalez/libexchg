@@ -1,19 +1,13 @@
 # TODO: use cmake
+dir = $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
 
-ifeq ($(LIBWEBSOCKETS_LIB),)
-	LIBWEBSOCKETS_LIB=-lwebsockets
-endif
-ifeq ($(LIBGLIB_LIB),)
-	LIBGLIB_LIB=-lglib-2.0
-endif
-ifeq ($(LIBGLIB_INCLUDE),)
-	LIBGLIB_INCLUDE=/usr/include/glib-2.0
-endif
-ifeq ($(LIBGLIB_LIB_INCLUDE),)
-	LIBGLIB_LIB_INCLUDE=/usr/lib/x86_64-linux-gnu/glib-2.0/include
-endif
+LIBWEBSOCKETS_LIB=./deps/build/libwebsockets/lib/libwebsockets.a
+LIBGLIB_LIB=./deps/build/glib/glib/libglib-2.0.a
 
-CFLAGS=-I$(LIBGLIB_INCLUDE) -I$(LIBGLIB_LIB_INCLUDE)
+CFLAGS=-I./deps/
+CFLAGS+=-I./deps/glib -I./deps/glib/glib/ -I./deps/build/glib/glib/
+CFLAGS+=-I./deps/build/libwebsockets/include/
+
 LDLIBS=$(LIBGLIB_LIB) -lssl -lcrypto -lcap
 
 CFLAGS+=-Wall -O2 -fPIC -pthread -I./ -I./include/
@@ -33,6 +27,11 @@ hdrs = $(public-hdrs) auth.h client.h json-helpers.h
 hdrs += compiler.h net-backend.h order-book.h time-helpers.h
 hdrs += exchanges/bitstamp.h exchanges/coinbase.h exchanges/kraken.h exchanges/gemini.h
 
+LIBGLIB_HDR=./deps/glib/glib/glib.h
+LIBWEBSOCKETS_HDR=./deps/libwebsockets/include/libwebsockets.h
+
+hdrs += $(LIBGLIB_HDR)
+
 test-obj = test/fake-net.o test/context.o
 test-obj += test/fake-gemini.o test/fake-kraken.o test/fake-bitstamp.o test/fake-coinbase.o
 test-obj += test/json/kraken/pair-info.o
@@ -48,26 +47,45 @@ examples = examples/trade/trade examples/print-book/print-book
 
 tests = examples/trade/test json-test ob-test decimal-test
 
-.PHONY: all tests examples clean
+.PHONY: all tests examples clean libwebsockets libglib
 
-all: libexchg.a libexchg.so libexchg-test.a libexchg-test.so
+all: libexchg.a libexchg-test.a
 examples: $(examples)
 tests: $(tests)
 
-libexchg.a: $(obj) $(exchange-obj) lws.o
-	$(AR) rcs $@ $^
-libexchg.so: $(obj) $(exchange-obj) lws.o
-	$(CC) -shared -o $@ $^
+libwebsockets: libglib
+	@if [ ! -d deps/build/libwebsockets/ ]; then \
+		mkdir deps/build/libwebsockets; \
+	fi; \
+	if [ ! -f deps/build/libwebsockets/Makefile ]; then \
+		cmake -B deps/build/libwebsockets -S deps/libwebsockets \
+		-DLWS_WITH_GLIB=ON \
+		-DGLIB_INCLUDE_DIRS="$(dir)/deps/glib/;$(dir)/deps/glib/glib/;$(dir)/deps/build/glib/glib/" \
+		-DGLIB_LIBRARIES=$(LIBGLIB_LIB) -DLWS_WITH_EVLIB_PLUGINS=0; \
+	fi; \
+	$(MAKE) -C deps/build/libwebsockets -j $(shell nproc)
 
-libexchg-test.a: $(obj) $(exchange-obj) $(test-obj)
+$(LIBWEBSOCKETS_LIB): libwebsockets ;
+$(LIBWEBSOCKETS_HDR): libwebsockets ;
+
+libglib:
+	@meson --default-library static deps/build/glib deps/glib; \
+	ninja -v -C deps/build/glib -j $(shell nproc); \
+
+$(LIBGLIB_HDR): libglib ;
+$(LIBGLIB_LIB): libglib ;
+
+libexchg.a: $(obj) $(exchange-obj) lws.o $(LIBWEBSOCKETS_LIB) $(LIBGLIB_LIB)
 	$(AR) rcs $@ $^
-libexchg-test.so: $(obj) $(exchange-obj) $(test-obj)
-	$(CC) -shared -o $@ $^
+
+libexchg-test.a: $(obj) $(exchange-obj) $(test-obj) $(LIBGLIB_LIB)
+	$(AR) rcs $@ $^
 
 examples/print-book/main.o: $(hdrs) examples/common.h
 examples/print-book/print-book: examples/print-book/main.o
 examples/print-book/print-book: examples/common.o libexchg.a
-	$(CC) -o $@ $(CFLAGS) $^ $(LIBWEBSOCKETS_LIB) $(LDLIBS) -lncurses
+	$(CC) -o $@ -Wall -pthread -O2 -I./include $(EXTRA_CFLAGS) \
+	$^ $(LIBWEBSOCKETS_LIB) $(LDLIBS) -lncurses
 
 examples/trade/trade.o: $(hdrs) examples/common.h examples/trade/trader.h
 examples/trade/trader.o: $(hdrs) examples/common.h examples/trade/trader.h
@@ -76,7 +94,8 @@ examples/trade/test.o: $(hdrs) examples/common.h examples/trade/trader.h
 
 examples/trade/trade: examples/trade/main.o examples/trade/trader.o
 examples/trade/trade: examples/common.o libexchg.a
-	$(CC) -o $@ $(CFLAGS) $^ $(LIBWEBSOCKETS_LIB) $(LDLIBS)
+	$(CC) -o $@ -Wall -pthread -O2 $(EXTRA_CFLAGS) \
+	-I./include $^ $(LIBWEBSOCKETS_LIB) $(LDLIBS)
 
 examples/trade/test: examples/common.o examples/trade/trader.o
 examples/trade/test: examples/trade/test.o libexchg-test.a
@@ -101,7 +120,7 @@ ob-test: order-book.o order-book-test.o decimal.o
 
 decimal.o: include/exchg/decimal.h
 decimal-test.o: include/exchg/decimal.h
-auth.o: auth.h
+auth.o: auth.h $(LIBGLIB_HDR)
 exchanges/bitstamp.o: $(hdrs)
 exchanges/gemini.o: $(hdrs)
 exchanges/kraken.o: $(hdrs)
@@ -112,8 +131,8 @@ client.o: $(hdrs) client.c
 
 buf.o: buf.h
 json-helpers.o: json-helpers.h
-order-book.o: include/exchg/decimal.h include/exchg/exchanges.h order-book.h
-lws.o: net-backend.h
+order-book.o: include/exchg/decimal.h include/exchg/exchanges.h order-book.h $(LIBGLIB_HDR)
+lws.o: net-backend.h $(LIBWEBSOCKETS_HDR)
 
 test/fake-net.o: $(hdrs) $(test-hdrs)
 test/context.o: $(hdrs) $(test-hdrs)
@@ -135,5 +154,8 @@ examples/common.o: $(hdrs) examples/common.h
 clean:
 	@find test/ -name "*.o" -delete
 	@find examples/ -name "*.o" -delete
-	@rm -f libexchg.a libexchg-test.a libexchg.so libexchg-test.so *.o \
+	@rm -f libexchg.a libexchg-test.a *.o \
 	exchanges/*.o $(examples) $(tests)
+
+depsclean:
+	@rm -rf deps/build

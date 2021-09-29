@@ -1,0 +1,9 @@
+[submodule "deps/libwebsockets"]
+	path = deps/libwebsockets
+	url = https://libwebsockets.org/repo/libwebsockets
+[submodule "deps/glib"]
+	path = deps/glib
+	url = https://gitlab.gnome.org/GNOME/glib.git
+[submodule "deps/jsmn"]
+	path = deps/jsmn
+	url = https://github.com/zserge/jsmn
