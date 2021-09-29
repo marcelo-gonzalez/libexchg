@@ -457,6 +457,7 @@ static void ws_on_closed(void *p) {
 			ws_add_retry_timer(w);
 		}
 	} else {
+		exchg_log("wss://%s%s closed\n", w->host, w->path);
 		websocket_free(w);
 	}
 }
