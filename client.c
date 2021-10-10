@@ -750,26 +750,6 @@ const struct exchg_pair_info *exchg_pair_info(struct exchg_client *cl,
 	return &cl->pair_info[pair];
 }
 
-int exchg_get_pair_info(struct exchg_client *cl) {
-	// TODO: delete this part. If this is called again, maybe the
-	// user really wants to fetch it again cus it thinks something
-	// may have changed
-	if (cl->pair_info_current)
-		return 0;
-
-	if (cl->get_info_error) {
-		exchg_log("%s can't get pair info. Already failed once.",
-			  cl->name);
-		return -1;
-	}
-
-	if (!cl->getting_info) {
-		cl->getting_info = true;
-		return cl->get_pair_info(cl);
-	}
-	return 0;
-}
-
 bool exchg_pair_info_current(struct exchg_client *cl) {
 	return cl->pair_info_current;
 }
@@ -1106,6 +1086,34 @@ static int call_per_exchange(struct exchg_context *ctx, const char *caller,
 	return -1;
 }
 
+int get_pair_info(struct exchg_client *cl) {
+	// TODO: delete this part. If this is called again, maybe the
+	// user really wants to fetch it again cus it thinks something
+	// may have changed
+	if (cl->pair_info_current)
+		return 0;
+
+	if (cl->get_info_error) {
+		exchg_log("%s can't get pair info. Already failed once.",
+			  cl->name);
+		return -1;
+	}
+
+	if (!cl->getting_info) {
+		cl->getting_info = true;
+		return cl->get_pair_info(cl);
+	}
+	return 0;
+}
+
+static int __get_pair_info(struct exchg_client *cl, void *p) {
+	return get_pair_info(cl);
+}
+
+int exchg_get_pair_info(struct exchg_context *ctx, enum exchg_id id) {
+	return call_per_exchange(ctx, __func__, __get_pair_info, id, NULL);
+}
+
 static int priv_ws_connect(struct exchg_client *cl, void *p) {
 	return cl->priv_ws_connect(cl);
 }
@@ -1125,7 +1133,7 @@ static int l2_subscribe(struct exchg_client *cl, void *p) {
 	int err = alloc_book(cl->ctx, pair);
 	if (err)
 		return err;
-	err = exchg_get_pair_info(cl);
+	err = get_pair_info(cl);
 	if (err)
 		return err;
 	if (cl->get_info_error) {

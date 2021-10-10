@@ -1410,7 +1410,7 @@ static int kraken_private_ws_connect(struct exchg_client *cl) {
 	if (kc->private_ws)
 		return 0;
 
-	if (exchg_get_pair_info(cl))
+	if (get_pair_info(cl))
 		return -1;
 
 	if (private_ws_connect(cl))
@@ -1619,7 +1619,7 @@ static int64_t kraken_place_order(struct exchg_client *cl, const struct exchg_or
 	k->canceling = false;
 
 	if (unlikely(!cl->pair_info_current)) {
-		if (exchg_get_pair_info(cl) || queue_work(cl, place_order_work, info)) {
+		if (get_pair_info(cl) || queue_work(cl, place_order_work, info)) {
 			order_info_free(cl, info);
 			return -1;
 		}

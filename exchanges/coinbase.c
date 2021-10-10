@@ -1366,7 +1366,7 @@ static int64_t coinbase_place_order(struct exchg_client *cl, const struct exchg_
 			return -1;
 		}
 	} else {
-		if (exchg_get_pair_info(cl))
+		if (get_pair_info(cl))
 			return -1;
 		info = new_order(cl, order, opts, private);
 		if (!info)
@@ -1459,7 +1459,7 @@ static int coinbase_new_keypair(struct exchg_client *cl,
 static int coinbase_priv_ws_connect(struct exchg_client *cl) {
 	struct coinbase_client *cb = client_private(cl);
 
-	if (exchg_get_pair_info(cl))
+	if (get_pair_info(cl))
 		return -1;
 
 	cb->watching_user_chan = true;

@@ -81,6 +81,8 @@ struct exchg_client {
 	char private[];
 };
 
+int get_pair_info(struct exchg_client *cl);
+
 static inline void *client_private(struct exchg_client *cl) {
 	return cl->private;
 }

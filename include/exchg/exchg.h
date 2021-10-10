@@ -135,8 +135,9 @@ int exchg_set_keypair(struct exchg_client *cl,
 int exchg_set_password(struct exchg_client *cl,
 		       size_t len, const char *password);
 
-// Fetch info on available trading pairs. Called automatically by other functions that require it
-int exchg_get_pair_info(struct exchg_client *cl);
+// Fetch info on available trading pairs. Called automatically by other functions that require it.
+// pass EXCHG_ALL_EXCHANGES to fetch info for all previously allocated clients
+int exchg_get_pair_info(struct exchg_context *ctx, enum exchg_id id);
 
 // Subscribe to L2 order book data to be received in the on_l2_update callback
 // pass EXCHG_ALL_EXCHANGES to subscribe on all previously allocated clients
