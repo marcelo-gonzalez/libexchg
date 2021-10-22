@@ -69,17 +69,18 @@ int set_pass(struct exchg_client *cl, const char *path) {
 	return ret;
 }
 
-enum exchg_id exchange_from_str(const char *str) {
+int exchange_from_str(enum exchg_id *ret, const char *str) {
 	if (!strcmp(str, "bitstamp"))
-		return EXCHG_BITSTAMP;
+		*ret = EXCHG_BITSTAMP;
 	else if (!strcmp(str, "gemini"))
-		return EXCHG_GEMINI;
+		*ret = EXCHG_GEMINI;
 	else if (!strcmp(str, "kraken"))
-		return EXCHG_KRAKEN;
+		*ret = EXCHG_KRAKEN;
 	else if (!strcmp(str, "coinbase"))
-		return EXCHG_COINBASE;
+		*ret = EXCHG_COINBASE;
 	else
 		return -1;
+	return 0;
 }
 
 int option_parse_exchanges(bool want_exchange[EXCHG_ALL_EXCHANGES], char *arg) {
@@ -91,8 +92,8 @@ int option_parse_exchanges(bool want_exchange[EXCHG_ALL_EXCHANGES], char *arg) {
 		char *exchange = strtok(str, ",");
 		if (!exchange)
 			break;
-		enum exchg_id id = exchange_from_str(exchange);
-		if (id < 0) {
+		enum exchg_id id;
+		if (exchange_from_str(&id, exchange) < 0) {
 			fprintf(stderr, "unrecognized exchange: %s\n", exchange);
 			return -1;
 		} else {

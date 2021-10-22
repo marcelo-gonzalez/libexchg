@@ -13,6 +13,6 @@ int set_keys(struct exchg_client *cl, const char *public_path,
 int set_pass(struct exchg_client *cl, const char *path);
 
 int option_parse_exchanges(bool want_exchange[EXCHG_ALL_EXCHANGES], char *arg);
-enum exchg_id exchange_from_str(const char *);
+int exchange_from_str(enum exchg_id *ret, const char *str);
 
 #endif

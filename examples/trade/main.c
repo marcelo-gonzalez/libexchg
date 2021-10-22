@@ -138,8 +138,8 @@ int main(int argc, char **argv) {
 		return 1;
 
 	int ret = 1;
-	enum exchg_id id = exchange_from_str(argv[optind]);
-	if (id < 0) {
+	enum exchg_id id;
+	if (exchange_from_str(&id, argv[optind]) < 0) {
 		fprintf(stderr, "unrecognized exchange: %s\n", argv[optind]);
 		goto free_ctx;
 	}
