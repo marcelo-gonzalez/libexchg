@@ -11,7 +11,7 @@
 
 struct find_price_arg {
 	struct trade_state *state;
-	struct exchg_context *ctx;
+	bool filled;
 };
 
 static int buy_up(const struct exchg_limit_order *o, void *user) {
@@ -27,12 +27,17 @@ static int buy_up(const struct exchg_limit_order *o, void *user) {
 	}
 
 	state->order.price = o->price;
+
+	if (b->filled)
+		return 1;
+
 	if (decimal_cmp(&o->size, &state->left_to_send) < 0) {
 		decimal_subtract_inplace(&state->left_to_send, &o->size);
 		return 0;
 	}
 	decimal_zero(&state->left_to_send);
-	return 1;
+	b->filled = true;
+	return 0;
 }
 
 static int sell_down(const struct exchg_limit_order *o, void *user) {
@@ -48,12 +53,17 @@ static int sell_down(const struct exchg_limit_order *o, void *user) {
 	}
 
 	state->order.price = o->price;
+
+	if (b->filled)
+		return 1;
+
 	if (decimal_cmp(&o->size, &state->left_to_send) < 0) {
 		decimal_subtract_inplace(&state->left_to_send, &o->size);
 		return 0;
 	}
 	decimal_zero(&state->left_to_send);
-	return 1;
+	b->filled = true;
+	return 0;
 }
 
 static void make_trades(struct exchg_client *cl,
@@ -61,7 +71,6 @@ static void make_trades(struct exchg_client *cl,
 	struct exchg_context *ctx = exchg_ctx(cl);
 	struct find_price_arg b = {
 		.state = state,
-		.ctx = ctx,
 	};
 
 	if (state->order.side == EXCHG_SIDE_BUY)

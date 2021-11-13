@@ -16,7 +16,7 @@
 static struct exchg_test_str_l2_updates events[] = {
 	{.pair = EXCHG_PAIR_BTCUSD,
 	 .bids = {{"30000", "1"}, {"29500", ".1"}, {"29400", ".2"}, {"29100", "2"}},
-	 .asks = {{"31000", "3.3"}}},
+	 .asks = {{"31000", "3.3"}, {"32000", "4.3"}}},
 	{.pair = EXCHG_PAIR_BTCUSD,
 	 .bids = {{"29000", "1.2"}}},
 	{.pair = EXCHG_PAIR_BTCUSD,
