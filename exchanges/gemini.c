@@ -949,9 +949,16 @@ static int order_events_recv(struct exchg_client *cl, struct websocket *w,
 					goto bad;
 			}
 		}
+		if (event.update.client_oid == -1) {
+			problem = "no \"client_order_id\"";
+			goto bad;
+		}
 		struct order_info *oi = exchg_order_lookup(cl, event.update.client_oid);
-		if (!oi)
+		if (!oi) {
+			exchg_log("Gemini got unknown order update:\n");
+			json_fprintln(stderr, json, &toks[0]);
 			goto skip;
+		}
 		struct gemini_order *g = order_info_private(oi);
 		struct exchg_order_info *info = &oi->info;
 
