@@ -8,7 +8,7 @@ Main header is `include/exchg/exchg.h`. Look in `examples/` to get a sense for t
 ```console
 hero@foo.bar:~$ git clone https://github.com/marcelo-gonzalez/libexchg && cd libexchg
 hero@foo.bar:~/libexchg$ git submodule init && git submodule update
-hero@foo.bar:~/libexchg$ sudo apt-get install cmake meson ninja-build
+hero@foo.bar:~/libexchg$ sudo apt-get install cmake meson ninja-build python3-setuptools libssl-dev libcap-dev
 hero@foo.bar:~/libexchg$ make
 hero@foo.bar:~/libexchg$ sudo apt-get install libncurses-dev
 hero@foo.bar:~/libexchg$ make examples
