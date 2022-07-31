@@ -796,7 +796,6 @@ struct pair_info_msg {
 	int price_decimals;
 	decimal_t base_increment;
 	decimal_t quote_increment;
-	decimal_t min_size;
 	bool trading_disabled;
 	bool online;
 };
@@ -868,12 +867,6 @@ static int parse_info(struct exchg_client *cl, struct http *http,
 					free(msg.id);
 					goto bad;
 				}
-			} else if (json_streq(json, key, "base_min_size")) {
-				if (json_get_decimal(&msg.min_size, json, value)) {
-					problem = "bad \"base_min_size\" field";
-					free(msg.id);
-					goto bad;
-				}
 			} else if (json_streq(json, key, "base_increment")) {
 				if (json_get_decimal(&msg.base_increment, json, value)) {
 					problem = "bad \"base_increment\" field";
@@ -901,11 +894,6 @@ static int parse_info(struct exchg_client *cl, struct http *http,
 		}
 		if (msg.counter == -1) {
 			problem = "no \"quote_currency\" field";
-			free(msg.id);
-			goto bad;
-		}
-		if (decimal_is_zero(&msg.min_size)) {
-			problem = "no \"base_min_size\" field";
 			free(msg.id);
 			goto bad;
 		}
@@ -948,7 +936,10 @@ static int parse_info(struct exchg_client *cl, struct http *http,
 		struct coinbase_pair_info *cpi = &cb->pair_info[pair];
 
 		pi->available = true;
-		pi->min_size = msg.min_size;
+		// TODO: the min size logic for coinbase is now based on price * size
+		// should update the pair info struct to be able to describe that.
+		// for now just set it to zero.
+		decimal_zero(&pi->min_size);
 		pi->base_decimals = decimal_inc_to_places(&msg.base_increment);
 		if (pi->base_decimals < 0) {
 			problem = "bad \"base_increment\" field";
@@ -961,7 +952,6 @@ static int parse_info(struct exchg_client *cl, struct http *http,
 			free(msg.id);
 			goto bad;
 		}
-		pi->min_size_is_base = true;
 		// TODO: get from api.pro.coinbase.com/fees
 		pi->fee_bps = 50;
 
