@@ -95,6 +95,8 @@ static const char *coinbase_pair_to_str(enum exchg_pair p) {
 		return "LTC-BTC";
 	case EXCHG_PAIR_DAIUSD:
 		return "DAI-USD";
+	case EXCHG_PAIR_NEARUSD:
+		return "NEAR-USD";
 	default:
 		return NULL;
 	}
@@ -131,6 +133,9 @@ static int coinbase_str_to_pair(enum exchg_pair *dst, const char *json,
 		return 0;
 	} else if (json_streq(json, tok, "BCH-USD")) {
 		*dst = EXCHG_PAIR_BCHUSD;
+		return 0;
+	} else if (json_streq(json, tok, "NEAR-USD")) {
+		*dst = EXCHG_PAIR_NEARUSD;
 		return 0;
 	} else
 		return -1;

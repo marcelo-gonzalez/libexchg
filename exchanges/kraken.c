@@ -807,6 +807,8 @@ static int kraken_str_to_pair(enum exchg_pair *pair, const char *json,
 		*pair = EXCHG_PAIR_LTCBCH;
 	else if (json_streq(json, tok, "DAIUSD"))
 		*pair = EXCHG_PAIR_DAIUSD;
+	else if (json_streq(json, tok, "NEARUSD"))
+		*pair = EXCHG_PAIR_NEARUSD;
 	else
 		return EINVAL;
 	return 0;
@@ -846,6 +848,8 @@ static const char *kraken_pair_to_str(enum exchg_pair pair) {
 		return "LTCBCH";
 	case EXCHG_PAIR_DAIUSD:
 		return "DAIUSD";
+	case EXCHG_PAIR_NEARUSD:
+		return "NEARUSD";
 	default:
 		return NULL;
 	}
@@ -869,6 +873,8 @@ static int kraken_str_to_ccy(enum exchg_currency *ccy, const char *json,
 		*ccy = EXCHG_CCY_BCH;
 	else if (json_streq(json, tok, "DAI"))
 		*ccy = EXCHG_CCY_DAI;
+	else if (json_streq(json, tok, "NEAR"))
+		*ccy = EXCHG_CCY_NEAR;
 	else
 		return EINVAL;
 	return 0;

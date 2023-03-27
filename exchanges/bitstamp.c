@@ -334,24 +334,26 @@ static int bitstamp_recv(struct exchg_client *cl, struct websocket *w,
 			}
 			key_idx += 2;
 		} else if (json_streq(json, key, "channel")) {
-			if (value->end - value->start <
-			    6 + strlen("order_book_") ||
-			    exchg_strn_to_pair(&msg.pair, &json[value->end-6],
-					       6)) {
-				key_idx = json_skip(num_toks, toks, key_idx+1);
-				continue;
-			}
-
-			if (value->end-value->start > strlen("order_book_") &&
+			const char *currency;
+			size_t currency_len;
+			if (value->end - value->start > strlen("order_book_") &&
 			    !strncmp(&json[value->start], "order_book_",
-				     strlen("order_book_")))
+				     strlen("order_book_"))) {
 				msg.chan_type = CHAN_FULL;
-			else if (value->end-value->start > strlen("diff_order_book_") &&
-				 !strncmp(&json[value->start], "diff_order_book_",
-					  strlen("diff_order_book_")))
+				currency = &json[value->start + strlen("order_book_")];
+				currency_len = value->end - value->start - strlen("order_book_");
+			} else if (value->end - value->start > strlen("diff_order_book_") &&
+				   !strncmp(&json[value->start], "diff_order_book_",
+					    strlen("diff_order_book_"))) {
 				msg.chan_type = CHAN_DIFF;
-			else {
+				currency = &json[value->start + strlen("diff_order_book_")];
+				currency_len = value->end - value->start - strlen("diff_order_book_");
+			} else {
 				problem = "bad channel field";
+				goto bad;
+			}
+			if (exchg_strn_to_pair(&msg.pair, currency, currency_len)) {
+				problem = "bad currency in channel field";
 				goto bad;
 			}
 			key_idx += 2;

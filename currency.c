@@ -28,6 +28,8 @@ const char *exchg_ccy_to_str(enum exchg_currency currency) {
 		return "bch";
 	case EXCHG_CCY_DAI:
 		return "dai";
+	case EXCHG_CCY_NEAR:
+		return "near";
 	default:
 		return "<bad currency>";
 	}
@@ -51,6 +53,8 @@ const char *exchg_ccy_to_upper(enum exchg_currency currency) {
 		return "BCH";
 	case EXCHG_CCY_DAI:
 		return "DAI";
+	case EXCHG_CCY_NEAR:
+		return "NEAR";
 	default:
 		return "<bad currency>";
 	}
@@ -90,6 +94,8 @@ const char *exchg_pair_to_str(enum exchg_pair pair) {
 		return "ltcbch";
 	case EXCHG_PAIR_DAIUSD:
 		return "daiusd";
+	case EXCHG_PAIR_NEARUSD:
+		return "nearusd";
 	default:
 		return "<invalid pair>";
 	}
@@ -123,6 +129,9 @@ enum exchg_join_type exchg_ccy_join(enum exchg_pair *dst,
 		case EXCHG_CCY_DAI:
 			*dst = EXCHG_PAIR_DAIUSD;
 			return JOIN_TYPE_FIRST_COUNTER;
+		case EXCHG_CCY_NEAR:
+			*dst = EXCHG_PAIR_NEARUSD;
+			return JOIN_TYPE_FIRST_COUNTER;
 		default:
 			fprintf(stderr, "%s: bad currency %d\n", __func__, b);
 			return JOIN_TYPE_ERROR;
@@ -149,6 +158,8 @@ enum exchg_join_type exchg_ccy_join(enum exchg_pair *dst,
 			*dst = EXCHG_PAIR_BCHBTC;
 			return JOIN_TYPE_FIRST_COUNTER;
 		case EXCHG_CCY_DAI:
+			return JOIN_TYPE_ERROR;
+		case EXCHG_CCY_NEAR:
 			return JOIN_TYPE_ERROR;
 		default:
 			fprintf(stderr, "%s: bad currency %d\n", __func__, b);
@@ -178,6 +189,8 @@ enum exchg_join_type exchg_ccy_join(enum exchg_pair *dst,
 			return JOIN_TYPE_FIRST_COUNTER;
 		case EXCHG_CCY_DAI:
 			return JOIN_TYPE_ERROR;
+		case EXCHG_CCY_NEAR:
+			return JOIN_TYPE_ERROR;
 		default:
 			fprintf(stderr, "%s: bad currency %d\n", __func__, b);
 			return JOIN_TYPE_ERROR;
@@ -205,6 +218,8 @@ enum exchg_join_type exchg_ccy_join(enum exchg_pair *dst,
 			*dst = EXCHG_PAIR_ZECBCH;
 			return JOIN_TYPE_FIRST_BASE;
 		case EXCHG_CCY_DAI:
+			return JOIN_TYPE_ERROR;
+		case EXCHG_CCY_NEAR:
 			return JOIN_TYPE_ERROR;
 		default:
 			fprintf(stderr, "%s: bad currency %d\n", __func__, b);
@@ -235,6 +250,8 @@ enum exchg_join_type exchg_ccy_join(enum exchg_pair *dst,
 		case EXCHG_CCY_BCH:
 			*dst = EXCHG_PAIR_LTCBCH;
 			return JOIN_TYPE_FIRST_BASE;
+		case EXCHG_CCY_NEAR:
+			return JOIN_TYPE_ERROR;
 		default:
 			fprintf(stderr, "%s: bad currency %d\n", __func__, b);
 			return JOIN_TYPE_ERROR;
@@ -263,6 +280,8 @@ enum exchg_join_type exchg_ccy_join(enum exchg_pair *dst,
 			return JOIN_TYPE_ERROR;
 		case EXCHG_CCY_DAI:
 			return JOIN_TYPE_ERROR;
+		case EXCHG_CCY_NEAR:
+			return JOIN_TYPE_ERROR;
 		default:
 			fprintf(stderr, "%s: bad currency %d\n", __func__, b);
 			return JOIN_TYPE_ERROR;
@@ -279,6 +298,25 @@ enum exchg_join_type exchg_ccy_join(enum exchg_pair *dst,
 		case EXCHG_CCY_XRP:
 		case EXCHG_CCY_LTC:
 		case EXCHG_CCY_BCH:
+		case EXCHG_CCY_NEAR:
+		case EXCHG_CCY_DAI:
+			return JOIN_TYPE_ERROR;
+		default:
+			fprintf(stderr, "%s: bad currency %d\n", __func__, b);
+			return JOIN_TYPE_ERROR;
+		}
+	case EXCHG_CCY_NEAR:
+		switch (b) {
+		case EXCHG_CCY_USD:
+			*dst = EXCHG_PAIR_NEARUSD;
+			return JOIN_TYPE_FIRST_BASE;
+		case EXCHG_CCY_BTC:
+		case EXCHG_CCY_ETH:
+		case EXCHG_CCY_ZEC:
+		case EXCHG_CCY_XRP:
+		case EXCHG_CCY_LTC:
+		case EXCHG_CCY_BCH:
+		case EXCHG_CCY_NEAR:
 		case EXCHG_CCY_DAI:
 			return JOIN_TYPE_ERROR;
 		default:
@@ -291,7 +329,7 @@ enum exchg_join_type exchg_ccy_join(enum exchg_pair *dst,
 }
 
 int exchg_pair_base(enum exchg_currency *base, enum exchg_pair pair) {
-	enum exchg_currency bases[] = {
+	static const enum exchg_currency bases[] = {
 		EXCHG_CCY_BTC,
 		EXCHG_CCY_ETH,
 		EXCHG_CCY_ETH,
@@ -308,6 +346,7 @@ int exchg_pair_base(enum exchg_currency *base, enum exchg_pair pair) {
 		EXCHG_CCY_LTC,
 		EXCHG_CCY_LTC,
 		EXCHG_CCY_DAI,
+		EXCHG_CCY_NEAR,
 	};
 
 	if (pair < 0 || pair >= EXCHG_NUM_PAIRS)
@@ -317,7 +356,7 @@ int exchg_pair_base(enum exchg_currency *base, enum exchg_pair pair) {
 }
 
 int exchg_pair_counter(enum exchg_currency *counter, enum exchg_pair pair) {
-	enum exchg_currency counters[] = {
+	static const enum exchg_currency counters[] = {
 		EXCHG_CCY_USD,
 		EXCHG_CCY_USD,
 		EXCHG_CCY_BTC,
@@ -334,6 +373,7 @@ int exchg_pair_counter(enum exchg_currency *counter, enum exchg_pair pair) {
 		EXCHG_CCY_ETH,
 		EXCHG_CCY_BCH,
 		EXCHG_CCY_USD,
+		EXCHG_CCY_USD,
 	};
 
 	if (pair < 0 || pair >= EXCHG_NUM_PAIRS)
@@ -349,23 +389,25 @@ int exchg_pair_split(enum exchg_currency *base, enum exchg_currency *counter,
 }
 
 static int str_to_currency(enum exchg_currency *currency,
-			   const char *str) {
-	if (!strncmp(str, "usd", 3))
+			   const char *str, size_t len) {
+	if (!strncmp(str, "usd", len))
 		*currency = EXCHG_CCY_USD;
-	else if (!strncmp(str, "btc", 3))
+	else if (!strncmp(str, "btc", len))
 		*currency = EXCHG_CCY_BTC;
-	else if (!strncmp(str, "eth", 3))
+	else if (!strncmp(str, "eth", len))
 		*currency = EXCHG_CCY_ETH;
-	else if (!strncmp(str, "zec", 3))
+	else if (!strncmp(str, "zec", len))
 		*currency = EXCHG_CCY_ZEC;
-	else if (!strncmp(str, "xrp", 3))
+	else if (!strncmp(str, "xrp", len))
 		*currency = EXCHG_CCY_XRP;
-	else if (!strncmp(str, "ltc", 3))
+	else if (!strncmp(str, "ltc", len))
 		*currency = EXCHG_CCY_LTC;
-	else if (!strncmp(str, "bch", 3))
+	else if (!strncmp(str, "bch", len))
 		*currency = EXCHG_CCY_BCH;
-	else if (!strncmp(str, "dai", 3))
+	else if (!strncmp(str, "dai", len))
 		*currency = EXCHG_CCY_DAI;
+	else if (!strncmp(str, "near", len))
+		*currency = EXCHG_CCY_NEAR;
 	else
 		return EINVAL;
 	return 0;
@@ -404,6 +446,8 @@ static int str_to_pair(enum exchg_pair *pair, const char *str) {
 		*pair = EXCHG_PAIR_LTCBCH;
 	else if (!strcmp(str, "daiusd"))
 		*pair = EXCHG_PAIR_DAIUSD;
+	else if (!strcmp(str, "nearusd"))
+		*pair = EXCHG_PAIR_NEARUSD;
 	else
 		return EINVAL;
 	return 0;
@@ -418,20 +462,20 @@ static void str_to_lower(char *dst, size_t len, const char *str) {
 int exchg_str_to_pair(enum exchg_pair *pair,
 		      const char *str) {
 	size_t len = strlen(str);
-	if (len != 6)
+	if (len < 6 || len > 7)
 		return -1;
 
-	char lower[7];
+	char lower[8];
 	str_to_lower(lower, len, str);
 	return str_to_pair(pair, str);
 }
 
 int exchg_strn_to_pair(enum exchg_pair *pair,
 		       const char *str, int len) {
-	if (len != 6)
+	if (len < 6 || len > 7)
 		return -1;
 
-	char lower[7];
+	char lower[8];
 	str_to_lower(lower, len, str);
 	return str_to_pair(pair, lower);
 }
@@ -439,20 +483,20 @@ int exchg_strn_to_pair(enum exchg_pair *pair,
 int exchg_str_to_ccy(enum exchg_currency *dst,
 		     const char *str) {
 	size_t len = strlen(str);
-	if (len != 3)
+	if (len < 3 || len > 4)
 		return -1;
 
-	char lower[4];
+	char lower[5];
 	str_to_lower(lower, len, str);
-	return str_to_currency(dst, lower);
+	return str_to_currency(dst, lower, len);
 }
 
 int exchg_strn_to_ccy(enum exchg_currency *dst,
 		      const char *str, size_t len) {
-	if (len != 3)
+	if (len < 3 || len > 4)
 		return -1;
 
-	char lower[4];
+	char lower[5];
 	str_to_lower(lower, len, str);
-	return str_to_currency(dst, lower);
+	return str_to_currency(dst, lower, len);
 }

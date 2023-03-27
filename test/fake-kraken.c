@@ -95,6 +95,8 @@ static const char *wsname(enum exchg_pair p) {
 		return "LTC/ETH";
 	case EXCHG_PAIR_DAIUSD:
 		return "DAI/USD";
+	case EXCHG_PAIR_NEARUSD:
+		return "NEAR/USD";
 	case EXCHG_PAIR_LTCBCH:
 		return NULL;
 	default:
@@ -120,6 +122,8 @@ static const char *kraken_ccy_str(enum exchg_currency c) {
 		return "BCH";
 	case EXCHG_CCY_DAI:
 		return "DAI";
+	case EXCHG_CCY_NEAR:
+		return "NEAR";
 	default:
 		return "<bad currency>";
 	}
@@ -150,6 +154,8 @@ static enum exchg_pair wsname_to_pair(const char *json, jsmntok_t *tok) {
 		return EXCHG_PAIR_LTCETH;
 	else if (json_streq(json, tok, "DAI/USD"))
 		return EXCHG_PAIR_LTCETH;
+	else if (json_streq(json, tok, "NEAR/USD"))
+		return EXCHG_PAIR_NEARUSD;
 	else
 		return -1;
 }
@@ -824,6 +830,8 @@ static enum exchg_pair asset_name_to_pair(const char *c, int start, int end) {
 		return EXCHG_PAIR_LTCBCH;
 	else if (!strncmp(&c[start], "DAIUSD", strlen("DAIUSD")))
 		return EXCHG_PAIR_DAIUSD;
+	else if (!strncmp(&c[start], "NEARUSD", strlen("NEARUSD")))
+		return EXCHG_PAIR_NEARUSD;
 	return -1;
 }
 
