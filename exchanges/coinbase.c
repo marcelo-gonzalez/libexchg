@@ -848,6 +848,12 @@ static int parse_info(struct exchg_client *cl, struct http *http,
 					exchg_log("%s: OOM\n", __func__);
 					return -1;
 				}
+				// maybe there is a better way to do this. The
+				// BTCAUCTION-USD pair info shows the same base
+				// and quote currencies as the BTC-USD one.
+				// So how do we distinguish them here?
+				if (strstr(msg.id, "AUCTION"))
+					goto skip;
 				if (err) {
 					problem = "bad \"id\" field";
 					goto bad;
