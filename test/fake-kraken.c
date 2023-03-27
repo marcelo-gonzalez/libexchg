@@ -66,15 +66,15 @@ static void kraken_write_orders(struct buf *buf, struct kraken_websocket *k,
 static const char *wsname(enum exchg_pair p) {
 	switch (p) {
 	case EXCHG_PAIR_BTCUSD:
-		return "XBT\\/USD";
+		return "XBT/USD";
 	case EXCHG_PAIR_ETHUSD:
-		return "ETH\\/USD";
+		return "ETH/USD";
 	case EXCHG_PAIR_ETHBTC:
-		return "ETH\\/XBT";
+		return "ETH/XBT";
 	case EXCHG_PAIR_ZECUSD:
-		return "ZEC\\/USD";
+		return "ZEC/USD";
 	case EXCHG_PAIR_ZECBTC:
-		return "ZEC\\/XBT";
+		return "ZEC/XBT";
 	case EXCHG_PAIR_ZECETH:
 		return NULL;
 	case EXCHG_PAIR_ZECBCH:
@@ -82,19 +82,19 @@ static const char *wsname(enum exchg_pair p) {
 	case EXCHG_PAIR_ZECLTC:
 		return NULL;
 	case EXCHG_PAIR_BCHUSD:
-		return "BCH\\/USD";
+		return "BCH/USD";
 	case EXCHG_PAIR_BCHBTC:
-		return "BCH\\/XBT";
+		return "BCH/XBT";
 	case EXCHG_PAIR_BCHETH:
-		return "BCH\\/ETH";
+		return "BCH/ETH";
 	case EXCHG_PAIR_LTCUSD:
-		return "LTC\\/USD";
+		return "LTC/USD";
 	case EXCHG_PAIR_LTCBTC:
-		return "LTC\\/XBT";
+		return "LTC/XBT";
 	case EXCHG_PAIR_LTCETH:
-		return "LTC\\/ETH";
+		return "LTC/ETH";
 	case EXCHG_PAIR_DAIUSD:
-		return "DAI\\/USD";
+		return "DAI/USD";
 	case EXCHG_PAIR_LTCBCH:
 		return NULL;
 	default:
@@ -126,29 +126,29 @@ static const char *kraken_ccy_str(enum exchg_currency c) {
 }
 
 static enum exchg_pair wsname_to_pair(const char *json, jsmntok_t *tok) {
-	if (json_streq(json, tok, "XBT\\/USD"))
+	if (json_streq(json, tok, "XBT/USD"))
 		return EXCHG_PAIR_BTCUSD;
-	else if (json_streq(json, tok, "ETH\\/USD"))
+	else if (json_streq(json, tok, "ETH/USD"))
 		return EXCHG_PAIR_ETHUSD;
-	else if (json_streq(json, tok, "ETH\\/XBT"))
+	else if (json_streq(json, tok, "ETH/XBT"))
 		return EXCHG_PAIR_ETHBTC;
-	else if (json_streq(json, tok, "ZEC\\/USD"))
+	else if (json_streq(json, tok, "ZEC/USD"))
 		return EXCHG_PAIR_ZECUSD;
-	else if (json_streq(json, tok, "ZEC\\/XBT"))
+	else if (json_streq(json, tok, "ZEC/XBT"))
 		return EXCHG_PAIR_ZECBTC;
-	else if (json_streq(json, tok, "BCH\\/USD"))
+	else if (json_streq(json, tok, "BCH/USD"))
 		return EXCHG_PAIR_BCHUSD;
-	else if (json_streq(json, tok, "BCH\\/XBT"))
+	else if (json_streq(json, tok, "BCH/XBT"))
 		return EXCHG_PAIR_BCHBTC;
-	else if (json_streq(json, tok, "BCH\\/ETH"))
+	else if (json_streq(json, tok, "BCH/ETH"))
 		return EXCHG_PAIR_BCHETH;
-	else if (json_streq(json, tok, "LTC\\/USD"))
+	else if (json_streq(json, tok, "LTC/USD"))
 		return EXCHG_PAIR_LTCUSD;
-	else if (json_streq(json, tok, "LTC\\/XBT"))
+	else if (json_streq(json, tok, "LTC/XBT"))
 		return EXCHG_PAIR_LTCBTC;
-	else if (json_streq(json, tok, "LTC\\/ETH"))
+	else if (json_streq(json, tok, "LTC/ETH"))
 		return EXCHG_PAIR_LTCETH;
-	else if (json_streq(json, tok, "DAI\\/USD"))
+	else if (json_streq(json, tok, "DAI/USD"))
 		return EXCHG_PAIR_LTCETH;
 	else
 		return -1;
