@@ -5,7 +5,7 @@ LIBWEBSOCKETS_LIB=./deps/build/libwebsockets/lib/libwebsockets.a
 LIBGLIB_LIB=./deps/build/glib/glib/libglib-2.0.a
 
 CFLAGS=-I./deps/
-CFLAGS+=-I./deps/glib -I./deps/glib/glib/ -I./deps/build/glib/glib/
+CFLAGS+=-I./deps/glib -I./deps/glib/glib/ -I./deps/build/glib/ -I./deps/build/glib/glib/
 CFLAGS+=-I./deps/build/libwebsockets/include/
 
 LDLIBS=$(LIBGLIB_LIB) -lssl -lcrypto -lcap
@@ -60,7 +60,7 @@ libwebsockets: libglib
 	if [ ! -f deps/build/libwebsockets/Makefile ]; then \
 		cmake -B deps/build/libwebsockets -S deps/libwebsockets \
 		-DLWS_WITH_GLIB=ON \
-		-DGLIB_INCLUDE_DIRS="$(dir)/deps/glib/;$(dir)/deps/glib/glib/;$(dir)/deps/build/glib/glib/" \
+		-DGLIB_INCLUDE_DIRS="$(dir)/deps/glib/;$(dir)/deps/glib/glib/;$(dir)/deps/build/glib/;$(dir)/deps/build/glib/glib/" \
 		-DGLIB_LIBRARIES=$(LIBGLIB_LIB) -DLWS_WITH_EVLIB_PLUGINS=0; \
 	fi; \
 	$(MAKE) -C deps/build/libwebsockets -j $(shell nproc)
@@ -69,8 +69,8 @@ $(LIBWEBSOCKETS_LIB): libwebsockets ;
 $(LIBWEBSOCKETS_HDR): libwebsockets ;
 
 libglib:
-	@meson --default-library static deps/build/glib deps/glib; \
-	ninja -v -C deps/build/glib -j $(shell nproc); \
+	@meson setup --default-library static deps/build/glib deps/glib; \
+	meson compile -C deps/build/glib; \
 
 $(LIBGLIB_HDR): libglib ;
 $(LIBGLIB_LIB): libglib ;
