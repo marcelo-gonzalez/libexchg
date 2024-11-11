@@ -43,7 +43,7 @@ public-test-hdrs = include/exchg/test.h
 test-hdrs = $(public-test-hdrs) test/util.h test/fake-net.h test/fake-gemini.h
 test-hdrs += test/fake-bitstamp.h test/fake-coinbase.h test/fake-kraken.h
 
-examples = examples/trade/trade examples/print-book/print-book
+examples = examples/trade/trade examples/print-book/print-book examples/simple/simple
 
 tests = examples/trade/test json-test ob-test decimal-test
 
@@ -94,6 +94,12 @@ examples/trade/test.o: $(hdrs) examples/common.h examples/trade/trader.h
 
 examples/trade/trade: examples/trade/main.o examples/trade/trader.o
 examples/trade/trade: examples/common.o libexchg.a
+	$(CC) -o $@ -Wall -pthread -O2 $(EXTRA_CFLAGS) \
+	-I./include $^ $(LIBWEBSOCKETS_LIB) $(LDLIBS)
+
+examples/simple/main.o: $(hdrs) examples/common.h
+examples/simple/simple: examples/simple/main.o
+examples/simple/simple: examples/common.o libexchg.a
 	$(CC) -o $@ -Wall -pthread -O2 $(EXTRA_CFLAGS) \
 	-I./include $^ $(LIBWEBSOCKETS_LIB) $(LDLIBS)
 
