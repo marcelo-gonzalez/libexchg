@@ -415,7 +415,7 @@ static bool service(struct exchg_net_context *ctx) {
 			buf_init(&buf, 1<<10);
 			wsock->read(wsock, &buf, event);
 			ws->recv(wsock->user, buf_start(&buf), buf.len);
-			free(buf.buf);
+			buf_free(&buf);
 			break;
 		}
 		break;
@@ -447,7 +447,7 @@ static bool service(struct exchg_net_context *ctx) {
 			buf_init(&buf, 1<<10);
 			http_conn->read(http_conn, event, &buf);
 			http->recv(http_conn->user, buf_start(&buf), buf.len);
-			free(buf.buf);
+			buf_free(&buf);
 			http_conn_close(http_conn);
 			http_conn->read_event = NULL;
 			break;

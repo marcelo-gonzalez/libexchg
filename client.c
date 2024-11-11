@@ -116,11 +116,11 @@ static int websocket_buf_write(struct websocket *ws, const char *fmt,
 		return -1;
 	len = buf_vsprintf(&b, fmt, ap);
 	if (len < 0) {
-		free(b.buf);
+		buf_free(&b);
 		return len;
 	}
 	len = ws_conn_write(ws->conn, buf_start(&b), b.len);
-	free(b.buf);
+	buf_free(&b);
 	return len;
 }
 
@@ -182,7 +182,7 @@ static void __http_free(struct http *h) {
 	free(h->method);
 	free(h->host);
 	free(h->path);
-	free(h->body.buf);
+	buf_free(&h->body);
 	free(h);
 }
 

@@ -13,6 +13,7 @@ struct buf {
 };
 
 int buf_alloc(struct buf *buf, size_t size, size_t padding);
+void buf_free(struct buf *buf);
 
 static inline char *buf_start(struct buf *buf) {
 	if (!buf->buf)

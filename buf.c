@@ -18,6 +18,10 @@ int buf_alloc(struct buf *buf, size_t size, size_t padding) {
 	return 0;
 }
 
+void buf_free(struct buf *buf) {
+	free(buf->buf);
+}
+
 int buf_vsprintf(struct buf *buf, const char *fmt, va_list ap) {
 	int len;
 	va_list a;
