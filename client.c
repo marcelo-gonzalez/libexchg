@@ -987,6 +987,7 @@ void free_exchg_client(struct exchg_client *cl) {
 	free(cl->password);
 	free(cl->update.bids);
 	free(cl->update.asks);
+	g_hash_table_destroy(cl->orders);
 	free(cl);
 }
 
