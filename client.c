@@ -1128,7 +1128,7 @@ bool exchg_private_ws_online(struct exchg_client *cl) {
 }
 
 static int l2_subscribe(struct exchg_client *cl, void *p) {
-	enum exchg_pair pair = (enum exchg_pair)p;
+	enum exchg_pair pair = *(enum exchg_pair *)p;
 	struct exchg_pair_info *pi = &cl->pair_info[pair];
 	// TODO: free if ends up unused cus its not available
 	int err = alloc_book(cl->ctx, pair);
@@ -1152,7 +1152,7 @@ static int l2_subscribe(struct exchg_client *cl, void *p) {
 
 int exchg_l2_subscribe(struct exchg_context *ctx, enum exchg_id id,
 		       enum exchg_pair pair) {
-	return call_per_exchange(ctx, __func__, l2_subscribe, id, (void *)pair);
+	return call_per_exchange(ctx, __func__, l2_subscribe, id, &pair);
 }
 
 static struct net_callbacks net_callbacks = {
