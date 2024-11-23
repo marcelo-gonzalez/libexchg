@@ -22,7 +22,6 @@ struct kraken_client {
 		char *wsname;
 	} pair_info[EXCHG_NUM_PAIRS];
 	unsigned int next_reqid;
-	SHA256_CTX sha_ctx;
 	GHashTable *channel_mapping;
 	GHashTable *cancelations;
 	struct websocket *data_ws;
@@ -67,7 +66,6 @@ static int private_http_add_headers(struct exchg_client *cl, struct http *http) 
 
 static int private_http_auth(struct exchg_client *cl, struct http *http) {
 	struct http_data *h = http_private(http);
-	struct kraken_client *k = client_private(cl);
 
 	// 123456{body}&nonce=123456
 	char *to_hash = malloc(20 + h->body_len + 27);
@@ -94,10 +92,7 @@ static int private_http_auth(struct exchg_client *cl, struct http *http) {
 	unsigned char *hash = to_auth + path_len;
 
 	memcpy(to_auth, path, path_len);
-
-	SHA256_Init(&k->sha_ctx);
-	SHA256_Update(&k->sha_ctx, to_hash, p-to_hash);
-	SHA256_Final(hash, &k->sha_ctx);
+	SHA256((unsigned char*)to_hash, p-to_hash, hash);
 
 	int err = hmac_ctx_b64(&cl->hmac_ctx, to_auth,
 			       path_len + SHA256_DIGEST_LENGTH,
