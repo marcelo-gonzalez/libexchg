@@ -3,7 +3,6 @@
 
 #include <ctype.h>
 #include <inttypes.h>
-#include <openssl/hmac.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -760,9 +759,10 @@ static int add_headers(struct exchg_client *cl, struct http *http) {
 				 "www.bitstamp.net", h->path,
 				 http_body(http));
 	char hmac[HMAC_SHA256_HEX_LEN];
-	int hmac_len = hmac_hex(cl->hmac_ctx, (unsigned char *)to_auth,
-				len, hmac, HEX_UPPER);
-	if (hmac_len < 0)
+	size_t hmac_len;
+	int err = hmac_ctx_hex(&cl->hmac_ctx, (unsigned char *)to_auth,
+			       len, hmac, &hmac_len, HEX_UPPER);
+	if (err)
 		return -1;
 
 	if (http_add_header(http, (unsigned char *)"X-Auth:",
@@ -992,10 +992,8 @@ static int bitstamp_new_keypair(struct exchg_client *cl,
 				const unsigned char *key, size_t len) {
 	struct bitstamp_client *bts = client_private(cl);
 
-	if (!HMAC_Init_ex(cl->hmac_ctx, key, len, EVP_sha256(), NULL)) {
-		exchg_log("%s HMAC_Init_ex() failure\n", __func__);
+	if (hmac_ctx_setkey(&cl->hmac_ctx, key, len))
 		return -1;
-	}
 
 	char *p = realloc(bts->api_header, cl->apikey_public_len +
 			  strlen("BITSTAMP ") + 1);
@@ -1014,7 +1012,7 @@ struct exchg_client *alloc_bitstamp_client(struct exchg_context *ctx) {
 		return NULL;
 	}
 
-	struct exchg_client *ret = alloc_exchg_client(ctx, EXCHG_BITSTAMP, 200, sizeof(struct bitstamp_client));
+	struct exchg_client *ret = alloc_exchg_client(ctx, EXCHG_BITSTAMP, "SHA256", 200, sizeof(struct bitstamp_client));
 	if (!ret)
 		return NULL;
 

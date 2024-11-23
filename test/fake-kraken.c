@@ -747,7 +747,7 @@ static struct http_conn *balances_dial(struct exchg_net_context *ctx,
 
 	req->priv = auth_check_alloc(strlen(exchg_test_kraken_public),
 				     (unsigned char *)exchg_test_kraken_public,
-				     len, k, 0, 0, EVP_sha512());
+				     len, k, 0, 0, "SHA512");
 	free(k);
 	return req;
 }

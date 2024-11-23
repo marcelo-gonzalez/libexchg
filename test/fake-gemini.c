@@ -265,7 +265,7 @@ static struct http_conn *balances_dial(struct exchg_net_context *ctx,
 				     (unsigned char *)exchg_test_gemini_public,
 				     strlen(exchg_test_gemini_private),
 				     (unsigned char *)exchg_test_gemini_private,
-				     1, HEX_LOWER, EVP_sha384());
+				     1, HEX_LOWER, "SHA384");
 	return req;
 }
 
@@ -530,7 +530,7 @@ static struct http_conn *place_order_dial(struct exchg_net_context *ctx,
 				   (unsigned char *)exchg_test_gemini_public,
 				   strlen(exchg_test_gemini_private),
 				   (unsigned char *)exchg_test_gemini_private,
-				   1, HEX_LOWER, EVP_sha384());
+				   1, HEX_LOWER, "SHA384");
 	req->priv = o;
 	return req;
 }
@@ -664,7 +664,7 @@ static struct http_conn *cancel_order_dial(struct exchg_net_context *ctx,
 				   (unsigned char *)exchg_test_gemini_public,
 				   strlen(exchg_test_gemini_private),
 				   (unsigned char *)exchg_test_gemini_private,
-				   1, HEX_LOWER, EVP_sha384());
+				   1, HEX_LOWER, "SHA384");
 	req->priv = c;
 	return req;
 }

@@ -10,7 +10,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <time.h>
-#include <openssl/hmac.h>
 
 #include "exchg/decimal.h"
 #include "auth.h"
@@ -384,9 +383,9 @@ static int gemini_l2_subscribe(struct exchg_client *cl,
 
 struct http_data {
 	char *payload;
-	int payload_len;
+	size_t payload_len;
 	char hmac[HMAC_SHA384_HEX_LEN];
-	int hmac_len;
+	size_t hmac_len;
 	char private[];
 };
 
@@ -413,14 +412,13 @@ static void http_on_closed(struct exchg_client *cl, struct http *http) {
 	free(data->payload);
 }
 
-static int gemini_conn_auth(struct http_data *data, HMAC_CTX *hmac_ctx,
+static int gemini_conn_auth(struct http_data *data, struct hmac_ctx *hmac_ctx,
 			    const char *request, size_t len) {
 	data->payload_len = base64_encode((unsigned char *)request, len, &data->payload);
 	if (data->payload_len < 0)
 		return -1;
-	data->hmac_len = hmac_hex(hmac_ctx, (unsigned char *)data->payload,
-				  data->payload_len, data->hmac, HEX_LOWER);
-	if (data->hmac_len < 0) {
+	if (hmac_ctx_hex(hmac_ctx, (unsigned char *)data->payload,
+			 data->payload_len, data->hmac, &data->hmac_len, HEX_LOWER)) {
 		free(data->payload);
 		return -1;
 	}
@@ -557,7 +555,7 @@ const static struct exchg_http_ops cancel_http_ops = {
 };
 
 static int send_order_cancel(struct exchg_client *cl, struct order_info *info) {
-	struct gemini_order *g = order_info_private(info);
+	struct gemini_order *order = order_info_private(info);
 	struct http *http = exchg_http_post(gemini_host(cl), "/v1/order/cancel", &cancel_http_ops, cl);
 	if (!http)
 		return -1;
@@ -565,15 +563,15 @@ static int send_order_cancel(struct exchg_client *cl, struct order_info *info) {
 	char request[100];
 	int len = sprintf(request, "{\"nonce\": %"PRId64", \"order_id\": %"PRId64
 			  ", \"request\": \"/v1/order/cancel\"}",
-			  current_micros(), g->server_oid);
+			  current_micros(), order->server_oid);
 
 	struct http_data *data = http_private(http);
-	if (gemini_conn_auth(data, cl->hmac_ctx, request, len)) {
+	if (gemini_conn_auth(data, &cl->hmac_ctx, request, len)) {
 		http_close(http);
 		return -1;
 	}
 	*(int64_t *)http_data_private(data) = info->info.id;
-	g->want_cancel = false;
+	order->want_cancel = false;
 	return 0;
 }
 
@@ -719,7 +717,7 @@ static int64_t gemini_place_order(struct exchg_client *cl, const struct exchg_or
 			  size_str, price_str, side, options);
 
 	struct http_data *data = http_private(http);
-	if (gemini_conn_auth(data, cl->hmac_ctx, request, len)) {
+	if (gemini_conn_auth(data, &cl->hmac_ctx, request, len)) {
 		http_close(http);
 		order_info_free(cl, oi);
 		return -1;
@@ -834,7 +832,7 @@ static int gemini_get_balances(struct exchg_client *cl, void *req_private) {
 
 	int len = sprintf(request, "{ \"nonce\": %lu, \"request\": \"/v1/balances\" }",
 			  current_micros());
-	if (gemini_conn_auth(data, cl->hmac_ctx, request, len)) {
+	if (gemini_conn_auth(data, &cl->hmac_ctx, request, len)) {
 		http_close(http);
 		return -1;
 	}
@@ -842,8 +840,8 @@ static int gemini_get_balances(struct exchg_client *cl, void *req_private) {
 	return 0;
 }
 
-static void gemini_destroy(struct exchg_client *cli) {
-	free_exchg_client(cli);
+static void gemini_destroy(struct exchg_client *cl) {
+	free_exchg_client(cl);
 }
 
 static int parse_event_object(struct exchg_client *cl,
@@ -1037,7 +1035,7 @@ static int order_events_on_disconnect(struct exchg_client *cl,
 		char request[100];
 		int len = sprintf(request, "{ \"nonce\": %lu, \"request\": \"/v1/order/events\" }",
 				  current_micros());
-		if (gemini_conn_auth(data, cl->hmac_ctx, request, len)) {
+		if (gemini_conn_auth(data, &cl->hmac_ctx, request, len)) {
 			g->priv_ws_connected = false;
 			return -1;
 		}
@@ -1082,7 +1080,7 @@ static int gemini_priv_ws_connect(struct exchg_client *cl) {
 	char request[100];
 	int len = sprintf(request, "{ \"nonce\": %lu, \"request\": \"/v1/order/events\" }",
 			  current_micros());
-	if (gemini_conn_auth(websocket_private(w), cl->hmac_ctx, request, len)) {
+	if (gemini_conn_auth(websocket_private(w), &cl->hmac_ctx, request, len)) {
 		websocket_close(w);
 		return -1;
 	}
@@ -1096,15 +1094,11 @@ static bool gemini_priv_ws_online(struct exchg_client *cl) {
 
 static int gemini_new_keypair(struct exchg_client *cl,
 			      const unsigned char *key, size_t len) {
-	if (!HMAC_Init_ex(cl->hmac_ctx, key, len, EVP_sha384(), NULL)) {
-		exchg_log("%s HMAC_Init_ex() failure\n", __func__);
-		return -1;
-	}
-	return 0;
+	return hmac_ctx_setkey(&cl->hmac_ctx, key, len);
 }
 
 struct exchg_client *alloc_gemini_client(struct exchg_context *ctx) {
-	struct exchg_client *ret = alloc_exchg_client(ctx, EXCHG_GEMINI, 8000, sizeof(struct gemini_client));
+	struct exchg_client *ret = alloc_exchg_client(ctx, EXCHG_GEMINI, "SHA384", 8000, sizeof(struct gemini_client));
 	if (!ret)
 		return NULL;
 

@@ -4,7 +4,6 @@
 #ifndef FAKE_NET_H
 #define FAKE_NET_H
 
-#include <openssl/hmac.h>
 #include <stdbool.h>
 #include <sys/queue.h>
 
@@ -85,19 +84,17 @@ struct auth_check {
 	unsigned char *payload;
 	size_t public_len;
 	unsigned char *public;
-	size_t private_len;
-	unsigned char *private;
 	int hmac_hex;
 	enum hex_type hex_type;
-	int hmac_len;
+	size_t hmac_len;
 	char *hmac;
-	HMAC_CTX *hmac_ctx;
+	struct hmac_ctx hmac_ctx;
 
 };
 
 struct auth_check *auth_check_alloc(size_t public_len, const unsigned char *public,
 				    size_t private_len, const unsigned char *private,
-				    int hmac_hex, enum hex_type type, const EVP_MD *md);
+				    int hmac_hex, enum hex_type type, const char *hmac_digest);
 void auth_check_free(struct auth_check *);
 void auth_check_set_public(struct auth_check *, const unsigned char *c, size_t len);
 void auth_check_set_payload(struct auth_check *a, const unsigned char *c, size_t len);

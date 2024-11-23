@@ -626,10 +626,10 @@ struct coinbase_auth {
 	char timestamp[30];
 	int timestamp_len;
 	char hmac[HMAC_SHA256_B64_LEN];
-	int hmac_len;
+	size_t hmac_len;
 };
 
-static int coinbase_auth(struct coinbase_auth *auth, HMAC_CTX *hmac_ctx,
+static int coinbase_auth(struct coinbase_auth *auth, struct hmac_ctx *hmac_ctx,
 			 const char *path, const char *method,
 			 const char *body, size_t body_len) {
 	int64_t time = current_seconds();
@@ -646,10 +646,8 @@ static int coinbase_auth(struct coinbase_auth *auth, HMAC_CTX *hmac_ctx,
 	auth_end += strlen(path);
 	memcpy(auth_end, body, body_len);
 	auth_end += body_len;
-	auth->hmac_len = hmac_b64(hmac_ctx, to_auth, auth_end - to_auth, auth->hmac);
-	if (auth->hmac_len < 0)
-		return auth->hmac_len;
-	return 0;
+	return hmac_ctx_b64(hmac_ctx, to_auth, auth_end - to_auth,
+			    auth->hmac, &auth->hmac_len);
 }
 
 static int channel_sub(struct exchg_client *cl) {
@@ -704,7 +702,7 @@ static int channel_sub(struct exchg_client *cl) {
 		struct coinbase_auth auth;
 		char *au = auth_fields;
 
-		if (coinbase_auth(&auth, cl->hmac_ctx, "/users/self/verify", "GET", NULL, 0))
+		if (coinbase_auth(&auth, &cl->hmac_ctx, "/users/self/verify", "GET", NULL, 0))
 			return -1;
 		au += sprintf(au, ", \"signature\": \"%s\", ", auth.hmac);
 		au += sprintf(au, "\"key\": \"%s\", ", cl->apikey_public);
@@ -1125,7 +1123,7 @@ static struct exchg_http_ops get_balances_ops = {
 	.conn_data_size = sizeof(struct http_data),
 };
 
-static int coinbase_http_auth(struct coinbase_auth *auth, HMAC_CTX *hmac_ctx, struct http *http) {
+static int coinbase_http_auth(struct coinbase_auth *auth, struct hmac_ctx *hmac_ctx, struct http *http) {
 	return coinbase_auth(auth, hmac_ctx, http_path(http), http_method(http),
 			     http_body(http), http_body_len(http));
 
@@ -1137,7 +1135,7 @@ static int coinbase_get_balances(struct exchg_client *cl, void *req_private) {
 		return -1;
 	struct http_data *data = http_private(http);
 	data->private = req_private;
-	if (coinbase_http_auth(&data->auth, cl->hmac_ctx, http)) {
+	if (coinbase_http_auth(&data->auth, &cl->hmac_ctx, http)) {
 		http_close(http);
 		return -1;
 	}
@@ -1304,7 +1302,7 @@ static int place_order(struct exchg_client *cl, struct http *http,
 		return -1;
 	}
 	data->id = info->id;
-	int ret = coinbase_http_auth(&data->auth, cl->hmac_ctx, http);
+	int ret = coinbase_http_auth(&data->auth, &cl->hmac_ctx, http);
 	if (!ret) {
 		info->status = EXCHG_ORDER_SUBMITTED;
 	} else if (ret && update_on_err) {
@@ -1389,7 +1387,7 @@ static int cancel_order_recv(struct exchg_client *cl, struct http *http,
 			// TODO: would make sense for http_retry() to take care of
 			// redoing the auth stuff
 			if (!c->cancel_retried &&
-			    !coinbase_http_auth(&data->auth, cl->hmac_ctx, http)) {
+			    !coinbase_http_auth(&data->auth, &cl->hmac_ctx, http)) {
 				http_retry(http);
 				c->cancel_retried = true;
 				retrying = "Retrying cancelation. ";
@@ -1429,7 +1427,7 @@ static int coinbase_cancel_order(struct exchg_client *cl, struct order_info *inf
 	if (!http)
 		return -1;
 	struct http_data *data = http_private(http);
-	if (coinbase_http_auth(&data->auth, cl->hmac_ctx, http)) {
+	if (coinbase_http_auth(&data->auth, &cl->hmac_ctx, http)) {
 		http_close(http);
 		return -1;
 	}
@@ -1443,13 +1441,9 @@ static int coinbase_new_keypair(struct exchg_client *cl,
 	len = base64_decode(key, len, &k);
 	if (len < 0)
 		return len;
-	if (!HMAC_Init_ex(cl->hmac_ctx, k, len, EVP_sha256(), NULL)) {
-		exchg_log("%s HMAC_Init_ex() failure\n", __func__);
-		free(k);
-		return -1;
-	}
+	int ret = hmac_ctx_setkey(&cl->hmac_ctx, k, len);
 	free(k);
-	return 0;
+	return ret;
 }
 
 static int coinbase_priv_ws_connect(struct exchg_client *cl) {
@@ -1485,7 +1479,7 @@ static void coinbase_destroy(struct exchg_client *cl) {
 }
 
 struct exchg_client *alloc_coinbase_client(struct exchg_context *ctx) {
-	struct exchg_client *ret = alloc_exchg_client(ctx, EXCHG_COINBASE, 2000, sizeof(struct coinbase_client));
+	struct exchg_client *ret = alloc_exchg_client(ctx, EXCHG_COINBASE, "SHA256", 2000, sizeof(struct coinbase_client));
 	if (!ret)
 		return NULL;
 	struct coinbase_client *cb = client_private(ret);

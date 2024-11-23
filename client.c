@@ -921,7 +921,8 @@ const char *exchg_name(struct exchg_client *cl) {
 }
 
 struct exchg_client *alloc_exchg_client(struct exchg_context *ctx,
-					enum exchg_id id, int l2_update_size, size_t private_size) {
+					enum exchg_id id, const char *hmac_digest,
+					int l2_update_size, size_t private_size) {
 	if (ctx->clients[id]) {
 		exchg_log("%s client already allocated\n", exchg_id_to_name(id));
 		return NULL;
@@ -933,12 +934,11 @@ struct exchg_client *alloc_exchg_client(struct exchg_context *ctx,
 	}
 	memset(ret, 0, sizeof(*ret) + private_size);
 
-	ret->hmac_ctx = HMAC_CTX_new();
-	if (!ret->hmac_ctx) {
-		exchg_log("OOM\n");
-		free(ret);
+	if (hmac_ctx_alloc(&ret->hmac_ctx, hmac_digest)) {
+		free_exchg_client(ret);
 		return NULL;
 	}
+
 	ret->id = id;
 	ret->ctx = ctx;
 	// TODO: only really need this many for the first update. Should shrink the buffers after that.
@@ -950,7 +950,7 @@ struct exchg_client *alloc_exchg_client(struct exchg_context *ctx,
 		exchg_log("%s: OOM\n", __func__);
 		free(ret->update.bids);
 		free(ret->update.asks);
-		HMAC_CTX_free(ret->hmac_ctx);
+		hmac_ctx_free(&ret->hmac_ctx);
 		free(ret);
 		return NULL;
 	}
@@ -969,7 +969,7 @@ void free_exchg_client(struct exchg_client *cl) {
 	struct http *h, *tmp_h;
 
 	cl->ctx->clients[cl->id] = NULL;
-	HMAC_CTX_free(cl->hmac_ctx);
+	hmac_ctx_free(&cl->hmac_ctx);
 	LIST_FOREACH_SAFE(ws, &cl->websocket_list, list, tmp_ws) {
 		LIST_REMOVE(ws, list);
 		__websocket_free(ws);

@@ -6,12 +6,12 @@
 
 #include <glib.h>
 #include <jsmn/jsmn.h>
-#include <openssl/hmac.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <sys/queue.h>
 
+#include "auth.h"
 #include "exchg/decimal.h"
 #include "exchg/currency.h"
 #include "exchg/exchg.h"
@@ -65,7 +65,7 @@ struct exchg_client {
 	void (*destroy)(struct exchg_client *cl);
 	LIST_HEAD(websocket_list, websocket) websocket_list;
 	LIST_HEAD(http_list, http) http_list;
-	HMAC_CTX *hmac_ctx;
+	struct hmac_ctx hmac_ctx;
 	unsigned char *apikey_public;
 	size_t apikey_public_len;
 	char *password;
@@ -187,7 +187,9 @@ static inline void exchg_book_clear(struct exchg_client *cl, enum exchg_pair pai
 }
 
 struct exchg_client *alloc_exchg_client(struct exchg_context *ctx,
-					enum exchg_id id, int l2_update_size, size_t private_size);
+					enum exchg_id id, const char *hmac_digest,
+					int l2_update_size, size_t private_size);
+
 // complete in progress stuff first
 // otherwise you can get a user after free in http_get callback
 void free_exchg_client(struct exchg_client *cl);

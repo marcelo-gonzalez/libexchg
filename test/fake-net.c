@@ -736,22 +736,18 @@ decimal_t *exchg_test_balances(struct exchg_net_context *ctx, enum exchg_id id) 
 
 struct auth_check *auth_check_alloc(size_t public_len, const unsigned char *public,
 				    size_t private_len, const unsigned char *private,
-				    int hmac_hex, enum hex_type type, const EVP_MD *md) {
+				    int hmac_hex, enum hex_type type, const char *hmac_digest) {
 	struct auth_check *a = xzalloc(sizeof(*a));
 	a->public_len = public_len;
-	a->private_len = private_len;
 	a->public = xzalloc(public_len);
-	a->private = xzalloc(private_len);
 	memcpy(a->public, public, public_len);
-	memcpy(a->private, private, private_len);
 
-	a->hmac_ctx = HMAC_CTX_new();
-	if (!a->hmac_ctx) {
-		fprintf(stderr, "%s: OOM\n", __func__);
+	if (hmac_ctx_alloc(&a->hmac_ctx, hmac_digest)) {
+		fprintf(stderr, "%s: hmac alloc failure!\n", __func__);
 		exit(1);
 	}
-	if (!HMAC_Init_ex(a->hmac_ctx, private, private_len, md, NULL)) {
-		fprintf(stderr, "%s: HMAC_Init_ex() failure\n", __func__);
+	if (hmac_ctx_setkey(&a->hmac_ctx, private, private_len)) {
+		fprintf(stderr, "%s: hmac set key failure!\n", __func__);
 		exit(1);
 	}
 	a->hmac_hex = hmac_hex;
@@ -765,8 +761,7 @@ void auth_check_free(struct auth_check *a) {
 	free(a->hmac);
 	free(a->payload);
 	free(a->public);
-	free(a->private);
-	HMAC_CTX_free(a->hmac_ctx);
+	hmac_ctx_free(&a->hmac_ctx);
 	free(a);
 }
 
@@ -775,14 +770,18 @@ static void hmac_verify(struct auth_check *a) {
 		return;
 
 	char hmac[HMAC_TEXT_LEN_MAX];
-	int hmac_len;
+	size_t hmac_len;
+	int err;
 	if (a->hmac_hex)
-		hmac_len = hmac_hex(a->hmac_ctx, a->payload,
-				    a->payload_len, hmac, a->hex_type);
+		err = hmac_ctx_hex(&a->hmac_ctx, a->payload,
+				   a->payload_len, hmac, &hmac_len, a->hex_type);
 	else
-		hmac_len = hmac_b64(a->hmac_ctx, a->payload,
-				    a->payload_len, hmac);
-
+		err = hmac_ctx_b64(&a->hmac_ctx, a->payload,
+				   a->payload_len, hmac, &hmac_len);
+	if (err) {
+		fprintf(stderr, "hmac failure!\n");
+		exit(1);
+	}
 	if (hmac_len != a->hmac_len || memcmp(hmac, a->hmac, hmac_len)) {
 		a->hmac_status = AUTH_BAD;
 		return;

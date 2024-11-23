@@ -99,9 +99,10 @@ static int private_http_auth(struct exchg_client *cl, struct http *http) {
 	SHA256_Update(&k->sha_ctx, to_hash, p-to_hash);
 	SHA256_Final(hash, &k->sha_ctx);
 
-	h->hmac_len = hmac_b64(cl->hmac_ctx, to_auth,
-			       path_len + SHA256_DIGEST_LENGTH, h->hmac);
-	if (h->hmac_len < 0) {
+	int err = hmac_ctx_b64(&cl->hmac_ctx, to_auth,
+			       path_len + SHA256_DIGEST_LENGTH,
+			       h->hmac, &h->hmac_len);
+	if (err) {
 		free(to_hash);
 		return -1;
 	}
@@ -1207,13 +1208,9 @@ static int kraken_new_keypair(struct exchg_client *cl,
 	len = base64_decode(key, len, &k);
 	if (len < 0)
 		return len;
-	if (!HMAC_Init_ex(cl->hmac_ctx, k, len, EVP_sha512(), NULL)) {
-		exchg_log("%s HMAC_Init_ex() failure\n", __func__);
-		free(k);
-		return -1;
-	}
+	int ret = hmac_ctx_setkey(&cl->hmac_ctx, k, len);
 	free(k);
-	return 0;
+	return ret;
 }
 
 enum openorders_status {
@@ -1813,7 +1810,7 @@ struct exchg_client *alloc_kraken_client(struct exchg_context *ctx) {
 		return NULL;
 	}
 
-	struct exchg_client *ret = alloc_exchg_client(ctx, EXCHG_KRAKEN, 2000, sizeof(struct kraken_client));
+	struct exchg_client *ret = alloc_exchg_client(ctx, EXCHG_KRAKEN, "SHA512", 2000, sizeof(struct kraken_client));
 	if (!ret)
 		return NULL;
 	struct kraken_client *kkn = client_private(ret);
