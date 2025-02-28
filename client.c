@@ -1113,11 +1113,12 @@ static int alloc_book(struct exchg_context *ctx, enum exchg_pair pair)
         if (!ctx->opts.track_book || ctx->books[pair])
                 return 0;
 
-        int max_depth[EXCHG_ALL_EXCHANGES];
-        memset(max_depth, 0, sizeof(max_depth));
-        max_depth[EXCHG_KRAKEN] = 1000;
+        struct order_book_config configs[EXCHG_ALL_EXCHANGES];
+        memset(configs, 0, sizeof(configs));
+        configs[EXCHG_KRAKEN].max_depth = 1000;
+        configs[EXCHG_KRAKEN].check_update_time = true;
         ctx->books[pair] =
-            order_book_new(max_depth, ctx->opts.sort_by_nominal_price);
+            order_book_new(configs, ctx->opts.sort_by_nominal_price);
         if (!ctx->books[pair])
                 return ENOMEM;
         return 0;

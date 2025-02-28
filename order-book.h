@@ -13,8 +13,14 @@
 
 struct order_book;
 
-struct order_book *order_book_new(int max_depth[EXCHG_ALL_EXCHANGES],
-                                  bool sort_by_nominal_price);
+struct order_book_config {
+        int max_depth;
+        bool check_update_time;
+};
+
+struct order_book *
+order_book_new(struct order_book_config configs[EXCHG_ALL_EXCHANGES],
+               bool sort_by_nominal_price);
 void order_book_free(struct order_book *ob);
 void order_book_clear(struct order_book *ob, enum exchg_id);
 void order_book_add_update(struct order_book *ob,

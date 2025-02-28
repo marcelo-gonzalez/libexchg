@@ -9,7 +9,7 @@
 #define ARRAY_SIZE(x) sizeof(x) / sizeof(*x)
 
 struct insert_test {
-        int max_depth[EXCHG_ALL_EXCHANGES];
+        struct order_book_config configs[EXCHG_ALL_EXCHANGES];
         struct update_data {
                 int exchange_id;
                 struct order_data {
@@ -20,7 +20,7 @@ struct insert_test {
         } data[20];
 } insert_tests[] = {
     {
-        .max_depth = {3},
+        .configs = {{.max_depth = 3, .check_update_time = false}},
         .data =
             {
                 {
@@ -172,7 +172,7 @@ void test_insert(void)
         for (int i = 0; i < ARRAY_SIZE(insert_tests); i++) {
                 struct insert_test *t = &insert_tests[i];
 
-                struct order_book *book = order_book_new(t->max_depth, false);
+                struct order_book *book = order_book_new(t->configs, false);
                 for (struct update_data *ud = &t->data[0];; ud++) {
                         fill_update(&u, ud);
                         if (!u.num_bids && !u.num_asks)

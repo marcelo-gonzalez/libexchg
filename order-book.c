@@ -17,6 +17,7 @@ struct order_book {
         int (*asks_cmp)(const void *a, const void *b, void *p);
         struct per_exchg_book {
                 int max_depth;
+                bool check_update_time;
                 GTree *bids;
                 GTree *asks;
                 GTreeNode *last_bid;
@@ -202,12 +203,16 @@ static void insert_order(struct order_book *ob,
 
         struct exchg_limit_order *o;
         bool found = g_tree_lookup_extended(tree, order, (void **)&o, NULL);
+        bool check_update_time =
+            ob->per_exchg[order->exchange_id].check_update_time;
 
         // prob not gonna happen, but for some reason sometimes kraken sends
         // multiple updates of the same level in the same message. seems like
         // they're always in ascending time order but just check it to be safe
-        if (found && o->update_micros > order->update_micros)
+        if (check_update_time && found &&
+            o->update_micros > order->update_micros) {
                 return;
+        }
 
         if (decimal_is_zero(&order->size)) {
                 per_exchg_remove(ob, order, is_bid);
@@ -376,8 +381,9 @@ int order_book_num_offers(struct order_book *ob)
         return g_tree_nnodes(ob->asks);
 }
 
-struct order_book *order_book_new(int max_depth[EXCHG_ALL_EXCHANGES],
-                                  bool sort_by_nominal_price)
+struct order_book *
+order_book_new(struct order_book_config configs[EXCHG_ALL_EXCHANGES],
+               bool sort_by_nominal_price)
 {
         struct order_book *ob = malloc(sizeof(*ob));
         if (!ob) {
@@ -395,7 +401,9 @@ struct order_book *order_book_new(int max_depth[EXCHG_ALL_EXCHANGES],
         ob->bids = g_tree_new_full(ob->bids_cmp, NULL, free, NULL);
         ob->asks = g_tree_new_full(ob->asks_cmp, NULL, free, NULL);
         for (int i = 0; i < EXCHG_ALL_EXCHANGES; i++) {
-                ob->per_exchg[i].max_depth = max_depth[i];
+                struct order_book_config *config = &configs[i];
+                ob->per_exchg[i].max_depth = config->max_depth;
+                ob->per_exchg[i].check_update_time = config->check_update_time;
                 ob->per_exchg[i].bids =
                     g_tree_new_full(ob->bids_cmp, NULL, NULL, NULL);
                 ob->per_exchg[i].asks =
