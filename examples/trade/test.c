@@ -45,6 +45,7 @@ static void event_cb(struct exchg_net_context *net_ctx,
 
                 event.id = t->exchange;
                 event.type = EXCHG_EVENT_BOOK_UPDATE;
+                event.data.book.pair = EXCHG_PAIR_BTCUSD;
                 exchg_test_l2_queue_order(&event.data.book, true, &price,
                                           &size);
                 exchg_test_add_events(net_ctx, 1, &event);
@@ -133,8 +134,7 @@ int main(void)
                         exchg_test_add_l2_events(net_ctx, ARRAY_SIZE(events),
                                                  events);
 
-                        decimal_t *balances =
-                            exchg_test_balances(net_ctx, cl->id);
+                        decimal_t *balances = exchg_test_balances(net_ctx, id);
                         decimal_from_str(&balances[EXCHG_CCY_USD], "40000");
 
                         ret |= trade_run(&state, cl);

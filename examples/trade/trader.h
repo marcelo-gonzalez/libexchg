@@ -6,7 +6,6 @@
 
 #include <string.h>
 
-#include "client.h"
 #include "exchg/currency.h"
 #include "exchg/decimal.h"
 
