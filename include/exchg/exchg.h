@@ -79,6 +79,29 @@ enum exchg_order_status {
         EXCHG_ORDER_ERROR,
 };
 
+static inline const char *
+exchg_order_status_to_str(enum exchg_order_status status)
+{
+        switch (status) {
+        case EXCHG_ORDER_UNSUBMITTED:
+                return "UNSUBMITTED";
+        case EXCHG_ORDER_SUBMITTED:
+                return "SUBMITTED";
+        case EXCHG_ORDER_PENDING:
+                return "PENDING";
+        case EXCHG_ORDER_OPEN:
+                return "OPEN";
+        case EXCHG_ORDER_FINISHED:
+                return "FINISHED";
+        case EXCHG_ORDER_CANCELED:
+                return "CANCELED";
+        case EXCHG_ORDER_ERROR:
+                return "ERROR";
+        default:
+                return "UNKNOWN_STATUS";
+        }
+}
+
 // TODO: type enum with more types instead of bool
 struct exchg_place_order_opts {
         bool immediate_or_cancel;

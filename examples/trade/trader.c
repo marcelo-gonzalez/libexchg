@@ -198,43 +198,16 @@ static void on_order_update(struct exchg_client *cl,
 {
         struct trade_state *state = user;
         struct timespec elapsed;
-        const char *status;
 
         time_since(&elapsed, &state->sent_at);
         if (state->verbose) {
-                switch (info->status) {
-                case EXCHG_ORDER_UNSUBMITTED:
-                        status = "UNSUBMITTED";
-                        break;
-                case EXCHG_ORDER_SUBMITTED:
-                        status = "SUBMITTED";
-                        break;
-                case EXCHG_ORDER_PENDING:
-                        status = "PENDING";
-                        break;
-                case EXCHG_ORDER_OPEN:
-                        status = "OPEN";
-                        break;
-                case EXCHG_ORDER_FINISHED:
-                        status = "FINISHED";
-                        break;
-                case EXCHG_ORDER_CANCELED:
-                        status = "CANCELED";
-                        break;
-                case EXCHG_ORDER_ERROR:
-                        status = "ERROR";
-                        break;
-                default:
-                        status = "<Unknown>";
-                        break;
-                }
                 char filled[30], out_of[30];
                 decimal_to_str(filled, &info->filled_size);
                 decimal_to_str(out_of, &info->order.size);
 
                 printf("=== <Order Update> === status: %s %s "
                        "filled %s/%s. latency: %ld.%.9ld ===========\n",
-                       status,
+                       exchg_order_status_to_str(info->status),
                        info->status == EXCHG_ORDER_ERROR ? info->err : "",
                        filled, out_of, elapsed.tv_sec, elapsed.tv_nsec);
         }
