@@ -58,34 +58,45 @@ struct exchg_test_websocket_event {
         int conn_id;
 };
 
+struct exchg_test_l2_updates {
+        enum exchg_pair pair;
+        int num_bids;
+        int num_asks;
+        struct exchg_test_l2_update *bids;
+        struct exchg_test_l2_update *asks;
+        int bid_cap;
+        int ask_cap;
+};
+
+struct exchg_test_order_placed {
+        int id;
+        struct exchg_order order;
+        struct exchg_place_order_opts opts;
+        decimal_t fill_size;
+        decimal_t avg_price;
+        bool error;
+};
+
+struct exchg_test_order_canceled {
+        struct exchg_order_info info;
+        bool succeed;
+};
+
 struct exchg_test_event {
         enum exchg_id id;
         enum exchg_test_event_type type;
         union {
                 // present in EXCHG_EVENT_BOOK_UPDATE events
-                struct exchg_test_l2_updates {
-                        enum exchg_pair pair;
-                        int num_bids;
-                        int num_asks;
-                        struct exchg_test_l2_update *bids;
-                        struct exchg_test_l2_update *asks;
-                        int bid_cap;
-                        int ask_cap;
-                } book;
+                // After calling exchg_test_add_events(), the exchg_net_context
+                // will take ownership of book.bids and book.asks and free()
+                // them when finished
+                struct exchg_test_l2_updates book;
                 // present in EXCHG_EVENT_ORDER_ACK events
                 struct exchg_order_info order_ack;
                 // present in EXCHG_EVENT_ORDER_PLACED events
-                struct exchg_test_order_placed {
-                        const int id;
-                        const struct exchg_order order;
-                        const struct exchg_place_order_opts opts;
-                        decimal_t fill_size;
-                        bool error;
-                } order_placed;
-                struct exchg_test_order_canceled {
-                        const struct exchg_order_info info;
-                        bool succeed;
-                } order_canceled;
+                // TODO: tighten the API
+                struct exchg_test_order_placed order_placed;
+                struct exchg_test_order_canceled order_canceled;
                 struct exchg_test_websocket_event ws_established;
                 struct exchg_test_websocket_event ws_close;
         } data;
@@ -111,7 +122,7 @@ typedef void (*exchg_test_callback_t)(struct exchg_net_context *,
                                       struct exchg_test_event *, void *);
 
 void exchg_test_set_callback(struct exchg_net_context *ctx,
-                             exchg_test_callback_t cb, void *private);
+                             exchg_test_callback_t cb, void *user);
 
 struct exchg_test_str_l2_update {
         const char *price;
