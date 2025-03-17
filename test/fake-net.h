@@ -4,8 +4,10 @@
 #ifndef FAKE_NET_H
 #define FAKE_NET_H
 
+#include <glib.h>
 #include <stdbool.h>
 #include <sys/queue.h>
+#include <time.h>
 
 #include "auth.h"
 #include "buf.h"
@@ -32,6 +34,7 @@ struct http_conn {
         void *user;
         struct exchg_net_context *ctx;
         struct exchg_test_event *read_event;
+        bool closed;
         void (*read)(struct http_conn *req, struct exchg_test_event *ev,
                      struct buf *buf);
         void (*write)(struct http_conn *req, const char *body, size_t len);
@@ -48,6 +51,7 @@ struct websocket_conn {
         bool established;
         enum exchg_id id;
         int conn_id;
+        bool closed;
         LIST_ENTRY(websocket_conn) list;
         void *user;
         struct exchg_net_context *ctx;
@@ -62,16 +66,6 @@ struct websocket_conn {
 struct exchg_test_event *
 exchg_fake_queue_ws_event(struct websocket_conn *w,
                           enum exchg_test_event_type type, size_t private_size);
-struct exchg_test_event *
-exchg_fake_queue_ws_event_tail(struct websocket_conn *w,
-                               enum exchg_test_event_type type,
-                               size_t private_size);
-struct exchg_test_event *exchg_fake_queue_ws_event_before(
-    struct websocket_conn *w, enum exchg_test_event_type type,
-    size_t private_size, struct exchg_test_event *event);
-struct exchg_test_event *exchg_fake_queue_ws_event_after(
-    struct websocket_conn *w, enum exchg_test_event_type type,
-    size_t private_size, struct exchg_test_event *event);
 
 void no_ws_write(struct websocket_conn *, const char *, size_t);
 
@@ -123,12 +117,26 @@ struct test_event {
                 struct http_conn *http;
                 struct websocket_conn *ws;
         } conn;
+        bool moveable;
+        int seq;
+        int64_t timestamp;
         struct exchg_test_event event;
         TAILQ_ENTRY(test_event) list;
         char private[];
 };
 
 void *test_event_private(struct exchg_test_event *event);
+
+struct test_events {
+        GTree *events;
+        // These are microseconds since the Epoch. Starts at the current time
+        // and then is incremented by some amount on each event.
+        // TODO: respect this in l2 update messages for exchanges other than
+        // coinbase
+        int64_t current_time;
+        int64_t next_time;
+        int seq;
+};
 
 struct test_order {
         struct exchg_order_info info;
@@ -142,7 +150,7 @@ struct exchg_net_context {
         struct net_callbacks *callbacks;
         LIST_HEAD(ws_list, websocket_conn) ws_list;
         LIST_HEAD(http_list, http_conn) http_list;
-        TAILQ_HEAD(events, test_event) events;
+        struct test_events events;
         bool running;
         struct {
                 decimal_t balances[EXCHG_NUM_CCYS];

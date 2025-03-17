@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: MIT
 // Copyright (C) 2021 Marcelo Diop-Gonzalez
 
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/queue.h>
+#include <time.h>
 
 #include "auth.h"
 #include "net-backend.h"
@@ -129,6 +131,79 @@ static void find_matching_ws(struct exchg_net_context *ctx,
         }
 }
 
+int tree_print_events(void *key, void *value, void *data)
+{
+        struct test_event *e = key;
+        fprintf(stderr, "timestamp: %" PRId64 ": %s, ", e->timestamp,
+                event_str(e->event.type));
+        return false;
+}
+
+static void print_events(struct test_events *events)
+{
+        fprintf(stderr,
+                "TEST EVENTS: current time %" PRId64 " num events: %d:\n",
+                events->current_time, g_tree_nnodes(events->events));
+        g_tree_foreach(events->events, tree_print_events, NULL);
+        fprintf(stderr, "\n");
+}
+
+static void next_event_time(struct test_events *events, int64_t *timestamp)
+{
+        int64_t ms_20 = 20000;
+        events->next_time += ms_20;
+        *timestamp = events->next_time;
+}
+
+static void advance_clock(struct test_events *events, int64_t current)
+{
+        events->current_time = current;
+        if (current > events->next_time)
+                events->next_time = current;
+}
+
+static struct test_event *ws_event_alloc(struct exchg_net_context *ctx,
+                                         struct websocket_conn *w,
+                                         enum exchg_test_event_type type,
+                                         size_t private_size)
+{
+        struct test_events *events = &ctx->events;
+        struct test_event *e = xzalloc(sizeof(*e) + private_size);
+
+        next_event_time(events, &e->timestamp);
+        e->moveable = type == EXCHG_EVENT_BOOK_UPDATE;
+        e->conn_type = CONN_TYPE_WS;
+        if (w) {
+                e->conn.ws = w;
+                e->event.id = w->id;
+        } else {
+                find_matching_ws(ctx, e);
+        }
+        e->event.type = type;
+        g_tree_insert(events->events, e, NULL);
+        events->seq++;
+        return e;
+}
+
+static struct test_event *http_event_alloc(struct exchg_net_context *ctx,
+                                           struct http_conn *h,
+                                           enum exchg_test_event_type type,
+                                           size_t private_size)
+{
+        struct test_events *events = &ctx->events;
+        struct test_event *e = xzalloc(sizeof(*e) + private_size);
+
+        next_event_time(events, &e->timestamp);
+
+        e->conn_type = CONN_TYPE_HTTP;
+        e->conn.http = h;
+        e->event.id = h->id;
+        e->event.type = type;
+        g_tree_insert(events->events, e, NULL);
+        events->seq++;
+        return e;
+}
+
 void exchg_test_add_events(struct exchg_net_context *ctx, int n,
                            struct exchg_test_event *events)
 {
@@ -139,14 +214,13 @@ void exchg_test_add_events(struct exchg_net_context *ctx, int n,
                                         "updates for now\n");
                         continue;
                 }
-                struct test_event *e = xzalloc(sizeof(*e));
+                struct test_event *e =
+                    ws_event_alloc(ctx, NULL, events[i].type, 0);
                 memcpy(&e->event, &events[i], sizeof(events[i]));
-                e->conn_type = CONN_TYPE_WS;
-                find_matching_ws(ctx, e);
-                TAILQ_INSERT_TAIL(&ctx->events, e, list);
         }
 }
 
+// TODO: void ret
 int exchg_test_l2_queue_order(struct exchg_test_l2_updates *u, bool is_bid,
                               decimal_t *price, decimal_t *size)
 {
@@ -157,7 +231,7 @@ int exchg_test_l2_queue_order(struct exchg_test_l2_updates *u, bool is_bid,
                             realloc(u->bids, sizeof(*u->bids) * new_cap);
                         if (!bids) {
                                 exchg_log("%s: OOM\n", __func__);
-                                return -1;
+                                exit(1);
                         }
                         u->bids = bids;
                         u->bid_cap = new_cap;
@@ -172,7 +246,7 @@ int exchg_test_l2_queue_order(struct exchg_test_l2_updates *u, bool is_bid,
                             realloc(u->asks, sizeof(*u->asks) * new_cap);
                         if (!asks) {
                                 exchg_log("%s: OOM\n", __func__);
-                                return -1;
+                                exit(1);
                         }
                         u->asks = asks;
                         u->ask_cap = new_cap;
@@ -189,12 +263,11 @@ void exchg_test_add_l2_events(struct exchg_net_context *ctx, int n,
 {
         for (int i = 0; i < n; i++) {
                 struct exchg_test_str_l2_updates *o = &msgs[i];
-                struct test_event *event = xzalloc(sizeof(*event));
+                struct test_event *event =
+                    ws_event_alloc(ctx, NULL, EXCHG_EVENT_BOOK_UPDATE, 0);
                 struct exchg_test_event *e = &event->event;
 
-                event->conn_type = CONN_TYPE_WS;
                 e->id = o->id;
-                e->type = EXCHG_EVENT_BOOK_UPDATE;
                 e->data.book.pair = o->pair;
 
                 for (struct exchg_test_str_l2_update *s = &o->bids[0]; s->price;
@@ -202,25 +275,17 @@ void exchg_test_add_l2_events(struct exchg_net_context *ctx, int n,
                         decimal_t price, size;
                         decimal_from_str(&price, s->price);
                         decimal_from_str(&size, s->size);
-                        if (exchg_test_l2_queue_order(&e->data.book, true,
-                                                      &price, &size)) {
-                                exchg_log("%s: OOM\n", __func__);
-                                return;
-                        }
+                        exchg_test_l2_queue_order(&e->data.book, true, &price,
+                                                  &size);
                 }
                 for (struct exchg_test_str_l2_update *s = &o->asks[0]; s->price;
                      s++) {
                         decimal_t price, size;
                         decimal_from_str(&price, s->price);
                         decimal_from_str(&size, s->size);
-                        if (exchg_test_l2_queue_order(&e->data.book, false,
-                                                      &price, &size)) {
-                                exchg_log("%s: OOM\n", __func__);
-                                return;
-                        }
+                        exchg_test_l2_queue_order(&e->data.book, false, &price,
+                                                  &size);
                 }
-                find_matching_ws(ctx, event);
-                TAILQ_INSERT_TAIL(&ctx->events, event, list);
         }
 }
 
@@ -236,107 +301,87 @@ void *test_event_private(struct exchg_test_event *event)
         return test_event_container(event)->private;
 }
 
-struct test_event *event_alloc(struct websocket_conn *w,
-                               enum exchg_test_event_type type,
-                               size_t private_size)
-{
-        struct test_event *event = xzalloc(sizeof(*event) + private_size);
-        struct exchg_test_event *e = &event->event;
-
-        event->conn_type = CONN_TYPE_WS;
-        event->conn.ws = w;
-        e->id = w->id;
-        e->type = type;
-        return event;
-}
-
 struct exchg_test_event *
 exchg_fake_queue_ws_event(struct websocket_conn *w,
                           enum exchg_test_event_type type, size_t private_size)
 {
-        struct test_event *event = event_alloc(w, type, private_size);
-        struct test_event *last = NULL, *tmp;
+        struct test_event *event =
+            ws_event_alloc(w->ctx, w, type, private_size);
 
-        TAILQ_FOREACH(tmp, &w->ctx->events, list)
-        {
-                if (tmp->event.type == EXCHG_EVENT_WS_PROTOCOL &&
-                    tmp->conn.ws == w)
-                        last = tmp;
+        return &event->event;
+}
+
+static int test_event_cmp(const void *k1, const void *k2)
+{
+        const struct test_event *event1 = k1;
+        const struct test_event *event2 = k2;
+
+        if (k1 == k2)
+                return 0;
+
+        if (event1->timestamp < event2->timestamp)
+                return -1;
+        if (event1->timestamp > event2->timestamp)
+                return 1;
+
+        if (k1 < k2)
+                return -1;
+        if (k1 > k2)
+                return 1;
+        return 0;
+}
+
+static void test_event_free(struct test_event *ev)
+{
+        if (ev->event.type == EXCHG_EVENT_BOOK_UPDATE) {
+                free(ev->event.data.book.bids);
+                free(ev->event.data.book.asks);
         }
-        if (last)
-                TAILQ_INSERT_AFTER(&w->ctx->events, last, event, list);
-        else
-                TAILQ_INSERT_HEAD(&w->ctx->events, event, list);
-        return &event->event;
+        free(ev);
 }
 
-struct exchg_test_event *
-exchg_fake_queue_ws_event_tail(struct websocket_conn *w,
-                               enum exchg_test_event_type type,
-                               size_t private_size)
+static void test_events_new(struct test_events *events)
 {
-        struct test_event *event = event_alloc(w, type, private_size);
-
-        TAILQ_INSERT_TAIL(&w->ctx->events, event, list);
-        return &event->event;
+        events->events = g_tree_new(test_event_cmp);
+        time_t t = time(NULL);
+        events->current_time = t * 1000000;
+        events->next_time = events->current_time;
 }
 
-struct exchg_test_event *exchg_fake_queue_ws_event_before(
-    struct websocket_conn *w, enum exchg_test_event_type type,
-    size_t private_size, struct exchg_test_event *before)
+int tree_collect_events(void *key, void *value, void *data)
 {
-        struct test_event *event = event_alloc(w, type, private_size);
-
-        TAILQ_INSERT_BEFORE(test_event_container(before), event, list);
-        return &event->event;
+        GPtrArray *to_free = data;
+        g_ptr_array_add(to_free, key);
+        return false;
 }
 
-struct exchg_test_event *exchg_fake_queue_ws_event_after(
-    struct websocket_conn *w, enum exchg_test_event_type type,
-    size_t private_size, struct exchg_test_event *after)
+static void free_event(struct test_events *events, struct test_event *ev)
 {
-        struct test_event *event = event_alloc(w, type, private_size);
+        events->seq++;
+        g_tree_remove(events->events, ev);
+        test_event_free(ev);
+}
 
-        TAILQ_INSERT_AFTER(&w->ctx->events, test_event_container(after), event,
-                           list);
-        return &event->event;
+static void test_events_free(struct test_events *events)
+{
+        GPtrArray *to_free =
+            g_ptr_array_sized_new(g_tree_nnodes(events->events));
+        g_tree_foreach(events->events, tree_collect_events, to_free);
+        for (int i = 0; i < to_free->len; i++) {
+                free_event(events, g_ptr_array_index(to_free, i));
+        }
+        g_ptr_array_unref(to_free);
+        g_tree_unref(events->events);
 }
 
 struct exchg_net_context *net_new(struct net_callbacks *c)
 {
         struct exchg_net_context *ctx = xzalloc(sizeof(*ctx));
-        TAILQ_INIT(&ctx->events);
+        test_events_new(&ctx->events);
         LIST_INIT(&ctx->ws_list);
         LIST_INIT(&ctx->http_list);
         ctx->callbacks = c;
         return ctx;
-}
-
-static void free_event(struct exchg_net_context *ctx, struct test_event *ev)
-{
-        TAILQ_REMOVE(&ctx->events, ev, list);
-        if (ev->event.type == EXCHG_EVENT_BOOK_UPDATE) {
-                free(ev->event.data.book.bids);
-                free(ev->event.data.book.asks);
-        } else if (ev->event.type == EXCHG_EVENT_ORDER_ACK) {
-                struct exchg_order_info *info = &ev->event.data.order_ack;
-                struct test_order *o, *tmp;
-                if (info->status == EXCHG_ORDER_ERROR ||
-                    info->status == EXCHG_ORDER_FINISHED ||
-                    info->status == EXCHG_ORDER_CANCELED) {
-                        LIST_FOREACH_SAFE(
-                            o, &ctx->servers[ev->event.id].order_list, list,
-                            tmp)
-                        {
-                                if (o->info.id == info->id) {
-                                        LIST_REMOVE(o, list);
-                                        free(o);
-                                        break;
-                                }
-                        }
-                }
-        }
-        free(ev);
 }
 
 bool on_order_edited(struct exchg_net_context *ctx, enum exchg_id id,
@@ -418,11 +463,63 @@ struct timer {
         struct exchg_net_context *ctx;
 };
 
+static void orphan_ws_event(struct exchg_net_context *ctx, struct test_event *e)
+{
+        struct test_events *events = &ctx->events;
+        g_tree_remove(events->events, e);
+        if (!e->moveable || e->seq == events->seq) {
+                exchg_log("test: dropping event with no matching websocket:\n"
+                          "%s: %s\n",
+                          exchg_id_to_name(e->event.id),
+                          event_str(e->event.type));
+                test_event_free(e);
+                return;
+        }
+        e->seq = events->seq;
+        next_event_time(events, &e->timestamp);
+        g_tree_insert(events->events, e, NULL);
+}
+
+struct find_orphaned_ws {
+        struct websocket_conn *wsock;
+        GPtrArray *orphaned_events;
+};
+
+int tree_orphaned_events(void *key, void *value, void *data)
+{
+        struct find_orphaned_ws *find = data;
+        struct test_event *e = key;
+        if (e->conn_type == CONN_TYPE_WS && e->conn.ws == find->wsock)
+                g_ptr_array_add(find->orphaned_events, e);
+        return false;
+}
+
+static void free_websocket(struct exchg_net_context *ctx,
+                           struct websocket_conn *w)
+{
+        struct test_events *events = &ctx->events;
+        struct websocket_conn_callbacks *ws = &ctx->callbacks->ws;
+
+        struct find_orphaned_ws find = {
+            .wsock = w,
+            .orphaned_events =
+                g_ptr_array_sized_new(g_tree_nnodes(events->events)),
+        };
+        g_tree_foreach(events->events, tree_orphaned_events, &find);
+        for (int i = 0; i < find.orphaned_events->len; i++) {
+                free_event(events, g_ptr_array_index(find.orphaned_events, i));
+        }
+        g_ptr_array_unref(find.orphaned_events);
+
+        LIST_REMOVE(w, list);
+        ws->on_closed(w->user);
+        w->destroy(w);
+}
+
 static bool service(struct exchg_net_context *ctx)
 {
         int ret;
         struct buf buf;
-        struct test_event *ev, *e, *tmp;
         struct exchg_test_event *event = NULL;
         struct websocket_conn_callbacks *ws = &ctx->callbacks->ws;
         struct http_callbacks *http = &ctx->callbacks->http;
@@ -431,20 +528,26 @@ static bool service(struct exchg_net_context *ctx)
         char *body;
         size_t body_len;
 
-        ev = TAILQ_FIRST(&ctx->events);
-        if (ev)
+        GTreeNode *first = g_tree_node_first(ctx->events.events);
+        struct test_event *ev = NULL;
+
+        if (first) {
+                ev = g_tree_node_key(first);
                 event = &ev->event;
+        }
 
         if (ctx->callback)
                 ctx->callback(ctx, event, ctx->cb_private);
 
-        if (TAILQ_EMPTY(&ctx->events)) {
+        first = g_tree_node_first(ctx->events.events);
+        if (!first) {
                 exchg_log("test: no events left to service\n");
                 return false;
         }
-
-        ev = TAILQ_FIRST(&ctx->events);
+        ev = g_tree_node_key(first);
         event = &ev->event;
+
+        advance_clock(&ctx->events, ev->timestamp);
 
         switch (ev->conn_type) {
         case CONN_TYPE_WS:
@@ -454,26 +557,18 @@ static bool service(struct exchg_net_context *ctx)
                         wsock = ev->conn.ws;
                 }
                 if (!wsock) {
-                        exchg_log("test: event with no matching websocket:\n"
-                                  "%s: %s\n",
-                                  exchg_id_to_name(event->id),
-                                  event_str(event->type));
-                        break;
+                        orphan_ws_event(ctx, ev);
+                        return true;
                 }
                 switch (event->type) {
                 case EXCHG_EVENT_WS_ESTABLISHED:
                         ws->on_established(wsock->user);
                         wsock->established = true;
-                        TAILQ_FOREACH(e, &ctx->events, list)
-                        {
-                                set_ws_if_matches(e, wsock);
-                        }
                         break;
                 case EXCHG_EVENT_WS_CLOSE:
-                        LIST_REMOVE(wsock, list);
-                        ws->on_closed(wsock->user);
-                        wsock->destroy(wsock);
-                        break;
+                        free_event(&ctx->events, ev);
+                        free_websocket(ctx, wsock);
+                        return true;
                 default:
                         buf_init(&buf, 1 << 10);
                         wsock->read(wsock, &buf, event);
@@ -484,6 +579,11 @@ static bool service(struct exchg_net_context *ctx)
                 }
                 break;
         case CONN_TYPE_HTTP:
+                // ->conn.http should be valid beacause no other events are
+                // queued after EXCHG_EVENT_HTTP_CLOSE, since http_event_alloc()
+                // is only called for other event types in
+                // fake_http_conn_alloc() on dialing. If that changes, do
+                // something like free_websocket()
                 http_conn = ev->conn.http;
                 switch (event->type) {
                 case EXCHG_EVENT_HTTP_ESTABLISHED:
@@ -497,13 +597,6 @@ static bool service(struct exchg_net_context *ctx)
                         // callback to fill in here
                         break;
                 case EXCHG_EVENT_HTTP_CLOSE:
-                        TAILQ_FOREACH_SAFE(e, &ctx->events, list, tmp)
-                        {
-                                if (e != ev && e->conn_type == CONN_TYPE_HTTP &&
-                                    e->conn.http == ev->conn.http) {
-                                        free_event(ctx, e);
-                                }
-                        }
                         LIST_REMOVE(http_conn, list);
                         http->on_closed(http_conn->user);
                         http_conn->destroy(http_conn);
@@ -530,7 +623,7 @@ static bool service(struct exchg_net_context *ctx)
                 t->f(t->p);
                 break;
         }
-        free_event(ctx, ev);
+        free_event(&ctx->events, ev);
         return true;
 }
 
@@ -543,22 +636,26 @@ void timer_cancel(struct timer *t)
         struct test_event *e =
             (struct test_event
                  *)((void *)t - (void *)&((struct test_event *)NULL)->private);
-        free_event(t->ctx, e);
+        free_event(&t->ctx->events, e);
 }
 
 struct timer *timer_new(struct exchg_net_context *ctx, void (*f)(void *),
                         void *p, int seconds)
 {
+        struct test_events *events = &ctx->events;
         struct test_event *e = xzalloc(sizeof(*e) + sizeof(struct timer));
 
+        e->timestamp = events->current_time + seconds * 1000000;
         e->conn_type = CONN_TYPE_NONE;
         e->event.id = -1;
         e->event.type = EXCHG_EVENT_TIMER;
+
         struct timer *t = (struct timer *)e->private;
         t->f = f;
         t->p = p;
         t->ctx = ctx;
-        TAILQ_INSERT_HEAD(&ctx->events, e, list);
+        g_tree_insert(events->events, e, NULL);
+        events->seq++;
         return t;
 }
 
@@ -568,13 +665,9 @@ void net_run(struct exchg_net_context *ctx)
         while (ctx->running && service(ctx)) {
         }
 
-        if (!TAILQ_EMPTY(&ctx->events)) {
-                struct test_event *e;
+        if (g_tree_nnodes(ctx->events.events) > 0) {
                 exchg_log("test: net_stop() called with events left!:\n");
-                TAILQ_FOREACH(e, &ctx->events, list)
-                {
-                        exchg_test_event_print(&e->event);
-                }
+                print_events(&ctx->events);
         }
 }
 
@@ -582,12 +675,11 @@ void net_stop(struct exchg_net_context *ctx) { ctx->running = false; }
 
 void net_destroy(struct exchg_net_context *ctx)
 {
-        struct test_event *e, *etmp;
         struct http_conn *h, *htmp;
         struct websocket_conn *w, *wtmp;
         struct test_order *o, *otmp;
 
-        TAILQ_FOREACH_SAFE(e, &ctx->events, list, etmp) { free_event(ctx, e); }
+        test_events_free(&ctx->events);
         LIST_FOREACH_SAFE(w, &ctx->ws_list, list, wtmp) { w->destroy(w); }
         LIST_FOREACH_SAFE(h, &ctx->http_list, list, htmp) { h->destroy(h); }
         for (enum exchg_id id = 0; id < EXCHG_ALL_EXCHANGES; id++) {
@@ -629,28 +721,15 @@ struct http_conn *fake_http_conn_alloc(struct exchg_net_context *ctx,
                                        void *private)
 {
         struct http_conn *req = xzalloc(sizeof(*req));
-        struct test_event *prep_event = xzalloc(sizeof(*prep_event));
-        struct test_event *read_event = xzalloc(sizeof(*read_event));
-        struct exchg_test_event *prep_ev = &prep_event->event;
-        struct exchg_test_event *read_ev = &read_event->event;
-
-        read_event->conn_type = CONN_TYPE_HTTP;
-        read_event->conn.http = req;
-        read_ev->id = exchange;
-        read_ev->type = type;
-        TAILQ_INSERT_HEAD(&ctx->events, read_event, list);
-
-        prep_event->conn_type = CONN_TYPE_HTTP;
-        prep_event->conn.http = req;
-        prep_ev->id = exchange;
-        prep_ev->type = EXCHG_EVENT_HTTP_ESTABLISHED;
-        TAILQ_INSERT_HEAD(&ctx->events, prep_event, list);
 
         req->id = exchange;
         req->status = 200;
         req->user = private;
         req->ctx = ctx;
-        req->read_event = read_ev;
+
+        http_event_alloc(ctx, req, EXCHG_EVENT_HTTP_ESTABLISHED, 0);
+        req->read_event = &http_event_alloc(ctx, req, type, 0)->event;
+
         LIST_INSERT_HEAD(&ctx->http_list, req, list);
         return req;
 }
@@ -687,23 +766,11 @@ int http_conn_status(struct http_conn *req) { return req->status; }
 
 void http_conn_close(struct http_conn *http)
 {
-        struct test_event *event;
-        struct exchg_test_event *ev;
+        if (http->closed)
+                return;
 
-        TAILQ_FOREACH(event, &http->ctx->events, list)
-        {
-                if (event->event.type == EXCHG_EVENT_HTTP_CLOSE &&
-                    event->conn.http == http)
-                        return;
-        }
-
-        event = xzalloc(sizeof(*event));
-        event->conn_type = CONN_TYPE_HTTP;
-        event->conn.http = http;
-        ev = &event->event;
-        ev->id = http->id;
-        ev->type = EXCHG_EVENT_HTTP_CLOSE;
-        TAILQ_INSERT_HEAD(&http->ctx->events, event, list);
+        http->closed = true;
+        http_event_alloc(http->ctx, http, EXCHG_EVENT_HTTP_CLOSE, 0);
 }
 
 int ws_conn_write(struct websocket_conn *ws, const char *buf, size_t len)
@@ -721,29 +788,19 @@ int ws_conn_add_header(struct websocket_conn *req, const unsigned char *name,
 
 void ws_conn_close(struct websocket_conn *ws)
 {
-        struct test_event *event;
-        struct exchg_test_event *ev;
+        if (ws->closed)
+                return;
+        ws->closed = true;
 
-        TAILQ_FOREACH(event, &ws->ctx->events, list)
-        {
-                if (event->event.type == EXCHG_EVENT_WS_CLOSE &&
-                    event->conn.ws == ws)
-                        return;
-        }
+        struct test_event *e =
+            ws_event_alloc(ws->ctx, ws, EXCHG_EVENT_WS_CLOSE, 0);
 
-        event = xzalloc(sizeof(*event));
-        event->conn_type = CONN_TYPE_WS;
-        event->conn.ws = ws;
-        ev = &event->event;
-        ev->type = EXCHG_EVENT_WS_CLOSE;
-        ev->id = ws->id;
         struct exchg_test_websocket_event event_data = {
             .conn_id = ws->conn_id,
             .host = ws->host,
             .path = ws->path,
         };
-        ev->data.ws_close = event_data;
-        TAILQ_INSERT_HEAD(&ws->ctx->events, event, list);
+        e->event.data.ws_close = event_data;
 }
 
 struct websocket_conn *fake_websocket_alloc(struct exchg_net_context *ctx,
@@ -813,19 +870,16 @@ struct websocket_conn *ws_dial(struct exchg_net_context *ctx, const char *host,
         ws->id = exchange;
         ws->conn_id = ctx->next_conn_id++;
 
-        struct test_event *event = xzalloc(sizeof(*event));
-        struct exchg_test_event *ev = &event->event;
-        event->conn_type = CONN_TYPE_WS;
-        event->conn.ws = ws;
-        ev->id = exchange;
-        ev->type = EXCHG_EVENT_WS_ESTABLISHED;
+        struct test_event *e =
+            ws_event_alloc(ws->ctx, ws, EXCHG_EVENT_WS_ESTABLISHED, 0);
+
         struct exchg_test_websocket_event event_data = {
             .conn_id = ws->conn_id,
             .host = host,
             .path = path,
         };
-        ev->data.ws_established = event_data;
-        TAILQ_INSERT_HEAD(&ctx->events, event, list);
+        e->event.data.ws_established = event_data;
+
         return ws;
 }
 

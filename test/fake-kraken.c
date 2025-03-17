@@ -461,7 +461,7 @@ enum private_ws_channel {
 static void queue_ws_order_ack(struct websocket_conn *w,
                                struct exchg_order_info *ack, int64_t reqid)
 {
-        struct exchg_test_event *ev = exchg_fake_queue_ws_event_tail(
+        struct exchg_test_event *ev = exchg_fake_queue_ws_event(
             w, EXCHG_EVENT_ORDER_ACK, sizeof(struct ack_msg));
         ev->data.order_ack = *ack;
         struct ack_msg *msg = test_event_private(ev);
@@ -654,7 +654,7 @@ static void private_ws_write(struct websocket_conn *w, const char *buf,
                 struct test_order *o = on_order_placed(w->ctx, EXCHG_KRAKEN,
                                                        &ack, sizeof(int64_t));
                 *(int64_t *)test_order_private(o) = reqid;
-                struct exchg_test_event *ev = exchg_fake_queue_ws_event_tail(
+                struct exchg_test_event *ev = exchg_fake_queue_ws_event(
                     w, EXCHG_EVENT_ORDER_ACK, sizeof(struct ack_msg));
                 ev->data.order_ack = ack;
                 if (ack.status != EXCHG_ORDER_ERROR)
@@ -670,9 +670,9 @@ static void private_ws_write(struct websocket_conn *w, const char *buf,
                         problem = "no txids given";
                         goto bad;
                 }
-                struct exchg_test_event *ev = exchg_fake_queue_ws_event_tail(
-                    w, EXCHG_EVENT_ORDER_CANCEL_ACK,
-                    sizeof(struct order_cancel));
+                struct exchg_test_event *ev =
+                    exchg_fake_queue_ws_event(w, EXCHG_EVENT_ORDER_CANCEL_ACK,
+                                              sizeof(struct order_cancel));
                 struct order_cancel *cancel = test_event_private(ev);
                 cancel->reqid = reqid;
                 cancel_order(w->ctx, userref, cancel);

@@ -523,8 +523,8 @@ static void place_order_add_header(struct http_conn *req,
 
         struct exchg_test_event *accepted = exchg_fake_queue_ws_event(
             ws, EXCHG_EVENT_ORDER_ACK, sizeof(struct gemini_ack));
-        struct exchg_test_event *last = exchg_fake_queue_ws_event_after(
-            ws, EXCHG_EVENT_ORDER_ACK, sizeof(struct gemini_ack), accepted);
+        struct exchg_test_event *last = exchg_fake_queue_ws_event(
+            ws, EXCHG_EVENT_ORDER_ACK, sizeof(struct gemini_ack));
 
         ack_init(accepted, ORDER_ACCEPTED, order, o->client_oid);
         if (ack->status == EXCHG_ORDER_FINISHED)
@@ -543,9 +543,8 @@ static void place_order_add_header(struct http_conn *req,
         }
         if (ack->status != EXCHG_ORDER_ERROR &&
             decimal_is_positive(&ack->filled_size)) {
-                struct exchg_test_event *fill = exchg_fake_queue_ws_event_after(
-                    ws, EXCHG_EVENT_ORDER_ACK, sizeof(struct gemini_ack),
-                    accepted);
+                struct exchg_test_event *fill = exchg_fake_queue_ws_event(
+                    ws, EXCHG_EVENT_ORDER_ACK, sizeof(struct gemini_ack));
                 ack_init(fill, ORDER_FILL, order, o->client_oid);
         }
         return;

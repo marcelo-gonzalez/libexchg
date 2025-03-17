@@ -232,8 +232,8 @@ static void generate_order_acks(struct exchg_net_context *ctx,
         if (!ws)
                 return;
         struct coinbase_websocket *cb = ws->priv;
-        struct exchg_test_event *recvd = exchg_fake_queue_ws_event_before(
-            ws, EXCHG_EVENT_ORDER_ACK, sizeof(struct ack_msg), read_event);
+        struct exchg_test_event *recvd = exchg_fake_queue_ws_event(
+            ws, EXCHG_EVENT_ORDER_ACK, sizeof(struct ack_msg));
 
         ack_init(recvd, ACK_RECV, o);
         recvd->data.order_ack.status = EXCHG_ORDER_PENDING;
@@ -242,8 +242,8 @@ static void generate_order_acks(struct exchg_net_context *ctx,
         if (!cb->channels[o->info.order.pair].user_subbed)
                 return;
 
-        struct exchg_test_event *last = exchg_fake_queue_ws_event_after(
-            ws, EXCHG_EVENT_ORDER_ACK, sizeof(struct ack_msg), recvd);
+        struct exchg_test_event *last = exchg_fake_queue_ws_event(
+            ws, EXCHG_EVENT_ORDER_ACK, sizeof(struct ack_msg));
         if (o->info.status == EXCHG_ORDER_FINISHED ||
             o->info.status == EXCHG_ORDER_CANCELED)
                 ack_init(last, ACK_DONE, o);
@@ -258,10 +258,8 @@ static void generate_order_acks(struct exchg_net_context *ctx,
         }
 
         if (decimal_is_positive(&o->info.filled_size)) {
-                struct exchg_test_event *match =
-                    exchg_fake_queue_ws_event_after(ws, EXCHG_EVENT_ORDER_ACK,
-                                                    sizeof(struct ack_msg),
-                                                    recvd);
+                struct exchg_test_event *match = exchg_fake_queue_ws_event(
+                    ws, EXCHG_EVENT_ORDER_ACK, sizeof(struct ack_msg));
                 ack_init(match, ACK_MATCH, o);
                 match->data.order_ack.status = EXCHG_ORDER_PENDING;
         }
@@ -471,23 +469,10 @@ static bool cancel_order(struct exchg_net_context *ctx, struct test_order *o)
         if (!on_order_canceled(ctx, EXCHG_COINBASE, o))
                 return false;
 
-        struct test_event *e, *tmp, *last = NULL;
+        struct test_event *last = NULL;
         bool send_done = true;
 
-        TAILQ_FOREACH_SAFE(e, &ctx->events, list, tmp)
-        {
-                if (e->event.id != EXCHG_COINBASE ||
-                    e->event.type != EXCHG_EVENT_ORDER_ACK ||
-                    e->conn_type != CONN_TYPE_WS)
-                        continue;
-
-                struct ack_msg *m = test_event_private(&e->event);
-                if (m->type == ACK_DONE) {
-                        send_done = false;
-                } else {
-                        last = e;
-                }
-        }
+        // TODO: check ongoing orders
         if (send_done) {
                 struct websocket_conn *ws =
                     fake_websocket_get(ctx, "ws-feed.pro.coinbase.com", NULL);
@@ -500,9 +485,8 @@ static bool cancel_order(struct exchg_net_context *ctx, struct test_order *o)
 
                 struct exchg_test_event *cancel;
                 if (last)
-                        cancel = exchg_fake_queue_ws_event_after(
-                            ws, EXCHG_EVENT_ORDER_ACK, sizeof(struct ack_msg),
-                            &last->event);
+                        cancel = exchg_fake_queue_ws_event(
+                            ws, EXCHG_EVENT_ORDER_ACK, sizeof(struct ack_msg));
                 else
                         cancel = exchg_fake_queue_ws_event(
                             ws, EXCHG_EVENT_ORDER_ACK, sizeof(struct ack_msg));
