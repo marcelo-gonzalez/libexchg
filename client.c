@@ -904,6 +904,10 @@ void exchg_order_update(struct exchg_client *cl, struct order_info *oi,
                 should_callback = true;
                 info->cancelation_failed = true;
         }
+        if (update->timestamp > info->update_timestamp) {
+                should_callback = true;
+                info->update_timestamp = update->timestamp;
+        }
 
         if (likely(should_callback && cl->ctx->callbacks.on_order_update))
                 cl->ctx->callbacks.on_order_update(cl, info, cl->ctx->user,

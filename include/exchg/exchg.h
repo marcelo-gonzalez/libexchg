@@ -120,6 +120,8 @@ struct exchg_order_info {
         bool cancelation_failed;
         decimal_t filled_size;
         decimal_t avg_price;
+        // TODO: this is only set for coinbase at the moment
+        int64_t update_timestamp;
         // Will contain a non-empty string if status is CANCELED or ERROR
         char err[EXCHG_ORDER_ERR_SIZE + 1];
 };

@@ -129,6 +129,7 @@ static inline bool order_status_done(enum exchg_order_status status)
 void order_info_free(struct exchg_client *cl, struct order_info *info);
 
 struct order_update {
+        int64_t timestamp;
         enum exchg_order_status new_status;
         const decimal_t *order_price;
         const decimal_t *order_size;
