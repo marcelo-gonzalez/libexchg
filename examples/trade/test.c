@@ -128,7 +128,7 @@ int main(void)
                                 return 1;
                         }
 
-                        if (exchg_private_ws_connect(ctx, id))
+                        if (exchg_private_ws_connect(ctx, id, NULL))
                                 goto free_ctx;
 
                         exchg_test_add_l2_events(net_ctx, ARRAY_SIZE(events),

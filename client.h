@@ -53,7 +53,8 @@ struct exchg_client {
         const char *name;
         struct exchg_context *ctx;
         int (*get_pair_info)(struct exchg_client *cl);
-        int (*l2_subscribe)(struct exchg_client *cl, enum exchg_pair pair);
+        int (*l2_subscribe)(struct exchg_client *cl, enum exchg_pair pair,
+                            const struct exchg_websocket_options *options);
         int (*get_balances)(struct exchg_client *cl, void *request_private);
         int64_t (*place_order)(struct exchg_client *cl,
                                const struct exchg_order *,
@@ -65,7 +66,8 @@ struct exchg_client {
         int (*cancel_order)(struct exchg_client *cl, struct order_info *info);
         int (*new_keypair)(struct exchg_client *cl, const unsigned char *key,
                            size_t len);
-        int (*priv_ws_connect)(struct exchg_client *cl);
+        int (*priv_ws_connect)(struct exchg_client *cl,
+                               const struct exchg_websocket_options *options);
         bool (*priv_ws_online)(struct exchg_client *cl);
         void (*destroy)(struct exchg_client *cl);
         LIST_HEAD(websocket_list, websocket) websocket_list;
@@ -238,6 +240,16 @@ struct exchg_websocket_ops {
         size_t conn_data_size;
 };
 
+static inline bool
+ws_options_authenticate(const struct exchg_websocket_options *options)
+{
+        return options ? options->authenticate : false;
+}
+
+// TODO: maybe just allow the changes
+void websocket_log_options_discrepancies(
+    struct websocket *, const struct exchg_websocket_options *options);
+
 bool websocket_disconnecting(struct websocket *);
 bool websocket_established(struct websocket *);
 
@@ -250,8 +262,8 @@ const char *http_path(struct http *);
 
 struct websocket *
 exchg_websocket_connect(struct exchg_client *cl, const char *host,
-                        const char *path,
-                        const struct exchg_websocket_ops *ops);
+                        const char *path, const struct exchg_websocket_ops *ops,
+                        const struct exchg_websocket_options *options);
 
 int websocket_printf(struct websocket *, const char *fmt, ...)
     __attribute__((format(printf, 2, 3)));

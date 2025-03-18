@@ -478,12 +478,13 @@ static const struct exchg_websocket_ops websocket_ops = {
     .recv = bitstamp_recv,
 };
 
-static int bitstamp_connect(struct exchg_client *cl)
+static int bitstamp_connect(struct exchg_client *cl,
+                            const struct exchg_websocket_options *options)
 {
         struct bitstamp_client *bts = client_private(cl);
 
-        bts->ws =
-            exchg_websocket_connect(cl, "ws.bitstamp.net", "/", &websocket_ops);
+        bts->ws = exchg_websocket_connect(cl, "ws.bitstamp.net", "/",
+                                          &websocket_ops, options);
         if (bts->ws)
                 return 0;
         return -1;
@@ -678,7 +679,8 @@ static struct exchg_http_ops get_info_ops = {
     .on_error = exchg_parse_info_on_error,
 };
 
-static int bitstamp_l2_subscribe(struct exchg_client *cl, enum exchg_pair pair)
+static int bitstamp_l2_subscribe(struct exchg_client *cl, enum exchg_pair pair,
+                                 const struct exchg_websocket_options *options)
 {
         struct bitstamp_client *bts = client_private(cl);
         struct bts_pair_info *bpi = &bts->pair_info[pair];
@@ -692,7 +694,9 @@ static int bitstamp_l2_subscribe(struct exchg_client *cl, enum exchg_pair pair)
                                                 "diff_order_book");
 
         if (!bts->ws)
-                return bitstamp_connect(cl);
+                return bitstamp_connect(cl, options);
+        else
+                websocket_log_options_discrepancies(bts->ws, options);
         return 0;
 }
 
@@ -1048,7 +1052,12 @@ static void bitstamp_destroy(struct exchg_client *cli)
         free_exchg_client(cli);
 }
 
-static int bitstamp_priv_ws_connect(struct exchg_client *cl) { return 0; }
+static int
+bitstamp_priv_ws_connect(struct exchg_client *cl,
+                         const struct exchg_websocket_options *options)
+{
+        return 0;
+}
 
 static bool bitstamp_priv_ws_online(struct exchg_client *cl) { return true; }
 

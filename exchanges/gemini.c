@@ -324,14 +324,15 @@ static inline const char *gemini_host(struct exchg_client *cl)
                 return "api.sandbox.gemini.com";
 }
 
-static int gemini_connect(struct exchg_client *cl, enum exchg_pair pair)
+static int gemini_connect(struct exchg_client *cl, enum exchg_pair pair,
+                          const struct exchg_websocket_options *options)
 {
         char path[50];
         sprintf(path, "/v1/marketdata/%s?heartbeat=true",
                 exchg_pair_to_str(pair));
 
-        struct websocket *w =
-            exchg_websocket_connect(cl, gemini_host(cl), path, &websocket_ops);
+        struct websocket *w = exchg_websocket_connect(cl, gemini_host(cl), path,
+                                                      &websocket_ops, options);
         if (!w)
                 return -1;
 
@@ -378,14 +379,15 @@ int find_conn(struct websocket *w, void *private)
         return 0;
 }
 
-static int gemini_l2_subscribe(struct exchg_client *cl, enum exchg_pair pair)
+static int gemini_l2_subscribe(struct exchg_client *cl, enum exchg_pair pair,
+                               const struct exchg_websocket_options *options)
 {
         struct find_conn_arg arg = {.pair = pair};
         for_each_websocket(cl, find_conn, &arg);
         if (arg.found)
                 return 0;
 
-        return gemini_connect(cl, pair);
+        return gemini_connect(cl, pair, options);
 }
 
 struct http_data {
@@ -1145,7 +1147,8 @@ static const struct exchg_websocket_ops order_events_ops = {
     .conn_data_size = sizeof(struct http_data),
 };
 
-static int gemini_priv_ws_connect(struct exchg_client *cl)
+static int gemini_priv_ws_connect(struct exchg_client *cl,
+                                  const struct exchg_websocket_options *options)
 {
         struct gemini_client *g = client_private(cl);
 
@@ -1153,8 +1156,9 @@ static int gemini_priv_ws_connect(struct exchg_client *cl)
                 return 0;
 
         g->priv_ws_connected = true;
-        struct websocket *w = exchg_websocket_connect(
-            cl, gemini_host(cl), "/v1/order/events", &order_events_ops);
+        struct websocket *w =
+            exchg_websocket_connect(cl, gemini_host(cl), "/v1/order/events",
+                                    &order_events_ops, options);
         if (!w)
                 return -1;
 

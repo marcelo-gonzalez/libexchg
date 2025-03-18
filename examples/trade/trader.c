@@ -309,10 +309,10 @@ int trade_run(struct trade_state *s, struct exchg_client *cl)
 {
         struct exchg_context *ctx = exchg_ctx(cl);
 
-        if (exchg_private_ws_connect(ctx, exchg_id(cl)))
+        if (exchg_private_ws_connect(ctx, exchg_id(cl), NULL))
                 return -1;
 
-        if (exchg_l2_subscribe(ctx, exchg_id(cl), s->order.pair))
+        if (exchg_l2_subscribe(ctx, exchg_id(cl), s->order.pair, NULL))
                 return -1;
 
         if (exchg_get_balances(cl, NULL))

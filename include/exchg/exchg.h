@@ -158,6 +158,11 @@ struct exchg_callbacks {
                          void *user);
 };
 
+struct exchg_websocket_options {
+        bool authenticate;
+        bool log_messages;
+};
+
 // ---------------- actions -----------------------
 // ------------------------------------------------
 int exchg_set_keypair(struct exchg_client *cl, size_t public_len,
@@ -176,7 +181,8 @@ int exchg_get_pair_info(struct exchg_context *ctx, enum exchg_id id);
 // Subscribe to L2 order book data to be received in the on_l2_update callback
 // pass EXCHG_ALL_EXCHANGES to subscribe on all previously allocated clients
 int exchg_l2_subscribe(struct exchg_context *ctx, enum exchg_id id,
-                       enum exchg_pair pair);
+                       enum exchg_pair pair,
+                       const struct exchg_websocket_options *options);
 
 int exchg_get_balances(struct exchg_client *cl, void *req_private);
 
@@ -205,7 +211,8 @@ int exchg_cancel_order(struct exchg_client *cl, int64_t id);
 // If available, subscribe to private data feed that will give updates
 // on our orders in the future.
 // pass EXCHG_ALL_EXCHANGES to connect on all previously allocated clients
-int exchg_private_ws_connect(struct exchg_context *, enum exchg_id);
+int exchg_private_ws_connect(struct exchg_context *, enum exchg_id,
+                             const struct exchg_websocket_options *options);
 // Is the private data feed online? If this doesn't apply for the given
 // exchange, this returns true.
 bool exchg_private_ws_online(struct exchg_client *);

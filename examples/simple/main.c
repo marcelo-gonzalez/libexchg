@@ -81,7 +81,7 @@ int main(int argc, char **argv)
         printf("Printing numbers of %s bids and asks received\n",
                exchg_pair_to_str(pair));
 
-        if (exchg_l2_subscribe(ctx, EXCHG_ALL_EXCHANGES, pair))
+        if (exchg_l2_subscribe(ctx, EXCHG_ALL_EXCHANGES, pair, NULL))
                 goto out_shutdown;
 
         while (exchg_service(ctx) && !interrupted) {

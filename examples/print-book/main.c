@@ -403,7 +403,7 @@ int main(int argc, char **argv)
                 if (want_exchange[id] && !exchg_alloc_client(ctx, id))
                         goto out_shutdown;
         }
-        if (exchg_l2_subscribe(ctx, EXCHG_ALL_EXCHANGES, book.pair))
+        if (exchg_l2_subscribe(ctx, EXCHG_ALL_EXCHANGES, book.pair, NULL))
                 goto out_shutdown;
 
         book_init(&book, ctx);

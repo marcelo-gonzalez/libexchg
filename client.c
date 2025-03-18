@@ -45,6 +45,7 @@ struct websocket {
         struct exchg_client *cl;
         struct websocket_conn *conn;
         const struct exchg_websocket_ops *ops;
+        bool log_messages;
         bool established;
         bool disconnecting;
         struct retry retry;
@@ -111,6 +112,10 @@ static int websocket_buf_write(struct websocket *ws, const char *fmt,
                 buf_free(&b);
                 return len;
         }
+        if (unlikely(ws->log_messages)) {
+                exchg_log("%s%s sending msg: %.*s\n", ws->host, ws->path, len,
+                          buf_start(&b));
+        }
         len = ws_conn_write(ws->conn, buf_start(&b), b.len);
         buf_free(&b);
         return len;
@@ -136,11 +141,16 @@ int websocket_printf(struct websocket *ws, const char *fmt, ...)
         len = vsnprintf(&buf[_net_write_buf_padding],
                         sizeof(buf) - _net_write_buf_padding, fmt, ap);
 
-        if (len < sizeof(buf) - _net_write_buf_padding)
+        if (len < sizeof(buf) - _net_write_buf_padding) {
+                if (unlikely(ws->log_messages)) {
+                        exchg_log("%s%s sending msg %.*s\n", ws->host, ws->path,
+                                  len, &buf[_net_write_buf_padding]);
+                }
                 len =
                     ws_conn_write(ws->conn, &buf[_net_write_buf_padding], len);
-        else
+        } else {
                 len = websocket_buf_write(ws, fmt, a, len);
+        }
 
         va_end(ap);
         va_end(a);
@@ -366,6 +376,12 @@ static int ws_recv(void *p, char *in, size_t len)
         if (numtoks == 0)
                 return 0;
 
+        if (unlikely(w->log_messages)) {
+                exchg_log("%s%s received msg: %.*s\n", w->host, w->path,
+                          (int)json_len, json);
+        }
+        // TODO: if multiple json objects come in the same incoming message this
+        // won't work right
         // TODO: return code that says whether to try reconnecting or not
         if (w->ops->recv(w->cl, w, json, numtoks, w->json.tokens)) {
                 w->disconnecting = true;
@@ -728,9 +744,20 @@ struct http *exchg_http_delete(const char *host, const char *path,
         return exchg_http_dial(host, path, ops, cl, "DELETE");
 }
 
-struct websocket *exchg_websocket_connect(struct exchg_client *cl,
-                                          const char *host, const char *path,
-                                          const struct exchg_websocket_ops *ops)
+void websocket_log_options_discrepancies(
+    struct websocket *w, const struct exchg_websocket_options *options)
+{
+        if (options && options->log_messages != w->log_messages) {
+                exchg_log("FIXME: websocket %s%s already established. Not "
+                          "changing logging option\n",
+                          w->host, w->path);
+        }
+}
+
+struct websocket *
+exchg_websocket_connect(struct exchg_client *cl, const char *host,
+                        const char *path, const struct exchg_websocket_ops *ops,
+                        const struct exchg_websocket_options *options)
 {
         struct websocket *w = malloc(sizeof(*w) + ops->conn_data_size);
         if (!w) {
@@ -758,6 +785,7 @@ struct websocket *exchg_websocket_connect(struct exchg_client *cl,
                 goto oom;
         if (json_alloc(&w->json))
                 goto oom;
+        w->log_messages = options ? options->log_messages : false;
         return w;
 
 oom:
@@ -1228,12 +1256,20 @@ int exchg_get_pair_info(struct exchg_context *ctx, enum exchg_id id)
 
 static int priv_ws_connect(struct exchg_client *cl, void *p)
 {
-        return cl->priv_ws_connect(cl);
+        const struct exchg_websocket_options *options = p;
+        return cl->priv_ws_connect(cl, options);
 }
 
-int exchg_private_ws_connect(struct exchg_context *ctx, enum exchg_id id)
+int exchg_private_ws_connect(struct exchg_context *ctx, enum exchg_id id,
+                             const struct exchg_websocket_options *options)
 {
-        return call_per_exchange(ctx, __func__, priv_ws_connect, id, NULL);
+        if (options && !options->authenticate) {
+                exchg_log("%s: authenticate option required but not given\n",
+                          __func__);
+                return -1;
+        }
+        return call_per_exchange(ctx, __func__, priv_ws_connect, id,
+                                 (void *)options);
 }
 
 bool exchg_private_ws_online(struct exchg_client *cl)
@@ -1241,12 +1277,17 @@ bool exchg_private_ws_online(struct exchg_client *cl)
         return cl->priv_ws_online(cl);
 }
 
+struct l2_subscribe_arg {
+        enum exchg_pair pair;
+        const struct exchg_websocket_options *options;
+};
+
 static int l2_subscribe(struct exchg_client *cl, void *p)
 {
-        enum exchg_pair pair = *(enum exchg_pair *)p;
-        struct exchg_pair_info *pi = &cl->pair_info[pair];
+        struct l2_subscribe_arg *arg = p;
+        struct exchg_pair_info *pi = &cl->pair_info[arg->pair];
         // TODO: free if ends up unused cus its not available
-        int err = alloc_book(cl->ctx, pair);
+        int err = alloc_book(cl->ctx, arg->pair);
         if (err)
                 return err;
         err = get_pair_info(cl);
@@ -1260,16 +1301,21 @@ static int l2_subscribe(struct exchg_client *cl, void *p)
         }
         if (cl->pair_info_current && !pi->available) {
                 exchg_log("pair %s not available on %s\n",
-                          exchg_pair_to_str(pair), cl->name);
+                          exchg_pair_to_str(arg->pair), cl->name);
                 return -1;
         }
-        return cl->l2_subscribe(cl, pair);
+        return cl->l2_subscribe(cl, arg->pair, arg->options);
 }
 
 int exchg_l2_subscribe(struct exchg_context *ctx, enum exchg_id id,
-                       enum exchg_pair pair)
+                       enum exchg_pair pair,
+                       const struct exchg_websocket_options *options)
 {
-        return call_per_exchange(ctx, __func__, l2_subscribe, id, &pair);
+        struct l2_subscribe_arg arg = {
+            .pair = pair,
+            .options = options,
+        };
+        return call_per_exchange(ctx, __func__, l2_subscribe, id, &arg);
 }
 
 static struct net_callbacks net_callbacks = {
@@ -1452,13 +1498,12 @@ void exchg_vlog(const char *fmt, va_list ap)
         struct timespec now;
         struct tm tm;
         char timestamp[60];
-        char buf[1024];
 
         clock_gettime(CLOCK_REALTIME, &now);
-        strftime(timestamp, sizeof(timestamp), "[%Y/%m/%d %T",
+        strftime(timestamp, sizeof(timestamp), "%Y/%m/%d %T",
                  localtime_r(&now.tv_sec, &tm));
-        vsnprintf(buf, sizeof(buf), fmt, ap);
-        fprintf(stderr, "%s.%.6ld] %s", timestamp, now.tv_nsec / 1000, buf);
+        fprintf(stderr, "[%s.%.6ld] ", timestamp, now.tv_nsec / 1000);
+        vfprintf(stderr, fmt, ap);
 }
 
 void exchg_log(const char *fmt, ...)

@@ -810,7 +810,8 @@ static const struct exchg_websocket_ops ws_ops = {
     .recv = ws_recv,
 };
 
-static int coinbase_l2_subscribe(struct exchg_client *cl, enum exchg_pair pair)
+static int coinbase_l2_subscribe(struct exchg_client *cl, enum exchg_pair pair,
+                                 const struct exchg_websocket_options *options)
 {
         struct coinbase_client *cb = client_private(cl);
         struct coinbase_pair_info *ci = &cb->pair_info[pair];
@@ -825,7 +826,7 @@ static int coinbase_l2_subscribe(struct exchg_client *cl, enum exchg_pair pair)
 
         if (!cb->ws) {
                 cb->ws = exchg_websocket_connect(cl, "ws-feed.pro.coinbase.com",
-                                                 "/", &ws_ops);
+                                                 "/", &ws_ops, options);
                 if (!cb->ws)
                         return -1;
         }
@@ -1547,7 +1548,9 @@ static int coinbase_new_keypair(struct exchg_client *cl,
         return ret;
 }
 
-static int coinbase_priv_ws_connect(struct exchg_client *cl)
+static int
+coinbase_priv_ws_connect(struct exchg_client *cl,
+                         const struct exchg_websocket_options *options)
 {
         struct coinbase_client *cb = client_private(cl);
 
@@ -1557,7 +1560,7 @@ static int coinbase_priv_ws_connect(struct exchg_client *cl)
         cb->watching_user_chan = true;
         if (!cb->ws) {
                 cb->ws = exchg_websocket_connect(cl, "ws-feed.pro.coinbase.com",
-                                                 "/", &ws_ops);
+                                                 "/", &ws_ops, options);
                 if (!cb->ws)
                         return -1;
                 return 0;

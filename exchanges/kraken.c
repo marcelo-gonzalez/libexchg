@@ -809,11 +809,12 @@ static const struct exchg_websocket_ops websocket_ops = {
     .recv = kraken_recv,
 };
 
-static int kraken_connect(struct exchg_client *cl)
+static int kraken_connect(struct exchg_client *cl,
+                          const struct exchg_websocket_options *options)
 {
         struct kraken_client *kkn = client_private(cl);
-        kkn->data_ws =
-            exchg_websocket_connect(cl, "ws.kraken.com", "/", &websocket_ops);
+        kkn->data_ws = exchg_websocket_connect(cl, "ws.kraken.com", "/",
+                                               &websocket_ops, options);
         if (kkn->data_ws)
                 return 0;
         return -1;
@@ -1144,7 +1145,8 @@ static struct exchg_http_ops get_info_ops = {
     .on_closed = exchg_parse_info_on_closed,
 };
 
-static int kraken_l2_subscribe(struct exchg_client *cl, enum exchg_pair pair)
+static int kraken_l2_subscribe(struct exchg_client *cl, enum exchg_pair pair,
+                               const struct exchg_websocket_options *options)
 {
         struct kraken_client *kkn = client_private(cl);
         struct kraken_pair_info *kpi = &kkn->pair_info[pair];
@@ -1157,8 +1159,12 @@ static int kraken_l2_subscribe(struct exchg_client *cl, enum exchg_pair pair)
         if (cl->pair_info_current && websocket_established(kkn->data_ws))
                 return kraken_subscribe(kkn, pair);
 
-        if (!kkn->data_ws && kraken_connect(cl))
-                return -1;
+        if (!kkn->data_ws) {
+                if (kraken_connect(cl, options))
+                        return -1;
+        } else {
+                websocket_log_options_discrepancies(kkn->data_ws, options);
+        }
         return 0;
 }
 
@@ -1470,12 +1476,13 @@ static const struct exchg_websocket_ops private_ws_ops = {
     .recv = private_ws_recv,
 };
 
-static int private_ws_connect(struct exchg_client *cl)
+static int private_ws_connect(struct exchg_client *cl,
+                              const struct exchg_websocket_options *options)
 {
         struct kraken_client *kkn = client_private(cl);
 
         kkn->private_ws = exchg_websocket_connect(cl, "ws-auth.kraken.com", "/",
-                                                  &private_ws_ops);
+                                                  &private_ws_ops, options);
         if (kkn->private_ws)
                 return 0;
         return -1;
@@ -1488,7 +1495,9 @@ bool kraken_private_ws_online(struct exchg_client *cl)
         return cl->pair_info_current && kc->openorders_recvd;
 }
 
-static int kraken_private_ws_connect(struct exchg_client *cl)
+static int
+kraken_private_ws_connect(struct exchg_client *cl,
+                          const struct exchg_websocket_options *options)
 {
         struct kraken_client *kc = client_private(cl);
 
@@ -1498,7 +1507,7 @@ static int kraken_private_ws_connect(struct exchg_client *cl)
         if (get_pair_info(cl))
                 return -1;
 
-        if (private_ws_connect(cl))
+        if (private_ws_connect(cl, options))
                 return -1;
 
         if (!kc->ws_token && !kc->getting_token)
