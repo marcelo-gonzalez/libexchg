@@ -228,11 +228,8 @@ int exchg_test_l2_queue_order(struct exchg_test_l2_updates *u, bool is_bid,
                 if (u->num_bids >= u->bid_cap) {
                         int new_cap = u->bid_cap * 2 + 1;
                         struct exchg_test_l2_update *bids =
-                            realloc(u->bids, sizeof(*u->bids) * new_cap);
-                        if (!bids) {
-                                exchg_log("%s: OOM\n", __func__);
-                                exit(1);
-                        }
+                            xzrealloc(u->bids, sizeof(*u->bids) * u->bid_cap,
+                                      sizeof(*u->bids) * new_cap);
                         u->bids = bids;
                         u->bid_cap = new_cap;
                 }
@@ -243,11 +240,8 @@ int exchg_test_l2_queue_order(struct exchg_test_l2_updates *u, bool is_bid,
                 if (u->num_asks >= u->ask_cap) {
                         int new_cap = u->ask_cap * 2 + 1;
                         struct exchg_test_l2_update *asks =
-                            realloc(u->asks, sizeof(*u->asks) * new_cap);
-                        if (!asks) {
-                                exchg_log("%s: OOM\n", __func__);
-                                exit(1);
-                        }
+                            xzrealloc(u->asks, sizeof(*u->asks) * u->ask_cap,
+                                      sizeof(*u->asks) * new_cap);
                         u->asks = asks;
                         u->ask_cap = new_cap;
                 }

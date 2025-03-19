@@ -32,6 +32,20 @@ static inline void *xzalloc(size_t s)
         return p;
 }
 
+static inline void *xzrealloc(void *p, size_t old_size, size_t new_size)
+{
+        void *q = realloc(p, new_size);
+        if (!q) {
+                if (new_size == 0)
+                        return q;
+                fprintf(stderr, "%s: OOM\n", __func__);
+                exit(1);
+        }
+        if (new_size > old_size)
+                memset(q + old_size, 0, new_size - old_size);
+        return q;
+}
+
 static inline char *xstrdup(const char *s)
 {
         char *ret = strdup(s);
