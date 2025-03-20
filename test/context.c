@@ -1,3 +1,5 @@
+#include "exchg/test.h"
+
 #include "client.h"
 
 struct exchg_net_context *exchg_test_net_ctx(struct exchg_context *ctx)
@@ -7,7 +9,8 @@ struct exchg_net_context *exchg_test_net_ctx(struct exchg_context *ctx)
 
 struct exchg_context *exchg_test_new(struct exchg_callbacks *c,
                                      const struct exchg_options *opts,
-                                     void *user)
+                                     void *user,
+                                     const struct exchg_test_options *test_opts)
 {
-        return exchg_new(c, opts, user);
+        return __exchg_new(c, opts, user, (void *)test_opts);
 }

@@ -158,8 +158,7 @@ struct exchg_net_context {
         } servers[EXCHG_ALL_EXCHANGES];
         int next_order_id;
         int next_conn_id;
-        exchg_test_callback_t callback;
-        void *cb_private;
+        struct exchg_test_options options;
         // TODO: char error[100];
 };
 

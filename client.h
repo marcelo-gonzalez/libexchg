@@ -19,6 +19,10 @@
 #include "net-backend.h"
 #include "order-book.h"
 
+struct exchg_context *__exchg_new(struct exchg_callbacks *callbacks,
+                                  const struct exchg_options *opts, void *user,
+                                  void *net_arg);
+
 struct work {
         struct exchg_client *cl;
         bool (*f)(struct exchg_client *, void *);

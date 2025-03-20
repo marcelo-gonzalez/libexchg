@@ -1377,8 +1377,9 @@ struct exchg_client *exchg_alloc_client(struct exchg_context *ctx,
         }
 }
 
-struct exchg_context *exchg_new(struct exchg_callbacks *callbacks,
-                                const struct exchg_options *opts, void *user)
+struct exchg_context *__exchg_new(struct exchg_callbacks *callbacks,
+                                  const struct exchg_options *opts, void *user,
+                                  void *net_arg)
 {
         struct exchg_context *ctx = malloc(sizeof(*ctx));
         if (!ctx) {
@@ -1391,12 +1392,18 @@ struct exchg_context *exchg_new(struct exchg_callbacks *callbacks,
         if (opts)
                 memcpy(&ctx->opts, opts, sizeof(*opts));
         ctx->user = user;
-        ctx->net_context = net_new(&net_callbacks);
+        ctx->net_context = net_new(&net_callbacks, net_arg);
         if (!ctx->net_context) {
                 free(ctx);
                 return NULL;
         }
         return ctx;
+}
+
+struct exchg_context *exchg_new(struct exchg_callbacks *callbacks,
+                                const struct exchg_options *opts, void *user)
+{
+        return __exchg_new(callbacks, opts, user, NULL);
 }
 
 void exchg_free(struct exchg_context *ctx)

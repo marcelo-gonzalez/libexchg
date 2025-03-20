@@ -28,13 +28,6 @@ static void buf_init(struct buf *buf, size_t size)
 
 void http_conn_want_write(struct http_conn *req) {}
 
-void exchg_test_set_callback(struct exchg_net_context *ctx,
-                             exchg_test_callback_t cb, void *private)
-{
-        ctx->callback = cb;
-        ctx->cb_private = private;
-}
-
 static const char *event_str(enum exchg_test_event_type type)
 {
         switch (type) {
@@ -368,9 +361,12 @@ static void test_events_free(struct test_events *events)
         g_tree_unref(events->events);
 }
 
-struct exchg_net_context *net_new(struct net_callbacks *c)
+struct exchg_net_context *net_new(struct net_callbacks *c, void *arg)
 {
+        const struct exchg_test_options *options = arg;
         struct exchg_net_context *ctx = xzalloc(sizeof(*ctx));
+        if (options)
+                memcpy(&ctx->options, options, sizeof(*options));
         test_events_new(&ctx->events);
         LIST_INIT(&ctx->ws_list);
         LIST_INIT(&ctx->http_list);
@@ -393,8 +389,8 @@ bool on_order_edited(struct exchg_net_context *ctx, enum exchg_id id,
                 },
         };
 
-        if (ctx->callback)
-                ctx->callback(ctx, &event, ctx->cb_private);
+        if (ctx->options.event_cb)
+                ctx->options.event_cb(ctx, &event, ctx->options.callback_user);
 
         return !event.data.order_edited.error;
 }
@@ -416,8 +412,8 @@ struct test_order *on_order_placed(struct exchg_net_context *ctx,
                 },
         };
         struct exchg_test_order_placed *placed = &event.data.order_placed;
-        if (ctx->callback)
-                ctx->callback(ctx, &event, ctx->cb_private);
+        if (ctx->options.event_cb)
+                ctx->options.event_cb(ctx, &event, ctx->options.callback_user);
         if (placed->error)
                 ack->status = EXCHG_ORDER_ERROR;
         else if (decimal_cmp(&placed->fill_size, &ack->order.size) >= 0)
@@ -444,8 +440,8 @@ bool on_order_canceled(struct exchg_net_context *ctx, enum exchg_id id,
                                              .info = o->info,
                                              .succeed = true,
                                          }};
-        if (ctx->callback)
-                ctx->callback(ctx, &event, ctx->cb_private);
+        if (ctx->options.event_cb)
+                ctx->options.event_cb(ctx, &event, ctx->options.callback_user);
         if (event.data.order_canceled.succeed)
                 o->info.status = EXCHG_ORDER_CANCELED;
         return event.data.order_canceled.succeed;
@@ -530,8 +526,8 @@ static bool service(struct exchg_net_context *ctx)
                 event = &ev->event;
         }
 
-        if (ctx->callback)
-                ctx->callback(ctx, event, ctx->cb_private);
+        if (ctx->options.event_cb)
+                ctx->options.event_cb(ctx, event, ctx->options.callback_user);
 
         first = g_tree_node_first(ctx->events.events);
         if (!first) {

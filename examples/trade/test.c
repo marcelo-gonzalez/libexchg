@@ -80,11 +80,14 @@ int main(void)
                         };
 
                         struct test_events t = {.exchange = id};
+                        struct exchg_test_options test_opts = {
+                            .event_cb = event_cb,
+                            .callback_user = &t,
+                        };
                         struct exchg_context *ctx = exchg_test_new(
-                            &trade_callbacks, &exchg_opts, &state);
+                            &trade_callbacks, &exchg_opts, &state, &test_opts);
                         struct exchg_net_context *net_ctx =
                             exchg_test_net_ctx(ctx);
-                        exchg_test_set_callback(net_ctx, event_cb, &t);
 
                         struct exchg_client *cl = exchg_alloc_client(ctx, id);
                         if (!cl)

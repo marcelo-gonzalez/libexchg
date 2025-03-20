@@ -116,24 +116,26 @@ struct exchg_test_event {
 int exchg_test_l2_queue_order(struct exchg_test_l2_updates *u, bool is_bid,
                               decimal_t *price, decimal_t *size);
 
-struct exchg_context *exchg_test_new(struct exchg_callbacks *c,
-                                     const struct exchg_options *opts,
-                                     void *user);
+struct exchg_net_context;
+
+typedef void (*exchg_test_callback_t)(struct exchg_net_context *,
+                                      struct exchg_test_event *, void *);
+
+struct exchg_test_options {
+        exchg_test_callback_t event_cb;
+        void *callback_user;
+};
+
+struct exchg_context *
+exchg_test_new(struct exchg_callbacks *c, const struct exchg_options *opts,
+               void *user, const struct exchg_test_options *test_opts);
 
 void exchg_test_event_print(struct exchg_test_event *);
-
-struct exchg_net_context;
 
 struct exchg_net_context *exchg_test_net_ctx(struct exchg_context *ctx);
 
 void exchg_test_add_events(struct exchg_net_context *ctx, int n,
                            struct exchg_test_event *msgs);
-
-typedef void (*exchg_test_callback_t)(struct exchg_net_context *,
-                                      struct exchg_test_event *, void *);
-
-void exchg_test_set_callback(struct exchg_net_context *ctx,
-                             exchg_test_callback_t cb, void *user);
 
 struct exchg_test_str_l2_update {
         const char *price;

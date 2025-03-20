@@ -303,7 +303,7 @@ void net_destroy(struct exchg_net_context *ctx)
         free(ctx);
 }
 
-struct exchg_net_context *net_new(struct net_callbacks *c)
+struct exchg_net_context *net_new(struct net_callbacks *c, void *_arg)
 {
         struct exchg_net_context *ret = malloc(sizeof(*ret));
         if (!ret) {
