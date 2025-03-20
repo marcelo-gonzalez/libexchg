@@ -28,7 +28,7 @@ static void buf_init(struct buf *buf, size_t size)
 
 void http_conn_want_write(struct http_conn *req) {}
 
-static const char *event_str(enum exchg_test_event_type type)
+const char *exchg_test_event_to_str(enum exchg_test_event_type type)
 {
         switch (type) {
         case EXCHG_EVENT_HTTP_ESTABLISHED:
@@ -64,31 +64,6 @@ static const char *event_str(enum exchg_test_event_type type)
         default:
                 return "<Unknown Type : Internal Error>";
         }
-}
-
-void exchg_test_event_print(struct exchg_test_event *ev)
-{
-        const char *exchange;
-
-        switch (ev->id) {
-        case EXCHG_BITSTAMP:
-                exchange = "Bitstamp";
-                break;
-        case EXCHG_GEMINI:
-                exchange = "Gemini";
-                break;
-        case EXCHG_KRAKEN:
-                exchange = "Kraken";
-                break;
-        case EXCHG_COINBASE:
-                exchange = "Coinbase";
-                break;
-        default:
-                exchange = "<No Exchange>";
-                break;
-        }
-
-        printf("event: %s %s\n", exchange, event_str(ev->type));
 }
 
 static bool set_ws_if_matches(struct test_event *ev, struct websocket_conn *ws)
@@ -128,7 +103,7 @@ int tree_print_events(void *key, void *value, void *data)
 {
         struct test_event *e = key;
         fprintf(stderr, "timestamp: %" PRId64 ": %s, ", e->timestamp,
-                event_str(e->event.type));
+                exchg_test_event_to_str(e->event.type));
         return false;
 }
 
@@ -461,7 +436,7 @@ static void orphan_ws_event(struct exchg_net_context *ctx, struct test_event *e)
                 exchg_log("test: dropping event with no matching websocket:\n"
                           "%s: %s\n",
                           exchg_id_to_name(e->event.id),
-                          event_str(e->event.type));
+                          exchg_test_event_to_str(e->event.type));
                 test_event_free(e);
                 return;
         }
@@ -606,7 +581,7 @@ static bool service(struct exchg_net_context *ctx)
                         exchg_log(
                             "test: internal error: CONN_TYPE_NONE event with"
                             " type != TIMER: %s\n",
-                            event_str(event->type));
+                            exchg_test_event_to_str(event->type));
                         break;
                 }
                 struct timer *t = test_event_private(event);

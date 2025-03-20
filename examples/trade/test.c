@@ -32,8 +32,10 @@ static void event_cb(struct exchg_net_context *net_ctx,
                      struct exchg_test_event *ev, void *p)
 {
         struct test_events *t = p;
-        if (ev)
-                exchg_test_event_print(ev);
+        if (ev) {
+                fprintf(stderr, "event: %s %s\n", exchg_id_to_name(ev->id),
+                        exchg_test_event_to_str(ev->type));
+        }
         if (!ev && t->num_generated < 8) {
                 struct exchg_test_event event;
                 decimal_t price, size;

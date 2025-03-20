@@ -130,7 +130,7 @@ struct exchg_context *
 exchg_test_new(struct exchg_callbacks *c, const struct exchg_options *opts,
                void *user, const struct exchg_test_options *test_opts);
 
-void exchg_test_event_print(struct exchg_test_event *);
+const char *exchg_test_event_to_str(enum exchg_test_event_type type);
 
 struct exchg_net_context *exchg_test_net_ctx(struct exchg_context *ctx);
 
