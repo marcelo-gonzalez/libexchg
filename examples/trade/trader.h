@@ -5,6 +5,7 @@
 #define EXAMPLES_TRADER_H
 
 #include <string.h>
+#include <time.h>
 
 #include "exchg/currency.h"
 #include "exchg/decimal.h"
