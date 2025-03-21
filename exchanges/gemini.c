@@ -764,7 +764,7 @@ gemini_place_order(struct exchg_client *cl, const struct exchg_order *order,
 
         int len = sprintf(
             request,
-            "{ \"nonce\": %lu, \"request\": \"/v1/order/new\", "
+            "{ \"nonce\": %" PRId64 ", \"request\": \"/v1/order/new\", "
             "\"client_order_id\": \"%" PRId64 "\", \"symbol\": \"%s\", "
             "\"amount\": \"%s\", \"price\": \"%s\", \"side\": \"%s\", "
             "\"type\": \"exchange limit\"%s}",
@@ -896,9 +896,10 @@ static int gemini_get_balances(struct exchg_client *cl,
         struct http_data *data = http_private(http);
         char request[100];
 
-        int len = sprintf(request,
-                          "{ \"nonce\": %lu, \"request\": \"/v1/balances\" }",
-                          current_micros());
+        int len =
+            sprintf(request,
+                    "{ \"nonce\": %" PRId64 ", \"request\": \"/v1/balances\" }",
+                    current_micros());
         if (gemini_conn_auth(data, &cl->hmac_ctx, request, len)) {
                 http_close(http);
                 return -1;
@@ -1117,10 +1118,10 @@ static int order_events_on_disconnect(struct exchg_client *cl,
         g->order_events_sub_acked = false;
         if (reconnect_seconds >= 0) {
                 char request[100];
-                int len = sprintf(
-                    request,
-                    "{ \"nonce\": %lu, \"request\": \"/v1/order/events\" }",
-                    current_micros());
+                int len = sprintf(request,
+                                  "{ \"nonce\": %" PRId64
+                                  ", \"request\": \"/v1/order/events\" }",
+                                  current_micros());
                 if (gemini_conn_auth(data, &cl->hmac_ctx, request, len)) {
                         g->priv_ws_connected = false;
                         return -1;
@@ -1170,9 +1171,10 @@ static int gemini_priv_ws_connect(struct exchg_client *cl,
                 return -1;
 
         char request[100];
-        int len = sprintf(
-            request, "{ \"nonce\": %lu, \"request\": \"/v1/order/events\" }",
-            current_micros());
+        int len = sprintf(request,
+                          "{ \"nonce\": %" PRId64
+                          ", \"request\": \"/v1/order/events\" }",
+                          current_micros());
         if (gemini_conn_auth(websocket_private(w), &cl->hmac_ctx, request,
                              len)) {
                 websocket_close(w);
