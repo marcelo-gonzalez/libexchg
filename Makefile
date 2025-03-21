@@ -34,9 +34,6 @@ hdrs += $(LIBGLIB_HDR)
 
 test-obj = test/fake-net.o test/context.o
 test-obj += test/fake-gemini.o test/fake-kraken.o test/fake-bitstamp.o test/fake-coinbase.o
-test-obj += test/json/kraken/pair-info.o
-test-obj += test/json/bitstamp/pairs-info.o
-test-obj += test/json/coinbase/products.o
 
 public-test-hdrs = include/exchg/test.h
 
@@ -106,13 +103,6 @@ examples/simple/simple: examples/common.o libexchg.a
 examples/trade/test: examples/common.o examples/trade/trader.o
 examples/trade/test: examples/trade/test.o libexchg-test.a
 	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
-
-test/json/kraken/pair-info.o: test/json/kraken/pair-info.json
-	$(LD) -r -b binary -o $@ $^
-test/json/bitstamp/pairs-info.o: test/json/bitstamp/pairs-info.json
-	$(LD) -r -b binary -o $@ $^
-test/json/coinbase/products.o: test/json/coinbase/products.json
-	$(LD) -r -b binary -o $@ $^
 
 decimal-test: decimal.o decimal-test.o
 	$(CC) $(CFLAGS) -o $@ $^

@@ -124,6 +124,13 @@ typedef void (*exchg_test_callback_t)(struct exchg_net_context *,
 struct exchg_test_options {
         exchg_test_callback_t event_cb;
         void *callback_user;
+        // These info_file fields are required for any test that allocates
+        // and uses the corresponding client. The files should contain the
+        // pair info data obtained with the relevant HTTP requests.
+        // Use test/pair-info/get-pair-info.py to download them.
+        const char *bitstamp_info_file;
+        const char *coinbase_info_file;
+        const char *kraken_info_file;
 };
 
 struct exchg_context *

@@ -4,10 +4,14 @@
 #ifndef TEST_UTIL_H
 #define TEST_UTIL_H
 
+#include <errno.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include <exchg/decimal.h>
+#include <exchg/exchg.h>
+
+#include "buf.h"
 
 static inline unsigned char *xdupwithnull(const unsigned char *buf, size_t len)
 {
@@ -72,6 +76,38 @@ static inline void write_prices(char *price_str, char *size_str, char *cost_str,
         decimal_to_str(fee_str, &fee);
         decimal_to_str(price_str, price);
         decimal_to_str(size_str, size);
+}
+
+static inline int buf_read_file(struct buf *buf, const char *filename)
+{
+        FILE *file = fopen(filename, "r");
+        if (!file) {
+                exchg_log("could not open %s to send on websocket: %s\n",
+                          filename, strerror(errno));
+                return -1;
+        }
+
+        size_t read_len = 1 << 10;
+        while (1) {
+                buf_xensure_append_size(buf, read_len);
+                size_t n = fread(buf_end(buf), 1, read_len, file);
+                if (n < 1) {
+                        if (ferror(file)) {
+                                exchg_log("reading from %s failed\n", filename);
+                                fclose(file);
+                                return -1;
+                        }
+                        break;
+                }
+                buf->len += n;
+        }
+
+        if (fclose(file)) {
+                exchg_log("error closing %s to send on websocket: %s\n",
+                          filename, strerror(errno));
+                return -1;
+        }
+        return 0;
 }
 
 #endif

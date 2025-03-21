@@ -61,7 +61,7 @@ int buf_xsprintf(struct buf *buf, const char *fmt, ...)
         return ret;
 }
 
-void buf_xcpy(struct buf *buf, void *src, size_t len)
+void buf_xensure_append_size(struct buf *buf, size_t len)
 {
         if (buf->size < buf->padding + buf->len + len) {
                 int sz = buf->padding + buf->len + len;
@@ -73,6 +73,11 @@ void buf_xcpy(struct buf *buf, void *src, size_t len)
                 buf->buf = b;
                 buf->size = sz;
         }
+}
+
+void buf_xcpy(struct buf *buf, void *src, size_t len)
+{
+        buf_xensure_append_size(buf, len);
         memcpy(&buf->buf[buf->padding + buf->len], src, len);
         buf->len += len;
 }

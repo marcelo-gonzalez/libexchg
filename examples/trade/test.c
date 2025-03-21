@@ -85,6 +85,13 @@ int main(void)
                         struct exchg_test_options test_opts = {
                             .event_cb = event_cb,
                             .callback_user = &t,
+                            // set these to the files downloaded by
+                            // test/pair-info/get-pair-info.py
+                            .bitstamp_info_file =
+                                "./test/pair-info/bitstamp.json",
+                            .coinbase_info_file =
+                                "./test/pair-info/coinbase.json",
+                            .kraken_info_file = "./test/pair-info/kraken.json",
                         };
                         struct exchg_context *ctx = exchg_test_new(
                             &trade_callbacks, &exchg_opts, &state, &test_opts);

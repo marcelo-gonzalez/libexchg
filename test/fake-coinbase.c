@@ -13,15 +13,19 @@
 #include "json-helpers.h"
 #include "util.h"
 
-extern char _binary_test_json_coinbase_products_json_start[];
-extern char _binary_test_json_coinbase_products_json_end[];
-
 static void products_read(struct http_conn *req, struct exchg_test_event *ev,
                           struct buf *buf)
 {
-        size_t size = _binary_test_json_coinbase_products_json_end -
-                      _binary_test_json_coinbase_products_json_start;
-        buf_xcpy(buf, _binary_test_json_coinbase_products_json_start, size);
+        if (!req->ctx->options.coinbase_info_file) {
+                fprintf(stderr, "test: no coinbase_info_file set in "
+                                "exchg_test_options. Please set it\n");
+                exit(1);
+        }
+        if (buf_read_file(buf, req->ctx->options.coinbase_info_file)) {
+                fprintf(stderr,
+                        "test: reading coinbase_info_file failed. Aborting\n");
+                exit(1);
+        }
 }
 
 static struct http_conn *products_dial(struct exchg_net_context *ctx,
