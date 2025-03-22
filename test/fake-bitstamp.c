@@ -215,7 +215,8 @@ static void bitstamp_ws_destroy(struct websocket_conn *w)
 struct websocket_conn *bitstamp_ws_dial(struct exchg_net_context *ctx,
                                         const char *path, void *private)
 {
-        struct websocket_conn *s = fake_websocket_alloc(ctx, private);
+        struct websocket_conn *s =
+            fake_websocket_alloc(EXCHG_BITSTAMP, ctx, private);
         s->read = bitstamp_ws_read;
         s->write = bitstamp_ws_write;
         s->matches = bitstamp_ws_matches;

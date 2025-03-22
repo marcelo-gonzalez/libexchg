@@ -768,12 +768,14 @@ void ws_conn_close(struct websocket_conn *ws)
         e->event.data.ws_close = event_data;
 }
 
-struct websocket_conn *fake_websocket_alloc(struct exchg_net_context *ctx,
+struct websocket_conn *fake_websocket_alloc(enum exchg_id id,
+                                            struct exchg_net_context *ctx,
                                             void *user)
 {
         struct websocket_conn *s = xzalloc(sizeof(*s));
         s->user = user;
         s->ctx = ctx;
+        s->id = id;
         LIST_INSERT_HEAD(&ctx->ws_list, s, list);
         return s;
 }

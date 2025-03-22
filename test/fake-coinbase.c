@@ -977,7 +977,8 @@ static void ws_destroy(struct websocket_conn *w)
 struct websocket_conn *coinbase_ws_dial(struct exchg_net_context *ctx,
                                         const char *path, void *private)
 {
-        struct websocket_conn *s = fake_websocket_alloc(ctx, private);
+        struct websocket_conn *s =
+            fake_websocket_alloc(EXCHG_COINBASE, ctx, private);
         s->read = ws_read;
         s->write = ws_write;
         s->matches = ws_matches;

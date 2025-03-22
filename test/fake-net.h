@@ -162,7 +162,8 @@ struct exchg_net_context {
         // TODO: char error[100];
 };
 
-struct websocket_conn *fake_websocket_alloc(struct exchg_net_context *ctx,
+struct websocket_conn *fake_websocket_alloc(enum exchg_id id,
+                                            struct exchg_net_context *ctx,
                                             void *user);
 void ws_conn_free(struct websocket_conn *);
 struct websocket_conn *fake_websocket_get(struct exchg_net_context *ctx,

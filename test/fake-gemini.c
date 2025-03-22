@@ -177,7 +177,8 @@ static int events_matches(struct websocket_conn *w, struct exchg_test_event *ev)
 struct websocket_conn *order_events_dial(struct exchg_net_context *ctx,
                                          void *private)
 {
-        struct websocket_conn *s = fake_websocket_alloc(ctx, private);
+        struct websocket_conn *s =
+            fake_websocket_alloc(EXCHG_GEMINI, ctx, private);
         s->read = events_read;
         s->write = no_ws_write;
         s->matches = events_matches;
@@ -210,7 +211,8 @@ struct websocket_conn *gemini_ws_dial(struct exchg_net_context *ctx,
                 return NULL;
         }
 
-        struct websocket_conn *s = fake_websocket_alloc(ctx, private);
+        struct websocket_conn *s =
+            fake_websocket_alloc(EXCHG_GEMINI, ctx, private);
         s->read = gemini_ws_read;
         s->write = no_ws_write;
         s->matches = gemini_ws_matches;

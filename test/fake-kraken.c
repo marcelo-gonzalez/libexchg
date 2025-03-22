@@ -323,7 +323,8 @@ static void kraken_ws_destroy(struct websocket_conn *w)
 struct websocket_conn *kraken_ws_dial(struct exchg_net_context *ctx,
                                       const char *path, void *private)
 {
-        struct websocket_conn *s = fake_websocket_alloc(ctx, private);
+        struct websocket_conn *s =
+            fake_websocket_alloc(EXCHG_KRAKEN, ctx, private);
         s->read = kraken_ws_read;
         s->write = kraken_ws_write;
         s->matches = kraken_ws_matches;
@@ -704,7 +705,8 @@ static void private_ws_destroy(struct websocket_conn *w)
 struct websocket_conn *kraken_ws_auth_dial(struct exchg_net_context *ctx,
                                            const char *path, void *private)
 {
-        struct websocket_conn *s = fake_websocket_alloc(ctx, private);
+        struct websocket_conn *s =
+            fake_websocket_alloc(EXCHG_KRAKEN, ctx, private);
         s->read = private_ws_read;
         s->write = private_ws_write;
         s->matches = private_ws_matches;
