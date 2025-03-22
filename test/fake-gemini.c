@@ -418,11 +418,11 @@ static void place_order_add_header(struct http_conn *req,
         jsmn_init(&o->parser);
         int n = jsmn_parse(&o->parser, json, len, o->toks, ARRAY_SIZE(o->toks));
         if (n < 1) {
-                sprintf(problem, "jsmn_parse(): %d", n);
+                snprintf(problem, sizeof(problem), "jsmn_parse(): %d", n);
                 goto bad;
         }
         if (o->toks[0].type != JSMN_OBJECT) {
-                sprintf(problem, "non-object json");
+                snprintf(problem, sizeof(problem), "non-object json");
                 goto bad;
         }
 
@@ -438,27 +438,30 @@ static void place_order_add_header(struct http_conn *req,
 
                 if (json_streq(json, key, "client_order_id")) {
                         if (json_get_int64(&o->client_oid, json, val)) {
-                                sprintf(problem, "bad order id");
+                                snprintf(problem, sizeof(problem),
+                                         "bad order id");
                                 goto bad;
                         }
                         key_idx += 2;
                 } else if (json_streq(json, key, "symbol")) {
                         if (json_get_pair(&ack->order.pair, json, val)) {
-                                sprintf(problem, "bad currency");
+                                snprintf(problem, sizeof(problem),
+                                         "bad currency");
                                 goto bad;
                         }
                         got_pair = true;
                         key_idx += 2;
                 } else if (json_streq(json, key, "amount")) {
                         if (json_get_decimal(&ack->order.size, json, val)) {
-                                sprintf(problem, "bad amount");
+                                snprintf(problem, sizeof(problem),
+                                         "bad amount");
                                 goto bad;
                         }
                         got_size = true;
                         key_idx += 2;
                 } else if (json_streq(json, key, "price")) {
                         if (json_get_decimal(&ack->order.price, json, val)) {
-                                sprintf(problem, "bad price");
+                                snprintf(problem, sizeof(problem), "bad price");
                                 goto bad;
                         }
                         got_price = true;
@@ -469,14 +472,15 @@ static void place_order_add_header(struct http_conn *req,
                         } else if (json_streq(json, val, "sell")) {
                                 ack->order.side = EXCHG_SIDE_SELL;
                         } else {
-                                sprintf(problem, "bad side");
+                                snprintf(problem, sizeof(problem), "bad side");
                                 goto bad;
                         }
                         got_side = true;
                         key_idx += 2;
                 } else if (json_streq(json, key, "options")) {
                         if (val->type != JSMN_ARRAY) {
-                                sprintf(problem, "bad options");
+                                snprintf(problem, sizeof(problem),
+                                         "bad options");
                                 goto bad;
                         }
                         for (int j = 1; j <= val->size; j++) {
@@ -493,23 +497,23 @@ static void place_order_add_header(struct http_conn *req,
                 }
         }
         if (o->client_oid == -1) {
-                sprintf(problem, "no client_order_id given");
+                snprintf(problem, sizeof(problem), "no client_order_id given");
                 goto bad;
         }
         if (!got_pair) {
-                sprintf(problem, "no pair given");
+                snprintf(problem, sizeof(problem), "no pair given");
                 goto bad;
         }
         if (!got_size) {
-                sprintf(problem, "no amount given");
+                snprintf(problem, sizeof(problem), "no amount given");
                 goto bad;
         }
         if (!got_price) {
-                sprintf(problem, "no price given");
+                snprintf(problem, sizeof(problem), "no price given");
                 goto bad;
         }
         if (!got_side) {
-                sprintf(problem, "no side given");
+                snprintf(problem, sizeof(problem), "no side given");
                 goto bad;
         }
         g_free(json);

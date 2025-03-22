@@ -57,8 +57,13 @@ static int private_http_add_headers(struct exchg_client *cl, struct http *http)
                 (unsigned char *)"application/x-www-form-urlencoded",
                 strlen("application/x-www-form-urlencoded")))
                 return 1;
-        char l[16];
-        size_t len = sprintf(l, "%zu", http_body_len(http));
+        char l[22];
+        size_t len = snprintf(l, sizeof(l), "%zu", http_body_len(http));
+        if (unlikely(len >= sizeof(l))) {
+                exchg_log("kraken: %s: int string length too large?? %zu.\n",
+                          __func__, len);
+                return -1;
+        }
         if (http_add_header(http, (unsigned char *)"Content-Length:",
                             (unsigned char *)l, len))
                 return 1;
@@ -70,7 +75,8 @@ static int private_http_auth(struct exchg_client *cl, struct http *http)
         struct http_data *h = http_private(http);
 
         // 123456{body}&nonce=123456
-        char *to_hash = malloc(20 + h->body_len + 27);
+        size_t to_hash_len = 20 + h->body_len + 27;
+        char *to_hash = malloc(to_hash_len);
         if (!to_hash) {
                 fprintf(stderr, "%s: OOM\n", __func__);
                 return -1;
@@ -84,7 +90,7 @@ static int private_http_auth(struct exchg_client *cl, struct http *http)
                 free(to_hash);
                 return -1;
         }
-        p += sprintf(p, "%" PRId64, nonce);
+        p += snprintf(p, to_hash_len, "%" PRId64, nonce);
         memcpy(p, http_body(http), http_body_len(http));
         p += http_body_len(http);
 
@@ -933,12 +939,12 @@ static int kraken_str_to_ccy(enum exchg_currency *ccy, const char *json,
 
 static int parse_info_result(struct exchg_client *cl, const char *json,
                              int num_toks, jsmntok_t *toks, int idx,
-                             char *problem)
+                             const char **problem)
 {
         struct kraken_client *kkn = client_private(cl);
 
         if (toks[idx].type != JSMN_OBJECT) {
-                sprintf(problem, "non-object result");
+                *problem = "non-object result";
                 return -1;
         }
 
@@ -955,8 +961,7 @@ static int parse_info_result(struct exchg_client *cl, const char *json,
                 }
 
                 if (value->type != JSMN_OBJECT) {
-                        sprintf(problem, "non-object info for pair %s",
-                                exchg_pair_to_str(pair));
+                        *problem = "non-object info";
                         return -1;
                 }
 
@@ -978,12 +983,10 @@ static int parse_info_result(struct exchg_client *cl, const char *json,
                                 int err =
                                     json_strdup(&kpi->wsname, json, value);
                                 if (err == ENOMEM) {
-                                        sprintf(problem, "%s: OOM", __func__);
+                                        *problem = "OOM";
                                         return -1;
                                 } else if (err) {
-                                        sprintf(problem,
-                                                "bad wsname for pair %s",
-                                                exchg_pair_to_str(pair));
+                                        *problem = "bad wsname";
                                         return -1;
                                 }
                                 got_wsname = true;
@@ -991,10 +994,7 @@ static int parse_info_result(struct exchg_client *cl, const char *json,
                         } else if (json_streq(json, key, "lot_decimals")) {
                                 if (json_get_int(&pi->base_decimals, json,
                                                  value)) {
-                                        sprintf(problem,
-                                                "bad \"lot_decimals\""
-                                                " for pair %s",
-                                                exchg_pair_to_str(pair));
+                                        *problem = "bad \"lot_decimals\"";
                                         return -1;
                                 }
                                 got_lot_decimals = true;
@@ -1002,10 +1002,7 @@ static int parse_info_result(struct exchg_client *cl, const char *json,
                         } else if (json_streq(json, key, "pair_decimals")) {
                                 if (json_get_int(&pi->price_decimals, json,
                                                  value)) {
-                                        sprintf(problem,
-                                                "bad \"lot_decimals\""
-                                                " for pair %s",
-                                                exchg_pair_to_str(pair));
+                                        *problem = "bad \"lot_decimals\"";
                                         return -1;
                                 }
                                 got_pair_decimals = true;
@@ -1013,10 +1010,7 @@ static int parse_info_result(struct exchg_client *cl, const char *json,
                         } else if (json_streq(json, key, "ordermin")) {
                                 if (json_get_decimal(&pi->min_size, json,
                                                      value)) {
-                                        sprintf(problem,
-                                                "bad \"ordermin\""
-                                                " for pair %s",
-                                                exchg_pair_to_str(pair));
+                                        *problem = "bad \"ordermin\"";
                                         return -1;
                                 }
                                 pi->min_size_is_base = true;
@@ -1033,10 +1027,7 @@ static int parse_info_result(struct exchg_client *cl, const char *json,
                                     fees->type != JSMN_ARRAY ||
                                     fees->size != 2 ||
                                     json_get_decimal(&fee, json, first_fee)) {
-                                        sprintf(problem,
-                                                "bad \"fees\""
-                                                " for pair %s",
-                                                exchg_pair_to_str(pair));
+                                        *problem = "bad \"fees\"";
                                         return -1;
                                 }
                                 pi->fee_bps = decimal_to_fractional(&fee, 2);
@@ -1048,29 +1039,23 @@ static int parse_info_result(struct exchg_client *cl, const char *json,
                 }
 
                 if (!got_wsname) {
-                        sprintf(problem, "missing \"wsname\" for pair %s",
-                                exchg_pair_to_str(pair));
+                        *problem = "missing \"wsname\"";
                         return -1;
                 }
                 if (!got_lot_decimals) {
-                        sprintf(problem, "missing \"lot_decimals\" for pair %s",
-                                exchg_pair_to_str(pair));
+                        *problem = "missing \"lot_decimals\"";
                         return -1;
                 }
                 if (!got_pair_decimals) {
-                        sprintf(problem,
-                                "missing \"pair_decimals\" for pair %s",
-                                exchg_pair_to_str(pair));
+                        *problem = "missing \"pair_decimals\"";
                         return -1;
                 }
                 if (!got_ordermin) {
-                        sprintf(problem, "missing \"ordermin\" for pair %s",
-                                exchg_pair_to_str(pair));
+                        *problem = "missing \"ordermin\"";
                         return -1;
                 }
                 if (!got_fees) {
-                        sprintf(problem, "missing \"fees\" for pair %s",
-                                exchg_pair_to_str(pair));
+                        *problem = "missing \"fees\"";
                         return -1;
                 }
                 pi->available = true;
@@ -1083,7 +1068,7 @@ static int kraken_parse_info(struct exchg_client *cl, struct http *http,
                              jsmntok_t *toks)
 {
         const char *url = "https://api.kraken.com/0/public/AssetPairs";
-        char problem[100];
+        const char *problem = "";
 
         if (status != 200) {
                 cl->get_info_error = 1;
@@ -1094,11 +1079,11 @@ static int kraken_parse_info(struct exchg_client *cl, struct http *http,
         }
 
         if (num_toks < 2) {
-                sprintf(problem, "no data received");
+                problem = "no data received";
                 goto bad;
         }
         if (toks[0].type != JSMN_OBJECT) {
-                sprintf(problem, "didn't receive a JSON object\n");
+                problem = "didn't receive a JSON object";
                 goto bad;
         }
 
@@ -1109,7 +1094,7 @@ static int kraken_parse_info(struct exchg_client *cl, struct http *http,
 
                 if (json_streq(json, key, "result")) {
                         key_idx = parse_info_result(cl, json, num_toks, toks,
-                                                    key_idx + 1, problem);
+                                                    key_idx + 1, &problem);
                         if (key_idx < 0)
                                 goto bad;
                 } else if (json_streq(json, key, "error")) {

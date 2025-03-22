@@ -158,14 +158,14 @@ static void on_l2_update(struct exchg_client *cl, enum exchg_pair pair,
                 }
                 if (state->updates_printed > 6)
                         return;
-                sprintf(after, "%ld.%.9ld after order acked", diff.tv_sec,
-                        diff.tv_nsec);
+                snprintf(after, sizeof(after), "%ld.%.9ld after order acked",
+                         diff.tv_sec, diff.tv_nsec);
         } else if (state->sent) {
                 if (state->updates_printed > 6)
                         return;
                 time_since(&diff, &state->sent_at);
-                sprintf(after, "%ld.%.9ld after order sent", diff.tv_sec,
-                        diff.tv_nsec);
+                snprintf(after, sizeof(after), "%ld.%.9ld after order sent",
+                         diff.tv_sec, diff.tv_nsec);
         } else
                 after[0] = 0;
 

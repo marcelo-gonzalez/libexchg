@@ -503,7 +503,7 @@ struct bitstamp_pair_info {
 
 static int parse_info_token(struct bitstamp_pair_info *info, char *json,
                             int num_toks, jsmntok_t *toks, int key_idx,
-                            char *problem)
+                            const char **problem)
 {
         jsmntok_t *key = &toks[key_idx];
         jsmntok_t *value = &toks[key_idx + 1];
@@ -513,19 +513,19 @@ static int parse_info_token(struct bitstamp_pair_info *info, char *json,
 
         if (json_streq(json, key, "base_decimals")) {
                 if (json_get_int(&info->base_decimals, json, value)) {
-                        sprintf(problem, "can't parse base_decimals field");
+                        *problem = "can't parse base_decimals field";
                         return -1;
                 }
                 return key_idx + 2;
         } else if (json_streq(json, key, "counter_decimals")) {
                 if (json_get_int(&info->price_decimals, json, value)) {
-                        sprintf(problem, "can't parse counter_decimals field");
+                        *problem = "can't parse counter_decimals field";
                         return -1;
                 }
                 return key_idx + 2;
         } else if (json_streq(json, key, "url_symbol")) {
                 if (value->type != JSMN_STRING) {
-                        sprintf(problem, "non string url_symbol field");
+                        *problem = "non string url_symbol field";
                         return -1;
                 }
                 if (json_get_pair(&info->pair, json, value)) {
@@ -547,19 +547,19 @@ static int parse_info_token(struct bitstamp_pair_info *info, char *json,
                         }
                 }
                 if (len == 0) {
-                        sprintf(problem, "bad minimum_order field");
+                        *problem = "bad minimum_order field";
                         return -1;
                 }
                 if (decimal_from_str_n(&info->min_size, &json[value->start],
                                        len)) {
-                        sprintf(problem, "bad minimum_order field");
+                        *problem = "bad minimum_order field";
                         return -1;
                 }
                 const char *c = &json[value->start + len];
                 while (isspace(*c) && c < &json[value->end])
                         c++;
                 if (c == &json[value->end]) {
-                        sprintf(problem, "bad minimum_order field");
+                        *problem = "bad minimum_order field";
                         return -1;
                 }
                 if (!exchg_strn_to_ccy(&info->min_currency, c,
@@ -574,7 +574,7 @@ static int bitstamp_parse_info(struct exchg_client *cl, struct http *http,
                                int status, char *json, int num_toks,
                                jsmntok_t *toks)
 {
-        char problem[100];
+        const char *problem = "";
         if (status != 200) {
                 fprintf(stderr,
                         "status %d from https://www.bitstamp.net"
@@ -586,11 +586,11 @@ static int bitstamp_parse_info(struct exchg_client *cl, struct http *http,
         }
 
         if (num_toks < 2) {
-                sprintf(problem, "no data received");
+                problem = "no data received";
                 goto out_bad;
         }
         if (toks[0].type != JSMN_ARRAY) {
-                sprintf(problem, "didn't receive a JSON array\n");
+                problem = "didn't receive a JSON array\n";
                 goto out_bad;
         }
 
@@ -598,7 +598,7 @@ static int bitstamp_parse_info(struct exchg_client *cl, struct http *http,
         for (int i = 0; i < toks[0].size; i++) {
                 jsmntok_t *tok = &toks[key_idx];
                 if (tok->type != JSMN_OBJECT) {
-                        sprintf(problem, "found non-object array element");
+                        problem = "found non-object array element";
                         goto out_bad;
                 }
                 struct bitstamp_pair_info info = {
@@ -611,26 +611,23 @@ static int bitstamp_parse_info(struct exchg_client *cl, struct http *http,
                 key_idx++;
                 for (int j = 0; j < tok->size; j++) {
                         key_idx = parse_info_token(&info, json, num_toks, toks,
-                                                   key_idx, problem);
+                                                   key_idx, &problem);
                         if (key_idx < 0)
                                 goto out_bad;
                 }
                 if (info.dont_care)
                         continue;
                 if (info.pair == -1) {
-                        sprintf(problem,
-                                "pair info without a url_symbol field");
+                        problem = "pair info without a url_symbol field";
                         goto out_bad;
                 }
                 if (info.base_decimals == -1 || info.price_decimals == -1) {
 
-                        sprintf(problem,
-                                "pair info with incomplete decimals info");
+                        problem = "pair info with incomplete decimals info";
                         goto out_bad;
                 }
                 if (!info.min_order_good) {
-                        sprintf(problem,
-                                "pair info without valid minimum_order field");
+                        problem = "pair info without valid minimum_order field";
                         goto out_bad;
                 }
                 if (!info.enabled) {
@@ -654,7 +651,7 @@ static int bitstamp_parse_info(struct exchg_client *cl, struct http *http,
                 else if (info.min_currency == counter)
                         pi->min_size_is_base = false;
                 else {
-                        sprintf(problem, "bad minimum_order field");
+                        problem = "bad minimum_order field";
                         goto out_bad;
                 }
                 pi->min_size = info.min_size;
@@ -770,7 +767,7 @@ static int balances_recv(struct exchg_client *cl, struct http *http, int status,
         return 0;
 }
 
-static int string_to_sign(char *dst, struct exchg_client *cl,
+static int string_to_sign(char *dst, size_t dst_len, struct exchg_client *cl,
                           const char *millis, const char *nonce,
                           const char *host, const char *path,
                           const char *payload)
@@ -780,13 +777,13 @@ static int string_to_sign(char *dst, struct exchg_client *cl,
             payload && *payload ? "application/x-www-form-urlencoded" : "";
         if (!payload)
                 payload = "";
-        return sprintf(dst, "%sPOST%s%s%s%s%sv2%s", bts->api_header, host, path,
-                       content_type, nonce, millis, payload);
+        return snprintf(dst, dst_len, "%sPOST%s%s%s%s%sv2%s", bts->api_header,
+                        host, path, content_type, nonce, millis, payload);
 }
 
-void bitstamp_get_nonce(char *dst)
+void bitstamp_get_nonce(char *dst, size_t size)
 {
-        int len = sprintf(dst, "%" PRId64, current_micros());
+        int len = snprintf(dst, size, "%" PRId64, current_micros());
         for (int i = len; i < 36; i++)
                 dst[i] = dst[i % len];
         dst[36] = 0;
@@ -800,15 +797,16 @@ static int add_headers(struct exchg_client *cl, struct http *http)
         size_t millis_len;
         char to_auth[400];
 
-        millis_len = sprintf(millis, "%" PRId64, current_millis());
-        bitstamp_get_nonce(nonce);
+        millis_len =
+            snprintf(millis, sizeof(millis), "%" PRId64, current_millis());
+        bitstamp_get_nonce(nonce, sizeof(nonce));
 
-        int len = string_to_sign(to_auth, cl, millis, nonce, "www.bitstamp.net",
-                                 h->path, http_body(http));
+        int len = string_to_sign(to_auth, sizeof(to_auth), cl, millis, nonce,
+                                 "www.bitstamp.net", h->path, http_body(http));
         char hmac[HMAC_SHA256_HEX_LEN];
         size_t hmac_len;
         int err = hmac_ctx_hex(&cl->hmac_ctx, (unsigned char *)to_auth, len,
-                               hmac, &hmac_len, HEX_UPPER);
+                               hmac, sizeof(hmac), &hmac_len, HEX_UPPER);
         if (err)
                 return -1;
 
@@ -835,7 +833,7 @@ static int add_headers(struct exchg_client *cl, struct http *http)
                         strlen("application/x-www-form-urlencoded")))
                         return 1;
                 char l[16];
-                len = sprintf(l, "%zu", h->payload_len);
+                len = snprintf(l, sizeof(l), "%zu", h->payload_len);
                 if (http_add_header(http, (unsigned char *)"Content-Length:",
                                     (unsigned char *)l, len))
                         return 1;
@@ -1072,13 +1070,14 @@ static int bitstamp_new_keypair(struct exchg_client *cl,
         if (hmac_ctx_setkey(&cl->hmac_ctx, key, len))
                 return -1;
 
-        char *p = realloc(bts->api_header,
-                          cl->apikey_public_len + strlen("BITSTAMP ") + 1);
+        size_t header_len = cl->apikey_public_len + strlen("BITSTAMP ") + 1;
+        char *p = realloc(bts->api_header, header_len);
         if (!p) {
                 exchg_log("%s: OOM\n", __func__);
                 return -1;
         }
-        bts->api_header_len = sprintf(p, "BITSTAMP %s", cl->apikey_public);
+        bts->api_header_len =
+            snprintf(p, header_len, "BITSTAMP %s", cl->apikey_public);
         bts->api_header = p;
         return 0;
 }

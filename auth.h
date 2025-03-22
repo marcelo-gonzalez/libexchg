@@ -36,7 +36,8 @@ int hmac_ctx_setkey(struct hmac_ctx *ctx, const unsigned char *key,
 void hmac_ctx_free(struct hmac_ctx *ctx);
 
 int hmac_ctx_hex(struct hmac_ctx *ctx, const unsigned char *msg, size_t len,
-                 char *hmac_hex, size_t *hmac_hex_len, enum hex_type htype);
+                 char *hmac_hex, size_t hmac_hex_buf_len, size_t *hmac_hex_len,
+                 enum hex_type htype);
 int hmac_ctx_b64(struct hmac_ctx *ctx, const unsigned char *msg, size_t len,
                  char *hmac_b64, size_t *hmac_b64_len);
 

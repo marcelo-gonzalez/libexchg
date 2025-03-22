@@ -27,6 +27,8 @@ static inline char *buf_start(struct buf *buf) { return buf_pos(buf, 0); }
 static inline char *buf_end(struct buf *buf) { return buf_pos(buf, buf->len); }
 
 int buf_vsprintf(struct buf *buf, const char *fmt, va_list ap);
+int buf_sprintf(struct buf *buf, const char *fmt, ...)
+    __attribute__((format(printf, 2, 3)));
 
 // for use int test code
 int buf_xsprintf(struct buf *buf, const char *fmt, ...)

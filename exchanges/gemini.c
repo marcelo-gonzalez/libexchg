@@ -206,7 +206,7 @@ static int gemini_recv(struct exchg_client *cl, struct websocket *w, char *json,
                 return 0;
 
         if (toks[0].type != JSMN_OBJECT) {
-                sprintf(problem, "not an object");
+                snprintf(problem, sizeof(problem), "not an object");
                 goto bad;
         }
 
@@ -225,20 +225,22 @@ static int gemini_recv(struct exchg_client *cl, struct websocket *w, char *json,
                                 clock_gettime(CLOCK_MONOTONIC,
                                               &gc->last_heartbeat);
                         } else {
-                                sprintf(problem, "bad \"type\" field");
+                                snprintf(problem, sizeof(problem),
+                                         "bad \"type\" field");
                                 goto bad;
                         }
                         key_idx += 2;
                 } else if (json_streq(json, key, "socket_sequence")) {
                         if (json_get_int64(&msg.seq, json, value)) {
-                                sprintf(problem, "bad \"socket_sequence\"");
+                                snprintf(problem, sizeof(problem),
+                                         "bad \"socket_sequence\"");
                                 goto bad;
                         }
                         if (msg.seq != gc->last_socket_sequence + 1) {
-                                sprintf(problem,
-                                        "socket_sequence gap (%" PRId64
-                                        " (got) vs %" PRId64 " (expected))",
-                                        msg.seq, gc->last_socket_sequence + 1);
+                                snprintf(problem, sizeof(problem),
+                                         "socket_sequence gap (%" PRId64
+                                         " (got) vs %" PRId64 " (expected))",
+                                         msg.seq, gc->last_socket_sequence + 1);
                                 goto bad;
                         }
                         gc->last_socket_sequence = msg.seq;
@@ -252,7 +254,8 @@ static int gemini_recv(struct exchg_client *cl, struct websocket *w, char *json,
                                 return -1;
                 } else if (json_streq(json, key, "timestampms")) {
                         if (json_get_int64(&msg.timestamp, json, value)) {
-                                sprintf(problem, "bad \"timestampms\" field");
+                                snprintf(problem, sizeof(problem),
+                                         "bad \"timestampms\" field");
                                 goto bad;
                         }
                         msg.timestamp *= 1000;
@@ -269,7 +272,7 @@ static int gemini_recv(struct exchg_client *cl, struct websocket *w, char *json,
         }
 
         if (msg.type != TYPE_UPDATE || msg.seq == -1 || !msg.events_recvd) {
-                sprintf(problem, "incomplete message");
+                snprintf(problem, sizeof(problem), "incomplete message");
                 goto bad;
         }
 
@@ -328,8 +331,8 @@ static int gemini_connect(struct exchg_client *cl, enum exchg_pair pair,
                           const struct exchg_websocket_options *options)
 {
         char path[50];
-        sprintf(path, "/v1/marketdata/%s?heartbeat=true",
-                exchg_pair_to_str(pair));
+        snprintf(path, sizeof(path), "/v1/marketdata/%s?heartbeat=true",
+                 exchg_pair_to_str(pair));
 
         struct websocket *w = exchg_websocket_connect(cl, gemini_host(cl), path,
                                                       &websocket_ops, options);
@@ -429,8 +432,8 @@ static int gemini_conn_auth(struct http_data *data, struct hmac_ctx *hmac_ctx,
         if (data->payload_len < 0)
                 return -1;
         if (hmac_ctx_hex(hmac_ctx, (unsigned char *)data->payload,
-                         data->payload_len, data->hmac, &data->hmac_len,
-                         HEX_LOWER)) {
+                         data->payload_len, data->hmac, sizeof(data->hmac),
+                         &data->hmac_len, HEX_LOWER)) {
                 free(data->payload);
                 return -1;
         }
@@ -592,11 +595,16 @@ static int send_order_cancel(struct exchg_client *cl, struct order_info *info,
                 return -1;
 
         char request[100];
-        int len = sprintf(request,
-                          "{\"nonce\": %" PRId64 ", \"order_id\": %" PRId64
-                          ", \"request\": \"/v1/order/cancel\"}",
-                          current_micros(), order->server_oid);
-
+        int len = snprintf(request, sizeof(request),
+                           "{\"nonce\": %" PRId64 ", \"order_id\": %" PRId64
+                           ", \"request\": \"/v1/order/cancel\"}",
+                           current_micros(), order->server_oid);
+        if (unlikely(len >= sizeof(request))) {
+                exchg_log("gemini: %s: FIXME: unexpected outgoing message "
+                          "length %d.\n",
+                          __func__, len);
+                return -1;
+        }
         struct http_data *data = http_private(http);
         if (gemini_conn_auth(data, &cl->hmac_ctx, request, len)) {
                 http_close(http);
@@ -762,15 +770,20 @@ gemini_place_order(struct exchg_client *cl, const struct exchg_order *order,
         decimal_to_str(size_str, &info->order.size);
         decimal_to_str(price_str, &info->order.price);
 
-        int len = sprintf(
-            request,
+        int len = snprintf(
+            request, sizeof(request),
             "{ \"nonce\": %" PRId64 ", \"request\": \"/v1/order/new\", "
             "\"client_order_id\": \"%" PRId64 "\", \"symbol\": \"%s\", "
             "\"amount\": \"%s\", \"price\": \"%s\", \"side\": \"%s\", "
             "\"type\": \"exchange limit\"%s}",
             current_micros(), info->id, exchg_pair_to_str(info->order.pair),
             size_str, price_str, side, options);
-
+        if (unlikely(len >= sizeof(request))) {
+                exchg_log("gemini: %s: FIXME: unexpected outgoing message "
+                          "length %d.\n",
+                          __func__, len);
+                return -1;
+        }
         struct http_data *data = http_private(http);
         if (gemini_conn_auth(data, &cl->hmac_ctx, request, len)) {
                 http_close(http);
@@ -896,10 +909,16 @@ static int gemini_get_balances(struct exchg_client *cl,
         struct http_data *data = http_private(http);
         char request[100];
 
-        int len =
-            sprintf(request,
-                    "{ \"nonce\": %" PRId64 ", \"request\": \"/v1/balances\" }",
-                    current_micros());
+        int len = snprintf(request, sizeof(request),
+                           "{ \"nonce\": %" PRId64
+                           ", \"request\": \"/v1/balances\" }",
+                           current_micros());
+        if (unlikely(len >= sizeof(request))) {
+                exchg_log("gemini: %s: FIXME: unexpected outgoing message "
+                          "length %d.\n",
+                          __func__, len);
+                return -1;
+        }
         if (gemini_conn_auth(data, &cl->hmac_ctx, request, len)) {
                 http_close(http);
                 return -1;
@@ -1118,10 +1137,16 @@ static int order_events_on_disconnect(struct exchg_client *cl,
         g->order_events_sub_acked = false;
         if (reconnect_seconds >= 0) {
                 char request[100];
-                int len = sprintf(request,
-                                  "{ \"nonce\": %" PRId64
-                                  ", \"request\": \"/v1/order/events\" }",
-                                  current_micros());
+                int len = snprintf(request, sizeof(request),
+                                   "{ \"nonce\": %" PRId64
+                                   ", \"request\": \"/v1/order/events\" }",
+                                   current_micros());
+                if (unlikely(len >= sizeof(request))) {
+                        exchg_log("gemini: %s: FIXME: unexpected outgoing "
+                                  "message length %d.\n",
+                                  __func__, len);
+                        return -1;
+                }
                 if (gemini_conn_auth(data, &cl->hmac_ctx, request, len)) {
                         g->priv_ws_connected = false;
                         return -1;
@@ -1171,10 +1196,16 @@ static int gemini_priv_ws_connect(struct exchg_client *cl,
                 return -1;
 
         char request[100];
-        int len = sprintf(request,
-                          "{ \"nonce\": %" PRId64
-                          ", \"request\": \"/v1/order/events\" }",
-                          current_micros());
+        int len = snprintf(request, sizeof(request),
+                           "{ \"nonce\": %" PRId64
+                           ", \"request\": \"/v1/order/events\" }",
+                           current_micros());
+        if (unlikely(len >= sizeof(request))) {
+                exchg_log("gemini: %s: FIXME: unexpected outgoing message "
+                          "length %d.\n",
+                          __func__, len);
+                return -1;
+        }
         if (gemini_conn_auth(websocket_private(w), &cl->hmac_ctx, request,
                              len)) {
                 websocket_close(w);

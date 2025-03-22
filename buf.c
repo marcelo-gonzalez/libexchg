@@ -48,6 +48,17 @@ int buf_vsprintf(struct buf *buf, const char *fmt, va_list ap)
         return len;
 }
 
+int buf_sprintf(struct buf *buf, const char *fmt, ...)
+{
+        va_list ap;
+
+        va_start(ap, fmt);
+        int ret = buf_vsprintf(buf, fmt, ap);
+        va_end(ap);
+
+        return ret;
+}
+
 int buf_xsprintf(struct buf *buf, const char *fmt, ...)
 {
         va_list ap;

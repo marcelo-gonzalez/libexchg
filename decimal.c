@@ -10,6 +10,8 @@
 
 #include "exchg/decimal.h"
 
+#include "compiler.h"
+
 #define ARRAY_SIZE(x) sizeof(x) / sizeof(*x)
 
 // TODO: check for overflow more robustly thoughout
@@ -175,7 +177,12 @@ overflow:
 
 int decimal_to_str(char *dst, const decimal_t *number)
 {
-        int ret = sprintf(dst, "%" PRId64, number->value);
+        int ret = snprintf(dst, 22, "%" PRId64, number->value);
+        if (unlikely(ret >= 22)) {
+                fprintf(stderr, "%s: snprintf of int64_t returned %d???\n",
+                        __func__, ret);
+                exit(1);
+        }
         int n;
         if (number->value < 0) {
                 dst++;

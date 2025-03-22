@@ -900,7 +900,7 @@ static void hmac_verify(struct auth_check *a)
         int err;
         if (a->hmac_hex)
                 err = hmac_ctx_hex(&a->hmac_ctx, a->payload, a->payload_len,
-                                   hmac, &hmac_len, a->hex_type);
+                                   hmac, sizeof(hmac), &hmac_len, a->hex_type);
         else
                 err = hmac_ctx_b64(&a->hmac_ctx, a->payload, a->payload_len,
                                    hmac, &hmac_len);

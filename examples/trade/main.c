@@ -37,13 +37,13 @@ static int check_intent(const char *exchange, enum exchg_pair pair,
         printf("please make sure you want to do the following:\n\n");
         char to_do[100];
         if (side == EXCHG_SIDE_BUY)
-                sprintf(to_do, "buy %s %s paying in %s on %s", amount,
-                        exchg_ccy_to_str(base), exchg_ccy_to_str(price),
-                        exchange);
+                snprintf(to_do, sizeof(to_do), "buy %s %s paying in %s on %s",
+                         amount, exchg_ccy_to_str(base),
+                         exchg_ccy_to_str(price), exchange);
         else
-                sprintf(to_do, "sell %s %s to receive %s on %s", amount,
-                        exchg_ccy_to_str(base), exchg_ccy_to_str(price),
-                        exchange);
+                snprintf(to_do, sizeof(to_do), "sell %s %s to receive %s on %s",
+                         amount, exchg_ccy_to_str(base),
+                         exchg_ccy_to_str(price), exchange);
         puts(to_do);
         printf("\nto confirm, retype the above:\n");
 

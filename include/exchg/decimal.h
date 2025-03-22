@@ -19,7 +19,7 @@ typedef struct {
         int64_t value;
 } decimal_t;
 
-// must be >= 21 bytes long
+// must be >= 22 bytes long
 int decimal_to_str(char *dst, const decimal_t *number);
 int decimal_from_str_n(decimal_t *dst, const char *str, size_t len);
 int decimal_from_str(decimal_t *dst, const char *str);

@@ -9,6 +9,7 @@
 #include <stdlib.h>
 
 #include "auth.h"
+#include "compiler.h"
 
 int hmac_ctx_alloc(struct hmac_ctx *h, const char *digest)
 {
@@ -100,15 +101,21 @@ int base64_decode(const unsigned char *in, int len, unsigned char **decoded)
         return len;
 }
 
-static size_t write_hex(char *dst, const unsigned char *p, size_t len,
-                        enum hex_type htype)
+static size_t write_hex(char *dst, size_t dst_len, const unsigned char *p,
+                        size_t len, enum hex_type htype)
 {
         const char *fmt = htype == HEX_UPPER ? "%02X" : "%02x";
-        size_t ret = 0;
+        size_t hex_len = 0;
         for (int i = 0; i < len; i++) {
-                ret += sprintf(dst + 2 * i, fmt, p[i]);
+                int n = snprintf(dst + hex_len, dst_len - hex_len, fmt, p[i]);
+                if (unlikely(hex_len + n >= dst_len)) {
+                        fprintf(stderr, "%s: buffer length %zu too small\n",
+                                __func__, dst_len);
+                        return -1;
+                }
+                hex_len += n;
         }
-        return ret;
+        return hex_len;
 }
 
 #define MAX_HMAC_LEN 64
@@ -133,13 +140,15 @@ out_err:
 }
 
 int hmac_ctx_hex(struct hmac_ctx *ctx, const unsigned char *msg, size_t len,
-                 char *hmac_hex, size_t *hmac_hex_len, enum hex_type htype)
+                 char *hmac_hex, size_t hmac_hex_buf_len, size_t *hmac_hex_len,
+                 enum hex_type htype)
 {
         unsigned char hmac[MAX_HMAC_LEN];
         size_t hmac_len;
         if (hmac_ctx_mac(ctx, msg, len, hmac, &hmac_len, sizeof(hmac)))
                 return -1;
-        *hmac_hex_len = write_hex(hmac_hex, hmac, hmac_len, htype);
+        *hmac_hex_len =
+            write_hex(hmac_hex, hmac_hex_buf_len, hmac, hmac_len, htype);
         return 0;
 }
 
