@@ -158,10 +158,10 @@ test/fake-coinbase.o: $(hdrs) $(test-hdrs) test/fake-coinbase.c
 examples/common.o: $(hdrs) examples/common.h
 
 clean:
+	@find exchanges/ -name "*.o" -delete
 	@find test/ -name "*.o" -delete
 	@find examples/ -name "*.o" -delete
-	@rm -f libexchg.a libexchg-test.a *.o \
-	exchanges/*.o $(examples) $(tests)
+	@rm -f libexchg.a libexchg-test.a *.o $(examples) $(tests)
 
 depsclean:
 	@rm -rf deps/build
