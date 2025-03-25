@@ -481,6 +481,33 @@ static void free_websocket(struct exchg_net_context *ctx,
         w->destroy(w);
 }
 
+static struct test_event *next_event(struct exchg_net_context *ctx)
+{
+        struct test_event *ev = NULL;
+        GTreeNode *first = g_tree_node_first(ctx->events.events);
+
+        if (first)
+                ev = g_tree_node_key(first);
+
+        if (ctx->options.event_cb)
+                ctx->options.event_cb(ctx, ev ? &ev->event : NULL,
+                                      ctx->options.callback_user);
+
+        if (!ev) {
+                first = g_tree_node_first(ctx->events.events);
+                if (first) {
+                        ev = g_tree_node_key(first);
+                        if (ctx->options.event_cb)
+                                ctx->options.event_cb(
+                                    ctx, &ev->event,
+                                    ctx->options.callback_user);
+                }
+        }
+        if (ev)
+                advance_clock(&ctx->events, ev->timestamp);
+        return ev;
+}
+
 static bool service(struct exchg_net_context *ctx)
 {
         int ret;
@@ -493,26 +520,12 @@ static bool service(struct exchg_net_context *ctx)
         char *body;
         size_t body_len;
 
-        GTreeNode *first = g_tree_node_first(ctx->events.events);
-        struct test_event *ev = NULL;
-
-        if (first) {
-                ev = g_tree_node_key(first);
-                event = &ev->event;
-        }
-
-        if (ctx->options.event_cb)
-                ctx->options.event_cb(ctx, event, ctx->options.callback_user);
-
-        first = g_tree_node_first(ctx->events.events);
-        if (!first) {
+        struct test_event *ev = next_event(ctx);
+        if (!ev) {
                 exchg_log("test: no events left to service\n");
                 return false;
         }
-        ev = g_tree_node_key(first);
         event = &ev->event;
-
-        advance_clock(&ctx->events, ev->timestamp);
 
         switch (ev->conn_type) {
         case CONN_TYPE_WS:
