@@ -132,6 +132,7 @@ static void advance_clock(struct test_events *events, int64_t current)
 
 static struct test_event *ws_event_alloc(struct exchg_net_context *ctx,
                                          struct websocket_conn *w,
+                                         enum exchg_id id,
                                          enum exchg_test_event_type type,
                                          size_t private_size)
 {
@@ -141,13 +142,13 @@ static struct test_event *ws_event_alloc(struct exchg_net_context *ctx,
         next_event_time(events, &e->timestamp);
         e->moveable = type == EXCHG_EVENT_BOOK_UPDATE;
         e->conn_type = CONN_TYPE_WS;
+        e->event.type = type;
+        e->event.id = id;
         if (w) {
                 e->conn.ws = w;
-                e->event.id = w->id;
         } else {
                 find_matching_ws(ctx, e);
         }
-        e->event.type = type;
         g_tree_insert(events->events, e, NULL);
         events->seq++;
         return e;
@@ -183,7 +184,7 @@ void exchg_test_add_events(struct exchg_net_context *ctx, int n,
                         continue;
                 }
                 struct test_event *e =
-                    ws_event_alloc(ctx, NULL, events[i].type, 0);
+                    ws_event_alloc(ctx, NULL, events[i].id, events[i].type, 0);
                 memcpy(&e->event, &events[i], sizeof(events[i]));
         }
 }
@@ -225,11 +226,10 @@ void exchg_test_add_l2_events(struct exchg_net_context *ctx, int n,
 {
         for (int i = 0; i < n; i++) {
                 struct exchg_test_str_l2_updates *o = &msgs[i];
-                struct test_event *event =
-                    ws_event_alloc(ctx, NULL, EXCHG_EVENT_BOOK_UPDATE, 0);
+                struct test_event *event = ws_event_alloc(
+                    ctx, NULL, o->id, EXCHG_EVENT_BOOK_UPDATE, 0);
                 struct exchg_test_event *e = &event->event;
 
-                e->id = o->id;
                 e->data.book.pair = o->pair;
 
                 for (struct exchg_test_str_l2_update *s = &o->bids[0]; s->price;
@@ -268,7 +268,7 @@ exchg_fake_queue_ws_event(struct websocket_conn *w,
                           enum exchg_test_event_type type, size_t private_size)
 {
         struct test_event *event =
-            ws_event_alloc(w->ctx, w, type, private_size);
+            ws_event_alloc(w->ctx, w, w->id, type, private_size);
 
         return &event->event;
 }
@@ -771,7 +771,7 @@ void ws_conn_close(struct websocket_conn *ws)
         ws->closed = true;
 
         struct test_event *e =
-            ws_event_alloc(ws->ctx, ws, EXCHG_EVENT_WS_CLOSE, 0);
+            ws_event_alloc(ws->ctx, ws, ws->id, EXCHG_EVENT_WS_CLOSE, 0);
 
         struct exchg_test_websocket_event event_data = {
             .conn_id = ws->conn_id,
@@ -850,8 +850,8 @@ struct websocket_conn *ws_dial(struct exchg_net_context *ctx, const char *host,
         ws->id = exchange;
         ws->conn_id = ctx->next_conn_id++;
 
-        struct test_event *e =
-            ws_event_alloc(ws->ctx, ws, EXCHG_EVENT_WS_ESTABLISHED, 0);
+        struct test_event *e = ws_event_alloc(ws->ctx, ws, exchange,
+                                              EXCHG_EVENT_WS_ESTABLISHED, 0);
 
         struct exchg_test_websocket_event event_data = {
             .conn_id = ws->conn_id,
