@@ -4,6 +4,9 @@
 #ifndef COINBASE_TEST_H
 #define COINBASE_TEST_H
 
+#include <exchg/decimal.h>
+
+#include "fake-net.h"
 #include "net-backend.h"
 
 struct http_conn *coinbase_http_dial(struct exchg_net_context *ctx,
@@ -12,5 +15,8 @@ struct http_conn *coinbase_http_dial(struct exchg_net_context *ctx,
 
 struct websocket_conn *coinbase_ws_dial(struct exchg_net_context *ctx,
                                         const char *path, void *private);
+
+int coinbase_fill_order(struct exchg_net_context *ctx, struct test_order *o,
+                        const decimal_t *total_fill);
 
 #endif

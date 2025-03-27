@@ -146,16 +146,20 @@ struct test_order {
 
 static inline void *test_order_private(struct test_order *o) { return o->priv; }
 
+struct test_server {
+        decimal_t balances[EXCHG_NUM_CCYS];
+        LIST_HEAD(order_list, test_order) order_list;
+        int (*fill_order)(struct exchg_net_context *ctx, struct test_order *o,
+                          const decimal_t *total_fill);
+};
+
 struct exchg_net_context {
         struct net_callbacks *callbacks;
         LIST_HEAD(ws_list, websocket_conn) ws_list;
         LIST_HEAD(http_list, http_conn) http_list;
         struct test_events events;
         bool running;
-        struct {
-                decimal_t balances[EXCHG_NUM_CCYS];
-                LIST_HEAD(order_list, test_order) order_list;
-        } servers[EXCHG_ALL_EXCHANGES];
+        struct test_server servers[EXCHG_ALL_EXCHANGES];
         int next_order_id;
         int next_conn_id;
         struct exchg_test_options options;

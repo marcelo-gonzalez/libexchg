@@ -346,6 +346,7 @@ struct exchg_net_context *net_new(struct net_callbacks *c, void *arg)
         LIST_INIT(&ctx->ws_list);
         LIST_INIT(&ctx->http_list);
         ctx->callbacks = c;
+        ctx->servers[EXCHG_COINBASE].fill_order = coinbase_fill_order;
         return ctx;
 }
 
@@ -404,6 +405,52 @@ struct test_order *on_order_placed(struct exchg_net_context *ctx,
         t->info = *ack;
         LIST_INSERT_HEAD(&ctx->servers[id].order_list, t, list);
         return t;
+}
+
+int exchg_test_fill_order(struct exchg_net_context *ctx, enum exchg_id id,
+                          int64_t order_id, const decimal_t *total_fill)
+{
+        struct test_order *o, *order = NULL;
+        LIST_FOREACH(o, &ctx->servers[id].order_list, list)
+        {
+                if (o->info.id == order_id) {
+                        order = o;
+                        break;
+                }
+        }
+        if (!order) {
+                exchg_log("test: %s: order ID %" PRId64 " on %s not found\n",
+                          __func__, order_id, exchg_id_to_name(id));
+                return -1;
+        }
+        if (decimal_cmp(total_fill, &order->info.filled_size) <= 0) {
+                exchg_log("test: %s: order ID %" PRId64
+                          " on %s already filled more than requested amount\n",
+                          __func__, order_id, exchg_id_to_name(id));
+                return -1;
+        }
+        int cmp = decimal_cmp(total_fill, &order->info.order.size);
+        if (cmp > 0) {
+                exchg_log("test: %s: truncating filled amount greater "
+                          "than total order size.\n",
+                          __func__);
+                order->info.filled_size = order->info.order.size;
+        } else {
+                order->info.filled_size = *total_fill;
+        }
+        if (cmp >= 0) {
+                order->info.status = EXCHG_ORDER_FINISHED;
+        }
+
+        struct test_server *server = &ctx->servers[id];
+        if (server->fill_order)
+                return server->fill_order(ctx, order, total_fill);
+
+        struct test_event *e =
+            ws_event_alloc(ctx, NULL, id, EXCHG_EVENT_ORDER_ACK, 0);
+
+        e->event.data.order_ack = o->info;
+        return 0;
 }
 
 bool on_order_canceled(struct exchg_net_context *ctx, enum exchg_id id,

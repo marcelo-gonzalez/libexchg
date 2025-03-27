@@ -144,6 +144,9 @@ struct exchg_net_context *exchg_test_net_ctx(struct exchg_context *ctx);
 void exchg_test_add_events(struct exchg_net_context *ctx, int n,
                            struct exchg_test_event *msgs);
 
+int exchg_test_fill_order(struct exchg_net_context *ctx, enum exchg_id id,
+                          int64_t order_id, const decimal_t *total_fill);
+
 struct exchg_test_str_l2_update {
         const char *price;
         const char *size;

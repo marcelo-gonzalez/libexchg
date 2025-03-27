@@ -445,6 +445,13 @@ static struct http_conn *orders_dial(struct exchg_net_context *ctx,
         return req;
 }
 
+int coinbase_fill_order(struct exchg_net_context *ctx, struct test_order *o,
+                        const decimal_t *total_fill)
+{
+        // TODO
+        return 0;
+}
+
 struct order_cancel {
         char client_oid[37];
         char msg[100];
