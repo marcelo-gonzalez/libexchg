@@ -191,7 +191,7 @@ void exchg_test_add_events(struct exchg_net_context *ctx, int n,
 
 // TODO: void ret
 int exchg_test_l2_queue_order(struct exchg_test_l2_updates *u, bool is_bid,
-                              decimal_t *price, decimal_t *size)
+                              const decimal_t *price, const decimal_t *size)
 {
         if (is_bid) {
                 if (u->num_bids >= u->bid_cap) {

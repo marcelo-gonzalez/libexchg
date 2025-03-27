@@ -114,7 +114,7 @@ struct exchg_test_event {
 };
 
 int exchg_test_l2_queue_order(struct exchg_test_l2_updates *u, bool is_bid,
-                              decimal_t *price, decimal_t *size);
+                              const decimal_t *price, const decimal_t *size);
 
 struct exchg_net_context;
 
