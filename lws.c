@@ -287,9 +287,10 @@ struct websocket_conn *ws_dial(struct exchg_net_context *ctx, const char *host,
         return ws;
 }
 
-void net_service(struct exchg_net_context *ctx)
+bool net_service(struct exchg_net_context *ctx)
 {
         g_main_context_iteration(NULL, TRUE);
+        return true;
 }
 
 void net_run(struct exchg_net_context *ctx) { g_main_loop_run(ctx->loop); }

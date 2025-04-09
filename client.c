@@ -1426,8 +1426,7 @@ bool exchg_service(struct exchg_context *ctx)
 {
         if (unlikely(!ctx->online))
                 return false;
-        net_service(ctx->net_context);
-        return true;
+        return net_service(ctx->net_context);
 }
 
 void exchg_run(struct exchg_context *ctx)

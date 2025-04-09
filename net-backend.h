@@ -4,6 +4,7 @@
 #ifndef NET_BACKEND_H
 #define NET_BACKEND_H
 
+#include <stdbool.h>
 #include <sys/types.h>
 
 struct exchg_net_context;
@@ -40,7 +41,7 @@ struct net_callbacks {
 // `arg` is only used by the test exchg_net_context and is cast in that case to
 // exchg_test_options *.
 extern struct exchg_net_context *net_new(struct net_callbacks *c, void *arg);
-extern void net_service(struct exchg_net_context *);
+extern bool net_service(struct exchg_net_context *);
 extern void net_run(struct exchg_net_context *);
 extern void net_stop(struct exchg_net_context *);
 extern void net_destroy(struct exchg_net_context *);

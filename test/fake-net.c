@@ -657,7 +657,7 @@ static bool service(struct exchg_net_context *ctx)
         return true;
 }
 
-void net_service(struct exchg_net_context *ctx) { service(ctx); }
+bool net_service(struct exchg_net_context *ctx) { return service(ctx); }
 
 void timer_cancel(struct timer *t)
 {
