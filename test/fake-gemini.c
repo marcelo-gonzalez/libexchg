@@ -88,10 +88,14 @@ static void gemini_ws_destroy(struct websocket_conn *w)
         ws_conn_free(w);
 }
 
-static int gemini_ws_matches(struct websocket_conn *w, enum exchg_pair p)
+static int gemini_ws_matches(struct websocket_conn *w,
+                             struct exchg_test_event *ev)
 {
         struct gemini_websocket *g = w->priv;
-        return g->pair == p;
+        if (ev->type == EXCHG_EVENT_BOOK_UPDATE) {
+                return g->pair == ev->data.book.pair;
+        }
+        return 0;
 }
 
 enum order_event_type {
@@ -165,7 +169,7 @@ static void events_read(struct websocket_conn *ws, struct buf *buf,
                      type, size, g->client_oid, ack->id, is_live, reason);
 }
 
-static int events_matches(struct websocket_conn *w, enum exchg_pair p)
+static int events_matches(struct websocket_conn *w, struct exchg_test_event *ev)
 {
         return 0;
 }

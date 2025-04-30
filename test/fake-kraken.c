@@ -224,10 +224,14 @@ static void kraken_ws_read(struct websocket_conn *ws, struct buf *buf,
         buf_xsprintf(buf, "}, \"book-100\", \"%s\"]", wsname(up->pair));
 }
 
-static int kraken_ws_matches(struct websocket_conn *w, enum exchg_pair p)
+static int kraken_ws_matches(struct websocket_conn *w,
+                             struct exchg_test_event *ev)
 {
         struct kraken_websocket *k = w->priv;
-        return k->channels[p].subbed;
+        if (ev->type == EXCHG_EVENT_BOOK_UPDATE) {
+                return k->channels[ev->data.book.pair].subbed;
+        }
+        return 0;
 }
 
 static void kraken_ws_write(struct websocket_conn *w, const char *buf,
@@ -436,7 +440,8 @@ static void private_ws_read(struct websocket_conn *ws, struct buf *buf,
         }
 }
 
-static int private_ws_matches(struct websocket_conn *w, enum exchg_pair p)
+static int private_ws_matches(struct websocket_conn *w,
+                              struct exchg_test_event *ev)
 {
         return 0;
 }

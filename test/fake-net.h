@@ -53,7 +53,7 @@ struct websocket_conn {
         void (*read)(struct websocket_conn *, struct buf *buf,
                      struct exchg_test_event *);
         void (*write)(struct websocket_conn *, const char *buf, size_t len);
-        int (*matches)(struct websocket_conn *, enum exchg_pair);
+        int (*matches)(struct websocket_conn *, struct exchg_test_event *);
         void (*destroy)(struct websocket_conn *);
         void *priv;
 };

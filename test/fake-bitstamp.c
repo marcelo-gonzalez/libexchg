@@ -111,10 +111,15 @@ static void bitstamp_ws_read(struct websocket_conn *ws, struct buf *buf,
                      c->diff_subbed && (!c->full_subbed || c->full_unsubbed));
 }
 
-static int bitstamp_ws_matches(struct websocket_conn *w, enum exchg_pair p)
+static int bitstamp_ws_matches(struct websocket_conn *w,
+                               struct exchg_test_event *ev)
 {
         struct bitstamp_websocket *b = w->priv;
-        return b->channels[p].diff_subbed || b->channels[p].full_subbed;
+        if (ev->type == EXCHG_EVENT_BOOK_UPDATE) {
+                enum exchg_pair p = ev->data.book.pair;
+                return b->channels[p].diff_subbed || b->channels[p].full_subbed;
+        }
+        return 0;
 }
 
 static int get_channel(const char *c, enum exchg_pair *p, bool *is_full)

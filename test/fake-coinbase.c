@@ -970,10 +970,14 @@ bad:
         fputc('\n', stderr);
 }
 
-static int ws_matches(struct websocket_conn *w, enum exchg_pair p)
+static int ws_matches(struct websocket_conn *w, struct exchg_test_event *ev)
 {
         struct coinbase_websocket *c = w->priv;
-        return c->channels[p].l2_subbed;
+        if (ev->type == EXCHG_EVENT_BOOK_UPDATE) {
+                enum exchg_pair p = ev->data.book.pair;
+                return c->channels[p].l2_subbed;
+        }
+        return 0;
 }
 
 static void ws_destroy(struct websocket_conn *w)

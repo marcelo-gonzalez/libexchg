@@ -26,12 +26,6 @@ static void buf_init(struct buf *buf, size_t size)
 
 void http_conn_want_write(struct http_conn *req) {}
 
-static int ws_matches(struct websocket_conn *ws, struct exchg_test_event *ev)
-{
-        return ev->type == EXCHG_EVENT_BOOK_UPDATE && ws->established &&
-               ws->id == ev->id && ws->matches(ws, ev->data.book.pair);
-}
-
 void exchg_test_set_callback(struct exchg_net_context *ctx,
                              exchg_test_callback_t cb, void *private)
 {
@@ -100,24 +94,26 @@ void exchg_test_event_print(struct exchg_test_event *ev)
         printf("event: %s %s\n", exchange, event_str(ev->type));
 }
 
-static void set_matching_ws(struct exchg_net_context *ctx,
-                            struct test_event *ev)
+static bool set_ws_if_matches(struct test_event *ev, struct websocket_conn *ws)
+{
+        if (!ev->conn.ws && ev->conn_type == CONN_TYPE_WS &&
+            ws->id == ev->event.id && ws->established &&
+            ws->matches(ws, &ev->event)) {
+                ev->conn.ws = ws;
+                return true;
+        } else {
+                return false;
+        }
+}
+
+static void find_matching_ws(struct exchg_net_context *ctx,
+                             struct test_event *ev)
 {
         struct websocket_conn *ws;
         LIST_FOREACH(ws, &ctx->ws_list, list)
         {
-                if (ws_matches(ws, &ev->event)) {
-                        ev->conn.ws = ws;
-
-                        struct test_event *e;
-                        TAILQ_FOREACH(e, &ctx->events, list)
-                        {
-                                if (ws_matches(ws, &e->event)) {
-                                        e->conn.ws = ws;
-                                }
-                        }
+                if (set_ws_if_matches(ev, ws))
                         break;
-                }
         }
 }
 
@@ -132,7 +128,7 @@ void exchg_test_add_events(struct exchg_net_context *ctx, int n,
                 struct test_event *e = xzalloc(sizeof(*e));
                 memcpy(&e->event, &events[i], sizeof(events[i]));
                 e->conn_type = CONN_TYPE_WS;
-                set_matching_ws(ctx, e);
+                find_matching_ws(ctx, e);
                 TAILQ_INSERT_TAIL(&ctx->events, e, list);
         }
 }
@@ -209,7 +205,7 @@ void exchg_test_add_l2_events(struct exchg_net_context *ctx, int n,
                                 return;
                         }
                 }
-                set_matching_ws(ctx, event);
+                find_matching_ws(ctx, event);
                 TAILQ_INSERT_TAIL(&ctx->events, event, list);
         }
 }
@@ -419,7 +415,7 @@ static bool service(struct exchg_net_context *ctx)
         case CONN_TYPE_WS:
                 wsock = ev->conn.ws;
                 if (!wsock) {
-                        set_matching_ws(ctx, ev);
+                        find_matching_ws(ctx, ev);
                         wsock = ev->conn.ws;
                 }
                 if (!wsock) {
@@ -434,8 +430,7 @@ static bool service(struct exchg_net_context *ctx)
                         wsock->established = true;
                         TAILQ_FOREACH(e, &ctx->events, list)
                         {
-                                if (e != ev && ws_matches(wsock, &e->event))
-                                        e->conn.ws = wsock;
+                                set_ws_if_matches(e, wsock);
                         }
                         break;
                 case EXCHG_EVENT_WS_CLOSE:
