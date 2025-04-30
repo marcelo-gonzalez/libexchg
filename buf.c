@@ -25,12 +25,11 @@ void buf_free(struct buf *buf) {
 int buf_vsprintf(struct buf *buf, const char *fmt, va_list ap) {
 	int len;
 	va_list a;
-	bool copied = false;
 
 	va_copy(a, ap);
 
 	while ((len = vsnprintf(&buf->buf[buf->padding + buf->len],
-				buf->size - buf->len - buf->padding, fmt, ap)) >=
+				buf->size - buf->len - buf->padding, fmt, a)) >=
 	       buf->size - buf->len - buf->padding) {
 		int sz = 2*(buf->padding + buf->len + len + 1);
 		char *b = realloc(buf->buf, sz);
@@ -41,10 +40,8 @@ int buf_vsprintf(struct buf *buf, const char *fmt, va_list ap) {
 		buf->buf = b;
 		buf->size = sz;
 
-		if (copied)
-			va_end(ap);
-		va_copy(ap, a);
-		copied = true;
+		va_end(a);
+		va_copy(a, ap);
 	}
 	va_end(a);
 	buf->len += len;
