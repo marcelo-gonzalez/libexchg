@@ -883,6 +883,7 @@ void exchg_order_update(struct exchg_client *cl, struct order_info *oi,
                           new_status == EXCHG_ORDER_CANCELED ||
                           new_status == EXCHG_ORDER_ERROR;
         }
+
         if (update)
                 info->status = new_status;
 

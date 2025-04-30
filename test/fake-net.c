@@ -607,9 +607,7 @@ struct http_conn *fake_http_conn_alloc(struct exchg_net_context *ctx,
         struct test_event *prep_event = xzalloc(sizeof(*prep_event));
         struct test_event *read_event = xzalloc(sizeof(*read_event));
         struct exchg_test_event *prep_ev = &prep_event->event;
-        ;
         struct exchg_test_event *read_ev = &read_event->event;
-        ;
 
         read_event->conn_type = CONN_TYPE_HTTP;
         read_event->conn.http = req;

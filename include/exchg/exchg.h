@@ -79,6 +79,7 @@ enum exchg_order_status {
         EXCHG_ORDER_ERROR,
 };
 
+// TODO: type enum with more types instead of bool
 struct exchg_place_order_opts {
         bool immediate_or_cancel;
 };
@@ -86,10 +87,13 @@ struct exchg_place_order_opts {
 #define EXCHG_ORDER_ERR_SIZE 127
 
 struct exchg_order_info {
+        // TODO: change this ID to be a union over different order ID types
+        // specific to each exchange
         int64_t id;
         struct exchg_order order;
         struct exchg_place_order_opts opts;
         enum exchg_order_status status;
+        // TODO: clean up the meaning/handling of this field
         bool cancelation_failed;
         decimal_t filled_size;
         decimal_t avg_price;
