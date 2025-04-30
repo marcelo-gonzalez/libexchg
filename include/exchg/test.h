@@ -24,8 +24,8 @@ extern "C" {
 #define exchg_test_coinbase_password "coinbase-password-asdfasdf"
 
 enum exchg_test_event_type {
-        EXCHG_EVENT_HTTP_PREP,
-        EXCHG_EVENT_WS_PREP,
+        EXCHG_EVENT_HTTP_ESTABLISHED,
+        EXCHG_EVENT_WS_ESTABLISHED,
         EXCHG_EVENT_BOOK_UPDATE,
         /* The code under test has just placed an order, with details
         in the event's order_placed field. You can write to
@@ -50,6 +50,12 @@ enum exchg_test_event_type {
 struct exchg_test_l2_update {
         decimal_t price;
         decimal_t size;
+};
+
+struct exchg_test_websocket_event {
+        const char *host;
+        const char *path;
+        int conn_id;
 };
 
 struct exchg_test_event {
@@ -80,6 +86,8 @@ struct exchg_test_event {
                         const struct exchg_order_info info;
                         bool succeed;
                 } order_canceled;
+                struct exchg_test_websocket_event ws_established;
+                struct exchg_test_websocket_event ws_close;
         } data;
 };
 

@@ -36,10 +36,10 @@ void exchg_test_set_callback(struct exchg_net_context *ctx,
 static const char *event_str(enum exchg_test_event_type type)
 {
         switch (type) {
-        case EXCHG_EVENT_HTTP_PREP:
-                return "HTTP_PREP";
-        case EXCHG_EVENT_WS_PREP:
-                return "WS_PREP";
+        case EXCHG_EVENT_HTTP_ESTABLISHED:
+                return "HTTP_ESTABLISHED";
+        case EXCHG_EVENT_WS_ESTABLISHED:
+                return "WS_ESTABLISHED";
         case EXCHG_EVENT_BOOK_UPDATE:
                 return "BOOK_UPDATE";
         case EXCHG_EVENT_ORDER_PLACED:
@@ -96,14 +96,24 @@ void exchg_test_event_print(struct exchg_test_event *ev)
 
 static bool set_ws_if_matches(struct test_event *ev, struct websocket_conn *ws)
 {
+        bool ws_set = false;
         if (!ev->conn.ws && ev->conn_type == CONN_TYPE_WS &&
-            ws->id == ev->event.id && ws->established &&
-            ws->matches(ws, &ev->event)) {
-                ev->conn.ws = ws;
-                return true;
-        } else {
-                return false;
+            ws->id == ev->event.id && ws->established) {
+                switch (ev->event.type) {
+                case EXCHG_EVENT_WS_ESTABLISHED:
+                        ws_set = ws->conn_id ==
+                                 ev->event.data.ws_established.conn_id;
+                        break;
+                case EXCHG_EVENT_WS_CLOSE:
+                        ws_set = ws->conn_id == ev->event.data.ws_close.conn_id;
+                        break;
+                default:
+                        ws_set = ws->matches(ws, &ev->event);
+                }
         }
+        if (ws_set)
+                ev->conn.ws = ws;
+        return ws_set;
 }
 
 static void find_matching_ws(struct exchg_net_context *ctx,
@@ -121,8 +131,10 @@ void exchg_test_add_events(struct exchg_net_context *ctx, int n,
                            struct exchg_test_event *events)
 {
         for (int i = 0; i < n; i++) {
-                if (events[i].type != EXCHG_EVENT_BOOK_UPDATE) {
-                        fprintf(stderr, "only can add book updtes for now\n");
+                if (events[i].type != EXCHG_EVENT_BOOK_UPDATE &&
+                    events[i].type != EXCHG_EVENT_WS_CLOSE) {
+                        fprintf(stderr, "only can add websocket close and book "
+                                        "updates for now\n");
                         continue;
                 }
                 struct test_event *e = xzalloc(sizeof(*e));
@@ -420,12 +432,13 @@ static bool service(struct exchg_net_context *ctx)
                 }
                 if (!wsock) {
                         exchg_log("test: event with no matching websocket:\n"
-                                  "%s %d\n",
-                                  exchg_id_to_name(event->id), event->type);
+                                  "%s: %s\n",
+                                  exchg_id_to_name(event->id),
+                                  event_str(event->type));
                         break;
                 }
                 switch (event->type) {
-                case EXCHG_EVENT_WS_PREP:
+                case EXCHG_EVENT_WS_ESTABLISHED:
                         ws->on_established(wsock->user);
                         wsock->established = true;
                         TAILQ_FOREACH(e, &ctx->events, list)
@@ -434,13 +447,6 @@ static bool service(struct exchg_net_context *ctx)
                         }
                         break;
                 case EXCHG_EVENT_WS_CLOSE:
-                        TAILQ_FOREACH_SAFE(e, &ctx->events, list, tmp)
-                        {
-                                if (e != ev && e->conn_type == CONN_TYPE_WS &&
-                                    e->conn.ws == ev->conn.ws) {
-                                        free_event(ctx, e);
-                                }
-                        }
                         LIST_REMOVE(wsock, list);
                         ws->on_closed(wsock->user);
                         wsock->destroy(wsock);
@@ -448,7 +454,8 @@ static bool service(struct exchg_net_context *ctx)
                 default:
                         buf_init(&buf, 1 << 10);
                         wsock->read(wsock, &buf, event);
-                        ws->recv(wsock->user, buf_start(&buf), buf.len);
+                        if (ws->recv(wsock->user, buf_start(&buf), buf.len))
+                                ws_conn_close(wsock);
                         buf_free(&buf);
                         break;
                 }
@@ -456,7 +463,7 @@ static bool service(struct exchg_net_context *ctx)
         case CONN_TYPE_HTTP:
                 http_conn = ev->conn.http;
                 switch (event->type) {
-                case EXCHG_EVENT_HTTP_PREP:
+                case EXCHG_EVENT_HTTP_ESTABLISHED:
                         ret = http->add_headers(http_conn->user, http_conn);
                         // TODO: if (ret) close(req);
                         http->write(http_conn->user, &body, &body_len);
@@ -613,7 +620,7 @@ struct http_conn *fake_http_conn_alloc(struct exchg_net_context *ctx,
         prep_event->conn_type = CONN_TYPE_HTTP;
         prep_event->conn.http = req;
         prep_ev->id = exchange;
-        prep_ev->type = EXCHG_EVENT_HTTP_PREP;
+        prep_ev->type = EXCHG_EVENT_HTTP_ESTABLISHED;
         TAILQ_INSERT_HEAD(&ctx->events, prep_event, list);
 
         req->id = exchange;
@@ -707,6 +714,12 @@ void ws_conn_close(struct websocket_conn *ws)
         ev = &event->event;
         ev->type = EXCHG_EVENT_WS_CLOSE;
         ev->id = ws->id;
+        struct exchg_test_websocket_event event_data = {
+            .conn_id = ws->conn_id,
+            .host = ws->host,
+            .path = ws->path,
+        };
+        ev->data.ws_close = event_data;
         TAILQ_INSERT_HEAD(&ws->ctx->events, event, list);
 }
 
@@ -772,16 +785,24 @@ struct websocket_conn *ws_dial(struct exchg_net_context *ctx, const char *host,
         if (!ws)
                 return NULL;
 
+        ws->host = xstrdup(host);
+        ws->path = xstrdup(path);
+        ws->id = exchange;
+        ws->conn_id = ctx->next_conn_id++;
+
         struct test_event *event = xzalloc(sizeof(*event));
         struct exchg_test_event *ev = &event->event;
         event->conn_type = CONN_TYPE_WS;
         event->conn.ws = ws;
         ev->id = exchange;
-        ev->type = EXCHG_EVENT_WS_PREP;
+        ev->type = EXCHG_EVENT_WS_ESTABLISHED;
+        struct exchg_test_websocket_event event_data = {
+            .conn_id = ws->conn_id,
+            .host = host,
+            .path = path,
+        };
+        ev->data.ws_established = event_data;
         TAILQ_INSERT_HEAD(&ctx->events, event, list);
-        ws->host = xstrdup(host);
-        ws->path = xstrdup(path);
-        ws->id = exchange;
         return ws;
 }
 

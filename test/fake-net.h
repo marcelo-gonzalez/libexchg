@@ -47,6 +47,7 @@ struct websocket_conn {
         char *path;
         bool established;
         enum exchg_id id;
+        int conn_id;
         LIST_ENTRY(websocket_conn) list;
         void *user;
         struct exchg_net_context *ctx;
@@ -148,6 +149,7 @@ struct exchg_net_context {
                 LIST_HEAD(order_list, test_order) order_list;
         } servers[EXCHG_ALL_EXCHANGES];
         int next_order_id;
+        int next_conn_id;
         exchg_test_callback_t callback;
         void *cb_private;
         // TODO: char error[100];
