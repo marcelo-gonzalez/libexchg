@@ -24,70 +24,71 @@ extern "C" {
 #define exchg_test_coinbase_password "coinbase-password-asdfasdf"
 
 enum exchg_test_event_type {
-	EXCHG_EVENT_HTTP_PREP,
-	EXCHG_EVENT_WS_PREP,
-	EXCHG_EVENT_BOOK_UPDATE,
-	/* The code under test has just placed an order, with details
-	in the event's order_placed field. You can write to
-	order_placed.fill_size and order_placed.error to affect
-	what will happen immediately to the order */
-	EXCHG_EVENT_ORDER_PLACED,
-	/* The code under test has just tried canceling an order, with details
-	in the event's order_canceled field. You can write to
-	order_canceled.succeed to tell whether the cancelation should succeed */
-	EXCHG_EVENT_ORDER_CANCELED,
-	EXCHG_EVENT_ORDER_ACK,
-	EXCHG_EVENT_ORDER_CANCEL_ACK,
-	EXCHG_EVENT_PAIRS_DATA,
-	EXCHG_EVENT_BALANCES,
-	EXCHG_EVENT_WS_PROTOCOL,
-	EXCHG_EVENT_HTTP_PROTOCOL,
-	EXCHG_EVENT_WS_CLOSE,
-	EXCHG_EVENT_HTTP_CLOSE,
-	EXCHG_EVENT_TIMER,
+        EXCHG_EVENT_HTTP_PREP,
+        EXCHG_EVENT_WS_PREP,
+        EXCHG_EVENT_BOOK_UPDATE,
+        /* The code under test has just placed an order, with details
+        in the event's order_placed field. You can write to
+        order_placed.fill_size and order_placed.error to affect
+        what will happen immediately to the order */
+        EXCHG_EVENT_ORDER_PLACED,
+        /* The code under test has just tried canceling an order, with details
+        in the event's order_canceled field. You can write to
+        order_canceled.succeed to tell whether the cancelation should succeed */
+        EXCHG_EVENT_ORDER_CANCELED,
+        EXCHG_EVENT_ORDER_ACK,
+        EXCHG_EVENT_ORDER_CANCEL_ACK,
+        EXCHG_EVENT_PAIRS_DATA,
+        EXCHG_EVENT_BALANCES,
+        EXCHG_EVENT_WS_PROTOCOL,
+        EXCHG_EVENT_HTTP_PROTOCOL,
+        EXCHG_EVENT_WS_CLOSE,
+        EXCHG_EVENT_HTTP_CLOSE,
+        EXCHG_EVENT_TIMER,
 };
 
 struct exchg_test_l2_update {
-	decimal_t price;
-	decimal_t size;
+        decimal_t price;
+        decimal_t size;
 };
 
 struct exchg_test_event {
-	enum exchg_id id;
-	enum exchg_test_event_type type;
-	union {
-		// present in EXCHG_EVENT_BOOK_UPDATE events
-		struct exchg_test_l2_updates {
-			enum exchg_pair pair;
-			int num_bids;
-			int num_asks;
-			struct exchg_test_l2_update *bids;
-			struct exchg_test_l2_update *asks;
-			int bid_cap;
-			int ask_cap;
-		} book;
-		// present in EXCHG_EVENT_ORDER_ACK events
-		struct exchg_order_info order_ack;
-		// present in EXCHG_EVENT_ORDER_PLACED events
-		struct exchg_test_order_placed {
-			const int id;
-			const struct exchg_order order;
-			const struct exchg_place_order_opts opts;
-			decimal_t fill_size;
-			bool error;
-		} order_placed;
-		struct exchg_test_order_canceled {
-			const struct exchg_order_info info;
-			bool succeed;
-		} order_canceled;
-	} data;
+        enum exchg_id id;
+        enum exchg_test_event_type type;
+        union {
+                // present in EXCHG_EVENT_BOOK_UPDATE events
+                struct exchg_test_l2_updates {
+                        enum exchg_pair pair;
+                        int num_bids;
+                        int num_asks;
+                        struct exchg_test_l2_update *bids;
+                        struct exchg_test_l2_update *asks;
+                        int bid_cap;
+                        int ask_cap;
+                } book;
+                // present in EXCHG_EVENT_ORDER_ACK events
+                struct exchg_order_info order_ack;
+                // present in EXCHG_EVENT_ORDER_PLACED events
+                struct exchg_test_order_placed {
+                        const int id;
+                        const struct exchg_order order;
+                        const struct exchg_place_order_opts opts;
+                        decimal_t fill_size;
+                        bool error;
+                } order_placed;
+                struct exchg_test_order_canceled {
+                        const struct exchg_order_info info;
+                        bool succeed;
+                } order_canceled;
+        } data;
 };
 
-int exchg_test_l2_queue_order(struct exchg_test_l2_updates *u,
-			      bool is_bid, decimal_t *price, decimal_t *size);
+int exchg_test_l2_queue_order(struct exchg_test_l2_updates *u, bool is_bid,
+                              decimal_t *price, decimal_t *size);
 
 struct exchg_context *exchg_test_new(struct exchg_callbacks *c,
-				     const struct exchg_options *opts, void *user);
+                                     const struct exchg_options *opts,
+                                     void *user);
 
 void exchg_test_event_print(struct exchg_test_event *);
 
@@ -95,32 +96,31 @@ struct exchg_net_context;
 
 struct exchg_net_context *exchg_test_net_ctx(struct exchg_context *ctx);
 
-void exchg_test_add_events(struct exchg_net_context *ctx,
-			   int n, struct exchg_test_event *msgs);
+void exchg_test_add_events(struct exchg_net_context *ctx, int n,
+                           struct exchg_test_event *msgs);
 
 typedef void (*exchg_test_callback_t)(struct exchg_net_context *,
-				      struct exchg_test_event *, void *);
+                                      struct exchg_test_event *, void *);
 
 void exchg_test_set_callback(struct exchg_net_context *ctx,
-			     exchg_test_callback_t cb,
-			     void *private);
+                             exchg_test_callback_t cb, void *private);
 
 struct exchg_test_str_l2_update {
-	const char *price;
-	const char *size;
+        const char *price;
+        const char *size;
 };
 
 struct exchg_test_str_l2_updates {
-	enum exchg_id id;
-	enum exchg_pair pair;
-	// both null terminated
-	struct exchg_test_str_l2_update bids[10];
-	struct exchg_test_str_l2_update asks[10];
+        enum exchg_id id;
+        enum exchg_pair pair;
+        // both null terminated
+        struct exchg_test_str_l2_update bids[10];
+        struct exchg_test_str_l2_update asks[10];
 };
 
 // TODO: delete this or put it in a helpers section. keep API small
-void exchg_test_add_l2_events(struct exchg_net_context *ctx,
-			      int n, struct exchg_test_str_l2_updates *msgs);
+void exchg_test_add_l2_events(struct exchg_net_context *ctx, int n,
+                              struct exchg_test_str_l2_updates *msgs);
 
 // returns a modifiable array of length EXCHG_NUM_CCYS
 decimal_t *exchg_test_balances(struct exchg_net_context *ctx, enum exchg_id id);

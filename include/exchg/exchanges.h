@@ -9,12 +9,12 @@ extern "C" {
 #endif
 
 enum exchg_id {
-	// Bitstamp order placement not fully implemented/tested
-	EXCHG_BITSTAMP = 0,
-	EXCHG_GEMINI,
-	EXCHG_KRAKEN,
-	EXCHG_COINBASE,
-	EXCHG_ALL_EXCHANGES,
+        // Bitstamp order placement not fully implemented/tested
+        EXCHG_BITSTAMP = 0,
+        EXCHG_GEMINI,
+        EXCHG_KRAKEN,
+        EXCHG_COINBASE,
+        EXCHG_ALL_EXCHANGES,
 };
 
 const char *exchg_id_to_name(enum exchg_id id);

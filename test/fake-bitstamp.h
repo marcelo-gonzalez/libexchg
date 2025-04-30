@@ -7,10 +7,10 @@
 #include "net-backend.h"
 
 struct http_conn *bitstamp_http_dial(struct exchg_net_context *ctx,
-				  const char *path,
-				  const char *method, void *private);
+                                     const char *path, const char *method,
+                                     void *private);
 
 struct websocket_conn *bitstamp_ws_dial(struct exchg_net_context *ctx,
-				 const char *path, void *private);
+                                        const char *path, void *private);
 
 #endif
