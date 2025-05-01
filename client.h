@@ -39,7 +39,7 @@ struct http;
 
 struct order_info {
         struct exchg_order_info info;
-        void *req_private;
+        struct exchg_request_options options;
         char private[];
 };
 
@@ -55,15 +55,17 @@ struct exchg_client {
         int (*get_pair_info)(struct exchg_client *cl);
         int (*l2_subscribe)(struct exchg_client *cl, enum exchg_pair pair,
                             const struct exchg_websocket_options *options);
-        int (*get_balances)(struct exchg_client *cl, void *request_private);
+        int (*get_balances)(struct exchg_client *cl,
+                            const struct exchg_request_options *options);
         int64_t (*place_order)(struct exchg_client *cl,
                                const struct exchg_order *,
                                const struct exchg_place_order_opts *,
-                               void *request_private);
+                               const struct exchg_request_options *options);
         int (*edit_order)(struct exchg_client *cl, struct order_info *info,
                           const struct exchg_price_size *ps,
-                          void *request_private);
-        int (*cancel_order)(struct exchg_client *cl, struct order_info *info);
+                          const struct exchg_request_options *options);
+        int (*cancel_order)(struct exchg_client *cl, struct order_info *info,
+                            const struct exchg_request_options *options);
         int (*new_keypair)(struct exchg_client *cl, const unsigned char *key,
                            size_t len);
         int (*priv_ws_connect)(struct exchg_client *cl,
@@ -112,15 +114,16 @@ static inline void order_err_cpy(struct exchg_order_info *info,
                 strncpy(info->err, "<unknown>", EXCHG_ORDER_ERR_SIZE);
 }
 
-struct order_info *__exchg_new_order(struct exchg_client *cl,
-                                     const struct exchg_order *order,
-                                     const struct exchg_place_order_opts *opts,
-                                     void *req_private, size_t private_size,
-                                     int64_t id);
+struct order_info *
+__exchg_new_order(struct exchg_client *cl, const struct exchg_order *order,
+                  const struct exchg_place_order_opts *opts,
+                  const struct exchg_request_options *options,
+                  size_t private_size, int64_t id);
 struct order_info *exchg_new_order(struct exchg_client *cl,
                                    const struct exchg_order *order,
                                    const struct exchg_place_order_opts *opts,
-                                   void *req_private, size_t private_size);
+                                   const struct exchg_request_options *options,
+                                   size_t private_size);
 
 static inline bool order_status_done(enum exchg_order_status status)
 {
@@ -309,13 +312,16 @@ struct exchg_http_ops {
 
 struct http *exchg_http_get(const char *host, const char *path,
                             const struct exchg_http_ops *ops,
-                            struct exchg_client *cl);
+                            struct exchg_client *cl,
+                            const struct exchg_request_options *options);
 struct http *exchg_http_post(const char *host, const char *path,
                              const struct exchg_http_ops *ops,
-                             struct exchg_client *cl);
+                             struct exchg_client *cl,
+                             const struct exchg_request_options *options);
 struct http *exchg_http_delete(const char *host, const char *path,
                                const struct exchg_http_ops *ops,
-                               struct exchg_client *cl);
+                               struct exchg_client *cl,
+                               const struct exchg_request_options *options);
 
 void http_retry(struct http *);
 

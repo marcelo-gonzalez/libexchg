@@ -64,6 +64,7 @@ struct http {
         const struct exchg_http_ops *ops;
         bool print_data;
         bool want_retry;
+        bool debug;
         struct retry retry;
         LIST_ENTRY(http) list;
         char private[];
@@ -501,6 +502,9 @@ static void ws_on_closed(void *p)
 int http_add_header(struct http *h, const unsigned char *name,
                     const unsigned char *val, size_t len)
 {
+        if (unlikely(h->debug))
+                exchg_log("writing header to %s%s: %s %.*s\n", h->host, h->path,
+                          (char *)name, (int)len, (char *)val);
         return http_conn_add_header(h->conn, name, val, len);
 }
 
@@ -631,6 +635,10 @@ static int http_recv(void *p, char *in, size_t len)
         if (numtoks == 0)
                 return 0;
 
+        if (unlikely(h->debug))
+                exchg_log("received response (status %d) from %s%s: %.*s\n",
+                          http_conn_status(h->conn), h->host, h->path,
+                          (int)json_len, json);
         return h->ops->recv(h->cl, h, http_conn_status(h->conn), json, numtoks,
                             h->json.tokens);
 }
@@ -641,6 +649,9 @@ static void http_write(void *p, char **buf, size_t *len)
 
         *buf = buf_start(&h->body);
         *len = h->body.len;
+        if (unlikely(h->debug))
+                exchg_log("writing body to %s%s: %.*s\n", h->host, h->path,
+                          (int)*len, *buf);
 }
 
 static void http_on_closed(void *p)
@@ -681,7 +692,8 @@ static int json_alloc(struct json *json)
 
 static struct http *exchg_http_dial(const char *host, const char *path,
                                     const struct exchg_http_ops *ops,
-                                    struct exchg_client *cl, const char *method)
+                                    struct exchg_client *cl, const char *method,
+                                    const struct exchg_request_options *options)
 {
         struct http *h = malloc(sizeof(*h) + ops->conn_data_size);
         if (!h) {
@@ -712,6 +724,9 @@ static struct http *exchg_http_dial(const char *host, const char *path,
                 goto oom;
         if (json_alloc(&h->json))
                 goto oom;
+        // TODO: maybe also keep options->user here instead of in the
+        // exchange specific code
+        h->debug = options ? options->debug : false;
         return h;
 
 oom:
@@ -725,23 +740,26 @@ oom:
 
 struct http *exchg_http_get(const char *host, const char *path,
                             const struct exchg_http_ops *ops,
-                            struct exchg_client *cl)
+                            struct exchg_client *cl,
+                            const struct exchg_request_options *options)
 {
-        return exchg_http_dial(host, path, ops, cl, "GET");
+        return exchg_http_dial(host, path, ops, cl, "GET", options);
 }
 
 struct http *exchg_http_post(const char *host, const char *path,
                              const struct exchg_http_ops *ops,
-                             struct exchg_client *cl)
+                             struct exchg_client *cl,
+                             const struct exchg_request_options *options)
 {
-        return exchg_http_dial(host, path, ops, cl, "POST");
+        return exchg_http_dial(host, path, ops, cl, "POST", options);
 }
 
 struct http *exchg_http_delete(const char *host, const char *path,
                                const struct exchg_http_ops *ops,
-                               struct exchg_client *cl)
+                               struct exchg_client *cl,
+                               const struct exchg_request_options *options)
 {
-        return exchg_http_dial(host, path, ops, cl, "DELETE");
+        return exchg_http_dial(host, path, ops, cl, "DELETE", options);
 }
 
 void websocket_log_options_discrepancies(
@@ -825,38 +843,37 @@ bool exchg_pair_info_current(struct exchg_client *cl)
         return cl->pair_info_current;
 }
 
-int exchg_get_balances(struct exchg_client *cl, void *req_private)
+int exchg_get_balances(struct exchg_client *cl,
+                       const struct exchg_request_options *options)
 {
-        return cl->get_balances(cl, req_private);
+        return cl->get_balances(cl, options);
 }
 
 void *websocket_private(struct websocket *w) { return w->private; }
 
 void *http_private(struct http *h) { return h->private; }
 
-struct order_info *__exchg_new_order(struct exchg_client *cl,
-                                     const struct exchg_order *order,
-                                     const struct exchg_place_order_opts *opts,
-                                     void *req_private, size_t private_size,
-                                     int64_t id)
+struct order_info *
+__exchg_new_order(struct exchg_client *cl, const struct exchg_order *order,
+                  const struct exchg_place_order_opts *opts,
+                  const struct exchg_request_options *options,
+                  size_t private_size, int64_t id)
 {
         struct order_info *info = malloc(sizeof(*info) + private_size);
         if (!info) {
                 exchg_log("%s: OOM\n", __func__);
                 return NULL;
         }
-        info->req_private = req_private;
+        memset(info, 0, sizeof(*info) + private_size);
+        if (options)
+                memcpy(&info->options, options, sizeof(*options));
         info->info.id = id;
         memcpy(&info->info.order, order, sizeof(*order));
         if (opts)
                 memcpy(&info->info.opts, opts, sizeof(info->info.opts));
-        else
-                memset(&info->info.opts, 0, sizeof(info->info.opts));
+
         info->info.status = EXCHG_ORDER_UNSUBMITTED;
         info->info.cancelation_failed = false;
-        memset(&info->info.filled_size, 0, sizeof(decimal_t));
-        memset(&info->info.avg_price, 0, sizeof(decimal_t));
-        info->info.err[0] = 0;
         g_hash_table_insert(cl->orders, &info->info.id, info);
         return info;
 }
@@ -864,11 +881,12 @@ struct order_info *__exchg_new_order(struct exchg_client *cl,
 struct order_info *exchg_new_order(struct exchg_client *cl,
                                    const struct exchg_order *order,
                                    const struct exchg_place_order_opts *opts,
-                                   void *req_private, size_t private_size)
+                                   const struct exchg_request_options *options,
+                                   size_t private_size)
 {
         // TODO: current_micros() is fine for now but a collision is not
         // absolutely out of the question. should fix that
-        return __exchg_new_order(cl, order, opts, req_private, private_size,
+        return __exchg_new_order(cl, order, opts, options, private_size,
                                  current_micros());
 }
 
@@ -939,14 +957,15 @@ void exchg_order_update(struct exchg_client *cl, struct order_info *oi,
 
         if (likely(should_callback && cl->ctx->callbacks.on_order_update))
                 cl->ctx->callbacks.on_order_update(cl, info, cl->ctx->user,
-                                                   oi->private);
+                                                   oi->options.user);
         if (order_status_done(info->status))
                 order_info_free(cl, oi);
 }
 
 int64_t exchg_place_order(struct exchg_client *cl,
                           const struct exchg_order *order,
-                          const struct exchg_place_order_opts *opts, void *priv)
+                          const struct exchg_place_order_opts *opts,
+                          const struct exchg_request_options *options)
 {
         if (unlikely(cl->ctx->opts.dry_run)) {
                 const char *action;
@@ -967,11 +986,12 @@ int64_t exchg_place_order(struct exchg_client *cl,
                        exchg_pair_to_str(order->pair), atfor, px);
                 return 0;
         }
-        return cl->place_order(cl, order, opts, priv);
+        return cl->place_order(cl, order, opts, options);
 }
 
 int exchg_edit_order(struct exchg_client *cl, int64_t id,
-                     const struct exchg_price_size *ps, void *request_private)
+                     const struct exchg_price_size *ps,
+                     const struct exchg_request_options *options)
 {
         if (unlikely(!ps->price && !ps->size)) {
                 exchg_log("%s: nothing to do with no new price or size\n",
@@ -989,10 +1009,11 @@ int exchg_edit_order(struct exchg_client *cl, int64_t id,
                 exchg_log("%s: %s not implemented\n", cl->name, __func__);
                 return -1;
         }
-        return cl->edit_order(cl, info, ps, request_private);
+        return cl->edit_order(cl, info, ps, options);
 }
 
-int exchg_cancel_order(struct exchg_client *cl, int64_t id)
+int exchg_cancel_order(struct exchg_client *cl, int64_t id,
+                       const struct exchg_request_options *options)
 {
         if (unlikely(cl->ctx->opts.dry_run)) {
                 // kind of tough, but what should dry run do? remember
@@ -1009,7 +1030,7 @@ int exchg_cancel_order(struct exchg_client *cl, int64_t id)
                           cl->name, id);
                 return -1;
         }
-        return cl->cancel_order(cl, info);
+        return cl->cancel_order(cl, info, options);
 }
 
 int exchg_realloc_order_bufs(struct exchg_client *cl, int n)

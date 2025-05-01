@@ -703,7 +703,7 @@ static int bitstamp_l2_subscribe(struct exchg_client *cl, enum exchg_pair pair,
 static int bitstamp_get_pair_info(struct exchg_client *cl)
 {
         if (!exchg_http_get("www.bitstamp.net", "/api/v2/trading-pairs-info/",
-                            &get_info_ops, cl))
+                            &get_info_ops, cl, NULL))
                 return -1;
         return 0;
 }
@@ -849,16 +849,18 @@ static struct exchg_http_ops get_balances_ops = {
     .conn_data_size = sizeof(struct http_data),
 };
 
-static int bitstamp_get_balances(struct exchg_client *cl, void *request_private)
+static int bitstamp_get_balances(struct exchg_client *cl,
+                                 const struct exchg_request_options *options)
 {
-        struct http *http = exchg_http_post(
-            "www.bitstamp.net", "/api/v2/balance/", &get_balances_ops, cl);
+        struct http *http =
+            exchg_http_post("www.bitstamp.net", "/api/v2/balance/",
+                            &get_balances_ops, cl, options);
         if (!http)
                 return -1;
         struct http_data *h = http_private(http);
         snprintf(h->path, sizeof(h->path), "/api/v2/balance/");
         h->payload_len = 0;
-        h->request_private = request_private;
+        h->request_private = options ? options->user : NULL;
         return 0;
 }
 
@@ -1001,7 +1003,7 @@ const static struct exchg_http_ops place_order_ops = {
 static int64_t bitstamp_place_order(struct exchg_client *cl,
                                     const struct exchg_order *order,
                                     const struct exchg_place_order_opts *opts,
-                                    void *private)
+                                    const struct exchg_request_options *options)
 {
         char amount[30], price[30];
         char path[50];
@@ -1009,8 +1011,8 @@ static int64_t bitstamp_place_order(struct exchg_client *cl,
         snprintf(path, sizeof(path), "/api/v2/%s/%s/",
                  order->side == EXCHG_SIDE_BUY ? "buy" : "sell",
                  exchg_pair_to_str(order->pair));
-        struct http *http =
-            exchg_http_post("www.bitstamp.net", path, &place_order_ops, cl);
+        struct http *http = exchg_http_post("www.bitstamp.net", path,
+                                            &place_order_ops, cl, options);
         if (!http)
                 return -1;
         struct http_data *h = http_private(http);
@@ -1019,7 +1021,7 @@ static int64_t bitstamp_place_order(struct exchg_client *cl,
         decimal_to_str(amount, &order->size);
         decimal_to_str(price, &order->price);
 
-        struct order_info *info = exchg_new_order(cl, order, opts, private, 0);
+        struct order_info *info = exchg_new_order(cl, order, opts, options, 0);
         if (!info) {
                 http_close(http);
                 return -ENOMEM;
@@ -1039,7 +1041,8 @@ static int64_t bitstamp_place_order(struct exchg_client *cl,
 }
 
 static int bitstamp_cancel_order(struct exchg_client *cl,
-                                 struct order_info *info)
+                                 struct order_info *info,
+                                 const struct exchg_request_options *options)
 {
         printf("sorry dunno how to cancel %s orders\n", exchg_name(cl));
         return -1;

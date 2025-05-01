@@ -163,6 +163,13 @@ struct exchg_websocket_options {
         bool log_messages;
 };
 
+struct exchg_request_options {
+        // If true, log any HTTP data sent or received
+        bool debug;
+        // Will be passed back to the user in callbacks
+        void *user;
+};
+
 // ---------------- actions -----------------------
 // ------------------------------------------------
 int exchg_set_keypair(struct exchg_client *cl, size_t public_len,
@@ -184,14 +191,15 @@ int exchg_l2_subscribe(struct exchg_context *ctx, enum exchg_id id,
                        enum exchg_pair pair,
                        const struct exchg_websocket_options *options);
 
-int exchg_get_balances(struct exchg_client *cl, void *req_private);
+int exchg_get_balances(struct exchg_client *cl,
+                       const struct exchg_request_options *);
 
 // Returns < 0 on error, otherwise an ID that will match the ID in the struct
 // order_info passed in the on_order_update() callback.
 // Pass NULL options for defaults.
 int64_t exchg_place_order(struct exchg_client *cl, const struct exchg_order *,
                           const struct exchg_place_order_opts *,
-                          void *request_private);
+                          const struct exchg_request_options *);
 
 struct exchg_price_size {
         const decimal_t *price;
@@ -199,14 +207,17 @@ struct exchg_price_size {
 };
 
 int exchg_edit_order(struct exchg_client *cl, int64_t id,
-                     const struct exchg_price_size *, void *request_private);
+                     const struct exchg_price_size *,
+                     const struct exchg_request_options *);
 
 // `id` must be an id previously returned by a call to exchg_place_order() on
 // this struct exchg_client. Returns nonzero on error. If successful, the order
 // isn't guaranteed to have been canceled until the on_order_update() callback
 // gives EXCHG_ORDER_CANCELED. If we later find that the cancelation was
 // not successful, an order update will be given with cancelation_failed=true
-int exchg_cancel_order(struct exchg_client *cl, int64_t id);
+// FIXME: For now options->user is ignored
+int exchg_cancel_order(struct exchg_client *cl, int64_t id,
+                       const struct exchg_request_options *);
 
 // If available, subscribe to private data feed that will give updates
 // on our orders in the future.

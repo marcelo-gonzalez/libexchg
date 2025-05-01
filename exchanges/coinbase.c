@@ -1062,7 +1062,7 @@ static struct exchg_http_ops get_info_ops = {
 static int coinbase_get_pair_info(struct exchg_client *cl)
 {
         if (!exchg_http_get("api.pro.coinbase.com", "/products", &get_info_ops,
-                            cl))
+                            cl, NULL))
                 return -1;
         return 0;
 }
@@ -1203,14 +1203,15 @@ static int coinbase_http_auth(struct coinbase_auth *auth,
                              http_body(http), http_body_len(http));
 }
 
-static int coinbase_get_balances(struct exchg_client *cl, void *req_private)
+static int coinbase_get_balances(struct exchg_client *cl,
+                                 const struct exchg_request_options *options)
 {
         struct http *http = exchg_http_get("api.pro.coinbase.com", "/accounts",
-                                           &get_balances_ops, cl);
+                                           &get_balances_ops, cl, options);
         if (!http)
                 return -1;
         struct http_data *data = http_private(http);
-        data->private = req_private;
+        data->private = options ? options->user : NULL;
         if (coinbase_http_auth(&data->auth, &cl->hmac_ctx, http)) {
                 http_close(http);
                 return -1;
@@ -1406,8 +1407,9 @@ static bool place_order_work(struct exchg_client *cl, void *p)
         if (!cl->pair_info_current)
                 return false;
 
-        struct http *http = exchg_http_post("api.pro.coinbase.com", "/orders",
-                                            &place_order_ops, cl);
+        struct http *http =
+            exchg_http_post("api.pro.coinbase.com", "/orders", &place_order_ops,
+                            cl, &info->options);
         if (!http) {
                 strncpy(info->info.err, "HTTP POST failed",
                         EXCHG_ORDER_ERR_SIZE);
@@ -1422,29 +1424,27 @@ static bool place_order_work(struct exchg_client *cl, void *p)
 static struct order_info *new_order(struct exchg_client *cl,
                                     const struct exchg_order *order,
                                     const struct exchg_place_order_opts *opts,
-                                    void *private)
+                                    const struct exchg_request_options *options)
 {
-        struct order_info *oi = exchg_new_order(cl, order, opts, private,
+        struct order_info *oi = exchg_new_order(cl, order, opts, options,
                                                 sizeof(struct coinbase_order));
-        if (!oi)
-                return NULL;
-        memset(order_info_private(oi), 0, sizeof(struct coinbase_order));
         return oi;
 }
 
 static int64_t coinbase_place_order(struct exchg_client *cl,
                                     const struct exchg_order *order,
                                     const struct exchg_place_order_opts *opts,
-                                    void *private)
+                                    const struct exchg_request_options *options)
 {
         struct order_info *info;
 
         if (likely(cl->pair_info_current)) {
-                struct http *http = exchg_http_post(
-                    "api.pro.coinbase.com", "/orders", &place_order_ops, cl);
+                struct http *http =
+                    exchg_http_post("api.pro.coinbase.com", "/orders",
+                                    &place_order_ops, cl, options);
                 if (!http)
                         return -1;
-                info = new_order(cl, order, opts, private);
+                info = new_order(cl, order, opts, options);
                 if (!info) {
                         http_close(http);
                         return -1;
@@ -1457,7 +1457,7 @@ static int64_t coinbase_place_order(struct exchg_client *cl,
         } else {
                 if (get_pair_info(cl))
                         return -1;
-                info = new_order(cl, order, opts, private);
+                info = new_order(cl, order, opts, options);
                 if (!info)
                         return -1;
                 if (queue_work(cl, place_order_work, info)) {
@@ -1506,7 +1506,8 @@ static struct exchg_http_ops cancel_order_ops = {
 };
 
 static int coinbase_cancel_order(struct exchg_client *cl,
-                                 struct order_info *info)
+                                 struct order_info *info,
+                                 const struct exchg_request_options *options)
 {
         struct coinbase_client *cb = client_private(cl);
         if (unlikely(info->info.status == EXCHG_ORDER_UNSUBMITTED)) {
@@ -1524,7 +1525,7 @@ static int coinbase_cancel_order(struct exchg_client *cl,
                 cb->pair_info[info->info.order.pair].id);
 
         struct http *http = exchg_http_delete("api.pro.coinbase.com", path,
-                                              &cancel_order_ops, cl);
+                                              &cancel_order_ops, cl, options);
         if (!http)
                 return -1;
         struct http_data *data = http_private(http);

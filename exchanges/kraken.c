@@ -234,8 +234,9 @@ static struct exchg_http_ops token_ops = {
 static int get_token(struct exchg_client *cl)
 {
         struct kraken_client *kc = client_private(cl);
-        struct http *http = exchg_http_post(
-            "api.kraken.com", "/0/private/GetWebSocketsToken", &token_ops, cl);
+        struct http *http =
+            exchg_http_post("api.kraken.com", "/0/private/GetWebSocketsToken",
+                            &token_ops, cl, NULL);
         if (!http)
                 return -1;
         if (private_http_auth(cl, http)) {
@@ -1171,7 +1172,7 @@ static int kraken_l2_subscribe(struct exchg_client *cl, enum exchg_pair pair,
 static int kraken_get_pair_info(struct exchg_client *cl)
 {
         if (!exchg_http_get("api.kraken.com", "/0/public/AssetPairs",
-                            &get_info_ops, cl))
+                            &get_info_ops, cl, NULL))
                 return -1;
         return 0;
 }
@@ -1260,14 +1261,15 @@ static struct exchg_http_ops balances_ops = {
     .conn_data_size = sizeof(struct http_data),
 };
 
-static int kraken_get_balances(struct exchg_client *cl, void *req_private)
+static int kraken_get_balances(struct exchg_client *cl,
+                               const struct exchg_request_options *options)
 {
         struct http *http = exchg_http_post(
-            "api.kraken.com", "/0/private/Balance", &balances_ops, cl);
+            "api.kraken.com", "/0/private/Balance", &balances_ops, cl, options);
         if (!http)
                 return -1;
         struct http_data *h = http_private(http);
-        h->request_private = req_private;
+        h->request_private = options ? options->user : NULL;
 
         if (private_http_auth(cl, http)) {
                 http_close(http);
@@ -1651,8 +1653,9 @@ static int http_post_add_order(struct exchg_client *cl, struct order_info *oi,
                 return -1;
         }
 
-        struct http *http = exchg_http_post(
-            "api.kraken.com", "/0/private/AddOrder", &add_order_ops, cl);
+        struct http *http =
+            exchg_http_post("api.kraken.com", "/0/private/AddOrder",
+                            &add_order_ops, cl, &oi->options);
         if (!http) {
                 if (update_on_err)
                         order_err_update(cl, oi, "HTTP POST failed");
@@ -1715,12 +1718,12 @@ static unsigned int get_reqid(struct exchg_client *cl)
 static int64_t kraken_place_order(struct exchg_client *cl,
                                   const struct exchg_order *order,
                                   const struct exchg_place_order_opts *opts,
-                                  void *request_private)
+                                  const struct exchg_request_options *options)
 {
         struct kraken_client *kkn = client_private(cl);
 
         struct order_info *info =
-            __exchg_new_order(cl, order, opts, request_private,
+            __exchg_new_order(cl, order, opts, options,
                               sizeof(struct kraken_order), get_reqid(cl));
         if (!info)
                 return -ENOMEM;
@@ -1887,7 +1890,8 @@ static struct exchg_http_ops cancel_order_ops = {
     .conn_data_size = sizeof(struct http_data),
 };
 
-static int kraken_cancel_order(struct exchg_client *cl, struct order_info *info)
+static int kraken_cancel_order(struct exchg_client *cl, struct order_info *info,
+                               const struct exchg_request_options *options)
 {
         struct kraken_client *kkn = client_private(cl);
         struct kraken_order *ko = order_info_private(info);
@@ -1913,7 +1917,7 @@ static int kraken_cancel_order(struct exchg_client *cl, struct order_info *info)
         } else {
                 struct http *http =
                     exchg_http_post("api.kraken.com", "/0/private/CancelOrder",
-                                    &cancel_order_ops, cl);
+                                    &cancel_order_ops, cl, options);
                 if (!http)
                         return -1;
                 if (kraken_body_sprintf(http, "txid=%" PRId64, info->info.id) <

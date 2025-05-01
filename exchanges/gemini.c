@@ -452,9 +452,11 @@ struct gemini_order_update {
 struct gemini_order {
         int64_t server_oid;
         bool want_cancel;
+        struct exchg_request_options cancel_options;
 };
 
-static int send_order_cancel(struct exchg_client *cl, struct order_info *info);
+static int send_order_cancel(struct exchg_client *cl, struct order_info *info,
+                             const struct exchg_request_options *options);
 
 static void order_update(struct exchg_client *cl, struct order_info *oi,
                          enum exchg_order_status new_status,
@@ -464,7 +466,7 @@ static void order_update(struct exchg_client *cl, struct order_info *oi,
 
         if (g->want_cancel && g->server_oid != -1 &&
             !order_status_done(new_status))
-                send_order_cancel(cl, oi);
+                send_order_cancel(cl, oi, &g->cancel_options);
         struct order_update update = {
             .new_status = new_status,
             .filled_size = new_size,
@@ -580,11 +582,12 @@ const static struct exchg_http_ops cancel_http_ops = {
     .conn_data_size = sizeof(struct http_data) + sizeof(int64_t),
 };
 
-static int send_order_cancel(struct exchg_client *cl, struct order_info *info)
+static int send_order_cancel(struct exchg_client *cl, struct order_info *info,
+                             const struct exchg_request_options *options)
 {
         struct gemini_order *order = order_info_private(info);
         struct http *http = exchg_http_post(gemini_host(cl), "/v1/order/cancel",
-                                            &cancel_http_ops, cl);
+                                            &cancel_http_ops, cl, options);
         if (!http)
                 return -1;
 
@@ -604,13 +607,16 @@ static int send_order_cancel(struct exchg_client *cl, struct order_info *info)
         return 0;
 }
 
-static int gemini_cancel_order(struct exchg_client *cl, struct order_info *info)
+static int gemini_cancel_order(struct exchg_client *cl, struct order_info *info,
+                               const struct exchg_request_options *options)
 {
         struct gemini_order *g = order_info_private(info);
         if (likely(g->server_oid != -1))
-                return send_order_cancel(cl, info);
+                return send_order_cancel(cl, info, options);
         else {
                 g->want_cancel = true;
+                if (options)
+                        memcpy(&g->cancel_options, options, sizeof(*options));
                 return 0;
         }
 }
@@ -729,16 +735,16 @@ const static struct exchg_http_ops trade_http_ops = {
     .conn_data_size = sizeof(struct http_data) + sizeof(int64_t),
 };
 
-static int64_t gemini_place_order(struct exchg_client *cl,
-                                  const struct exchg_order *order,
-                                  const struct exchg_place_order_opts *opts,
-                                  void *private)
+static int64_t
+gemini_place_order(struct exchg_client *cl, const struct exchg_order *order,
+                   const struct exchg_place_order_opts *opts,
+                   const struct exchg_request_options *req_options)
 {
         struct http *http = exchg_http_post(gemini_host(cl), "/v1/order/new",
-                                            &trade_http_ops, cl);
+                                            &trade_http_ops, cl, req_options);
         if (!http)
                 return -1;
-        struct order_info *oi = exchg_new_order(cl, order, opts, private,
+        struct order_info *oi = exchg_new_order(cl, order, opts, req_options,
                                                 sizeof(struct gemini_order));
         if (!oi) {
                 http_close(http);
@@ -880,10 +886,11 @@ const static struct exchg_http_ops balances_http_ops = {
     .conn_data_size = sizeof(struct http_data) + sizeof(void *),
 };
 
-static int gemini_get_balances(struct exchg_client *cl, void *req_private)
+static int gemini_get_balances(struct exchg_client *cl,
+                               const struct exchg_request_options *options)
 {
         struct http *http = exchg_http_post(gemini_host(cl), "/v1/balances",
-                                            &balances_http_ops, cl);
+                                            &balances_http_ops, cl, options);
         if (!http)
                 return -1;
         struct http_data *data = http_private(http);
@@ -896,7 +903,7 @@ static int gemini_get_balances(struct exchg_client *cl, void *req_private)
                 http_close(http);
                 return -1;
         }
-        *(void **)http_data_private(data) = req_private;
+        *(void **)http_data_private(data) = options ? options->user : NULL;
         return 0;
 }
 
