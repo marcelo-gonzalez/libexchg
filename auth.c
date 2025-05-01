@@ -3,6 +3,7 @@
 
 #include <glib.h>
 #include <glib/gi18n.h>
+#include <openssl/err.h>
 #include <openssl/evp.h>
 #include <openssl/params.h>
 #include <stdio.h>
@@ -16,11 +17,13 @@ int hmac_ctx_alloc(struct hmac_ctx *h, const char *digest)
         EVP_MAC *mac = EVP_MAC_fetch(NULL, "HMAC", NULL);
         if (!mac) {
                 fprintf(stderr, "failed fetching \"HMAC\" EVP_MAC\n");
+                ERR_print_errors_fp(stderr);
                 return -1;
         }
         EVP_MAC_CTX *ctx = EVP_MAC_CTX_new(mac);
         if (!ctx) {
                 fprintf(stderr, "EVP_MAC_CTX_new() failed\n");
+                ERR_print_errors_fp(stderr);
                 EVP_MAC_free(mac);
                 return -1;
         }
@@ -32,6 +35,7 @@ int hmac_ctx_alloc(struct hmac_ctx *h, const char *digest)
 
         if (!EVP_MAC_CTX_set_params(ctx, params)) {
                 fprintf(stderr, "EVP_MAC_CTX_set_params() failed\n");
+                ERR_print_errors_fp(stderr);
                 EVP_MAC_free(mac);
                 EVP_MAC_CTX_free(ctx);
                 return -1;
@@ -48,6 +52,7 @@ int hmac_ctx_setkey(struct hmac_ctx *ctx, const unsigned char *key,
         if (!EVP_MAC_init(ctx->ctx, key, keylen, NULL)) {
                 fprintf(stderr, "EVP_MAC_init() with keylen %zu failed\n",
                         keylen);
+                ERR_print_errors_fp(stderr);
                 return -1;
         }
         return 0;
@@ -126,17 +131,20 @@ static size_t hmac_ctx_mac(struct hmac_ctx *ctx, const unsigned char *msg,
 {
         if (!EVP_MAC_init(ctx->ctx, NULL, 0, NULL)) {
                 fprintf(stderr, "EVP_MAC_init() failure\n");
+                ERR_print_errors_fp(stderr);
                 return -1;
         }
-        if (!EVP_MAC_update(ctx->ctx, msg, len))
-                goto out_err;
-        if (!EVP_MAC_final(ctx->ctx, hmac, hmac_len, hmac_size))
-                goto out_err;
+        if (!EVP_MAC_update(ctx->ctx, msg, len)) {
+                fprintf(stderr, "EVP_MAC_update() failure\n");
+                ERR_print_errors_fp(stderr);
+                return -1;
+        }
+        if (!EVP_MAC_final(ctx->ctx, hmac, hmac_len, hmac_size)) {
+                fprintf(stderr, "EVP_MAC_final() failure\n");
+                ERR_print_errors_fp(stderr);
+                return -1;
+        }
         return 0;
-
-out_err:
-        fprintf(stderr, "HMAC computation failure\n");
-        return -1;
 }
 
 int hmac_ctx_hex(struct hmac_ctx *ctx, const unsigned char *msg, size_t len,
