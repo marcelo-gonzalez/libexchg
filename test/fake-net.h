@@ -171,6 +171,9 @@ struct test_order *on_order_placed(struct exchg_net_context *ctx,
                                    enum exchg_id id,
                                    struct exchg_order_info *ack,
                                    size_t private_size);
+bool on_order_edited(struct exchg_net_context *ctx, enum exchg_id id,
+                     struct test_order *o, const decimal_t *new_price,
+                     const decimal_t *new_size);
 bool on_order_canceled(struct exchg_net_context *ctx, enum exchg_id id,
                        struct test_order *o);
 

@@ -952,14 +952,21 @@ static int place_order_recv(struct exchg_client *cl, struct http *http,
                 new_status = EXCHG_ORDER_PENDING;
         else
                 new_status = EXCHG_ORDER_ERROR;
-        exchg_order_update(cl, oi, new_status, &size, false);
+        struct order_update update = {
+            .new_status = new_status,
+            .filled_size = &size,
+        };
+        exchg_order_update(cl, oi, &update);
         return 0;
 
 bad:
         snprintf(info->err, EXCHG_ORDER_ERR_SIZE, "Bitstamp sent bad update");
         exchg_log("%s: %s:\n", info->err, problem);
         json_fprintln(stderr, json, &toks[0]);
-        exchg_order_update(cl, oi, EXCHG_ORDER_ERROR, NULL, false);
+        struct order_update err_update = {
+            .new_status = EXCHG_ORDER_ERROR,
+        };
+        exchg_order_update(cl, oi, &err_update);
         return 0;
 }
 
@@ -974,7 +981,10 @@ static void place_order_on_err(struct exchg_client *cl, struct http *http,
                 strncpy(info->err, err, EXCHG_ORDER_ERR_SIZE);
         else
                 strncpy(info->err, "<unknown>", EXCHG_ORDER_ERR_SIZE);
-        exchg_order_update(cl, oi, EXCHG_ORDER_ERROR, NULL, false);
+        struct order_update update = {
+            .new_status = EXCHG_ORDER_ERROR,
+        };
+        exchg_order_update(cl, oi, &update);
 }
 
 const static struct exchg_http_ops place_order_ops = {

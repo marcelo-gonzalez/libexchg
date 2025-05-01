@@ -185,6 +185,14 @@ int64_t exchg_place_order(struct exchg_client *cl, const struct exchg_order *,
                           const struct exchg_place_order_opts *,
                           void *request_private);
 
+struct exchg_price_size {
+        const decimal_t *price;
+        const decimal_t *size;
+};
+
+int exchg_edit_order(struct exchg_client *cl, int64_t id,
+                     const struct exchg_price_size *, void *request_private);
+
 // `id` must be an id previously returned by a call to exchg_place_order() on
 // this struct exchg_client. Returns nonzero on error. If successful, the order
 // isn't guaranteed to have been canceled until the on_order_update() callback

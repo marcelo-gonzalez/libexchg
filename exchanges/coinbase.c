@@ -320,7 +320,12 @@ static void order_update(struct exchg_client *cl, struct order_info *oi,
 
         if (order_status_done(new_status) && c->id)
                 g_hash_table_remove(cb->orders, c->id);
-        exchg_order_update(cl, oi, new_status, new_size, cancel_failed);
+        struct order_update update = {
+            .new_status = new_status,
+            .filled_size = new_size,
+            .cancel_failed = cancel_failed,
+        };
+        exchg_order_update(cl, oi, &update);
 }
 
 static int msg_finish(struct exchg_client *cl, struct ws_msg *msg, char *json,

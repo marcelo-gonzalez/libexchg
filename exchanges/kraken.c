@@ -337,7 +337,12 @@ static void order_update(struct exchg_client *cl, struct order_info *oi,
 {
         if (order_status_done(new_status))
                 cancel_done(cl, oi);
-        exchg_order_update(cl, oi, new_status, new_size, cancel_failed);
+        struct order_update update = {
+            .new_status = new_status,
+            .filled_size = new_size,
+            .cancel_failed = cancel_failed,
+        };
+        exchg_order_update(cl, oi, &update);
 }
 
 enum event_type {
@@ -538,12 +543,17 @@ static int parse_event(struct exchg_client *cl, const char *json, int num_toks,
                 }
                 cancel_done(cl, oi);
                 if (json_streq(json, status.status, "ok")) {
-                        exchg_order_update(cl, oi, EXCHG_ORDER_CANCELED, NULL,
-                                           false);
+                        struct order_update update = {
+                            .new_status = EXCHG_ORDER_CANCELED,
+                        };
+                        exchg_order_update(cl, oi, &update);
                 } else {
                         order_err_cpy(&oi->info, json, status.error_msg);
-                        exchg_order_update(cl, oi, EXCHG_ORDER_SUBMITTED, NULL,
-                                           true);
+                        struct order_update update = {
+                            .new_status = EXCHG_ORDER_SUBMITTED,
+                            .cancel_failed = true,
+                        };
+                        exchg_order_update(cl, oi, &update);
                         exchg_log("Kraken: cancelation of order %u failed:\n",
                                   id);
                         json_fprintln(stderr, json, &toks[0]);
@@ -1766,8 +1776,11 @@ static int cancel_order_recv(struct exchg_client *cl, struct http *http,
                                 order_err_cpy(&oi->info, json, value);
                         else
                                 order_err_cpy(&oi->info, json, value + 1);
-                        exchg_order_update(cl, oi, EXCHG_ORDER_SUBMITTED, NULL,
-                                           true);
+                        struct order_update update = {
+                            .new_status = EXCHG_ORDER_SUBMITTED,
+                            .cancel_failed = true,
+                        };
+                        exchg_order_update(cl, oi, &update);
                         return 0;
                 } else if (json_streq(json, key, "result")) {
                         if (value->type != JSMN_OBJECT) {
@@ -1806,14 +1819,22 @@ static int cancel_order_recv(struct exchg_client *cl, struct http *http,
                           http_host(http), http_path(http));
                 json_fprintln(stderr, json, &toks[0]);
         }
-        if (count > 0)
-                exchg_order_update(cl, oi, EXCHG_ORDER_CANCELED, NULL, false);
+        if (count > 0) {
+                struct order_update update = {
+                    .new_status = EXCHG_ORDER_CANCELED,
+                };
+                exchg_order_update(cl, oi, &update);
+        }
         return 0;
 
 bad:
         snprintf(oi->info.err, EXCHG_ORDER_ERR_SIZE, "%s%s sent bad data",
                  http_host(http), http_path(http));
-        exchg_order_update(cl, oi, EXCHG_ORDER_SUBMITTED, NULL, true);
+        struct order_update update = {
+            .new_status = EXCHG_ORDER_SUBMITTED,
+            .cancel_failed = true,
+        };
+        exchg_order_update(cl, oi, &update);
         exchg_log("%s%s sent bad data: %s\n", http_host(http), http_path(http),
                   problem);
         json_fprintln(stderr, json, &toks[0]);
@@ -1833,7 +1854,11 @@ static void cancel_order_on_err(struct exchg_client *cl, struct http *http,
         else
                 strncpy(info->info.err, "<unknown>", EXCHG_ORDER_ERR_SIZE);
         cancel_done(cl, info);
-        exchg_order_update(cl, info, EXCHG_ORDER_SUBMITTED, NULL, true);
+        struct order_update update = {
+            .new_status = EXCHG_ORDER_SUBMITTED,
+            .cancel_failed = true,
+        };
+        exchg_order_update(cl, info, &update);
 }
 
 static void cancel_order_on_closed(struct exchg_client *cl, struct http *http)

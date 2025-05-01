@@ -59,6 +59,9 @@ struct exchg_client {
                                const struct exchg_order *,
                                const struct exchg_place_order_opts *,
                                void *request_private);
+        int (*edit_order)(struct exchg_client *cl, struct order_info *info,
+                          const struct exchg_price_size *ps,
+                          void *request_private);
         int (*cancel_order)(struct exchg_client *cl, struct order_info *info);
         int (*new_keypair)(struct exchg_client *cl, const unsigned char *key,
                            size_t len);
@@ -124,9 +127,18 @@ static inline bool order_status_done(enum exchg_order_status status)
 }
 
 void order_info_free(struct exchg_client *cl, struct order_info *info);
+
+struct order_update {
+        enum exchg_order_status new_status;
+        const decimal_t *order_price;
+        const decimal_t *order_size;
+        const decimal_t *filled_size;
+        const decimal_t *avg_price;
+        bool cancel_failed;
+};
+
 void exchg_order_update(struct exchg_client *cl, struct order_info *oi,
-                        enum exchg_order_status new_status,
-                        const decimal_t *new_size, bool cancel_failed);
+                        const struct order_update *update);
 struct order_info *exchg_order_lookup(struct exchg_client *cl, int64_t id);
 
 __attribute__((format(printf, 3, 4))) static inline void
@@ -134,10 +146,13 @@ order_err_update(struct exchg_client *cl, struct order_info *oi,
                  const char *fmt, ...)
 {
         va_list ap;
+        struct order_update update = {
+            .new_status = EXCHG_ORDER_ERROR,
+        };
 
         va_start(ap, fmt);
         vsnprintf(oi->info.err, EXCHG_ORDER_ERR_SIZE, fmt, ap);
-        exchg_order_update(cl, oi, EXCHG_ORDER_ERROR, NULL, false);
+        exchg_order_update(cl, oi, &update);
         va_end(ap);
 }
 

@@ -44,6 +44,8 @@ static const char *event_str(enum exchg_test_event_type type)
                 return "BOOK_UPDATE";
         case EXCHG_EVENT_ORDER_PLACED:
                 return "ORDER_PLACED";
+        case EXCHG_EVENT_ORDER_EDITED:
+                return "ORDER_EDITED";
         case EXCHG_EVENT_ORDER_CANCELED:
                 return "ORDER_CANCELED";
         case EXCHG_EVENT_ORDER_ACK:
@@ -335,6 +337,27 @@ static void free_event(struct exchg_net_context *ctx, struct test_event *ev)
                 }
         }
         free(ev);
+}
+
+bool on_order_edited(struct exchg_net_context *ctx, enum exchg_id id,
+                     struct test_order *o, const decimal_t *new_price,
+                     const decimal_t *new_size)
+{
+        struct exchg_test_event event = {
+            .id = id,
+            .type = EXCHG_EVENT_ORDER_EDITED,
+            .data.order_edited =
+                {
+                    .id = o->info.id,
+                    .new_price = new_price,
+                    .new_size = new_size,
+                },
+        };
+
+        if (ctx->callback)
+                ctx->callback(ctx, &event, ctx->cb_private);
+
+        return !event.data.order_edited.error;
 }
 
 struct test_order *on_order_placed(struct exchg_net_context *ctx,

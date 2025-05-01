@@ -858,14 +858,10 @@ void order_info_free(struct exchg_client *cl, struct order_info *info)
 // So only give an order update if it seems that the new
 // message has more recent info than what was has been gotten so far
 void exchg_order_update(struct exchg_client *cl, struct order_info *oi,
-                        enum exchg_order_status new_status,
-                        const decimal_t *new_size, bool cancel_failed)
+                        const struct order_update *update)
 {
         struct exchg_order_info *info = &oi->info;
-        bool update = false;
-
-        if (info->opts.immediate_or_cancel && new_status == EXCHG_ORDER_OPEN)
-                new_status = EXCHG_ORDER_PENDING;
+        bool should_callback = false;
 
         switch (info->status) {
         case EXCHG_ORDER_FINISHED:
@@ -873,30 +869,43 @@ void exchg_order_update(struct exchg_client *cl, struct order_info *oi,
         case EXCHG_ORDER_ERROR:
                 return;
         case EXCHG_ORDER_UNSUBMITTED:
-                update |= new_status == EXCHG_ORDER_SUBMITTED;
+                should_callback |= update->new_status == EXCHG_ORDER_SUBMITTED;
         case EXCHG_ORDER_SUBMITTED:
-                update |= new_status == EXCHG_ORDER_PENDING;
+                should_callback |= update->new_status == EXCHG_ORDER_PENDING;
         case EXCHG_ORDER_PENDING:
-                update |= new_status == EXCHG_ORDER_OPEN;
+                should_callback |= update->new_status == EXCHG_ORDER_OPEN;
         case EXCHG_ORDER_OPEN:
-                update |= new_status == EXCHG_ORDER_FINISHED ||
-                          new_status == EXCHG_ORDER_CANCELED ||
-                          new_status == EXCHG_ORDER_ERROR;
+                should_callback |= update->new_status == EXCHG_ORDER_FINISHED ||
+                                   update->new_status == EXCHG_ORDER_CANCELED ||
+                                   update->new_status == EXCHG_ORDER_ERROR;
         }
 
-        if (update)
-                info->status = new_status;
+        if (should_callback)
+                info->status = update->new_status;
 
-        if (new_size && decimal_cmp(&info->filled_size, new_size) < 0) {
-                update = true;
-                info->filled_size = *new_size;
+        if (update->filled_size &&
+            decimal_cmp(&info->filled_size, update->filled_size) < 0) {
+                should_callback = true;
+                info->filled_size = *update->filled_size;
+                if (update->avg_price)
+                        info->avg_price = *update->avg_price;
         }
-        if (!info->cancelation_failed && cancel_failed) {
-                update = true;
+        if (update->order_price &&
+            decimal_cmp(&info->order.price, update->order_price)) {
+                should_callback = true;
+                info->order.price = *update->order_price;
+        }
+        if (update->order_size &&
+            decimal_cmp(&info->order.size, update->order_size)) {
+                should_callback = true;
+                info->order.size = *update->order_size;
+        }
+        if (!info->cancelation_failed && update->cancel_failed) {
+                should_callback = true;
                 info->cancelation_failed = true;
         }
 
-        if (likely(update && cl->ctx->callbacks.on_order_update))
+        if (likely(should_callback && cl->ctx->callbacks.on_order_update))
                 cl->ctx->callbacks.on_order_update(cl, info, cl->ctx->user,
                                                    oi->private);
         if (order_status_done(info->status))
@@ -927,6 +936,28 @@ int64_t exchg_place_order(struct exchg_client *cl,
                 return 0;
         }
         return cl->place_order(cl, order, opts, priv);
+}
+
+int exchg_edit_order(struct exchg_client *cl, int64_t id,
+                     const struct exchg_price_size *ps, void *request_private)
+{
+        if (unlikely(!ps->price && !ps->size)) {
+                exchg_log("%s: nothing to do with no new price or size\n",
+                          __func__);
+                return 0;
+        }
+        struct order_info *info = exchg_order_lookup(cl, id);
+        if (!info) {
+                exchg_log("%s: %s: order ID %" PRId64 " not known\n", cl->name,
+                          __func__, id);
+                return -1;
+        }
+        // TODO: implement for exchanges other than coinbase
+        if (unlikely(!cl->edit_order)) {
+                exchg_log("%s: %s not implemented\n", cl->name, __func__);
+                return -1;
+        }
+        return cl->edit_order(cl, info, ps, request_private);
 }
 
 int exchg_cancel_order(struct exchg_client *cl, int64_t id)

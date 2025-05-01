@@ -32,6 +32,9 @@ enum exchg_test_event_type {
         order_placed.fill_size and order_placed.error to affect
         what will happen immediately to the order */
         EXCHG_EVENT_ORDER_PLACED,
+        /* The code under test has just edited an order with details in the
+           order_edited field */
+        EXCHG_EVENT_ORDER_EDITED,
         /* The code under test has just tried canceling an order, with details
         in the event's order_canceled field. You can write to
         order_canceled.succeed to tell whether the cancelation should succeed */
@@ -77,6 +80,13 @@ struct exchg_test_order_placed {
         bool error;
 };
 
+struct exchg_test_order_edited {
+        int id;
+        const decimal_t *new_price;
+        const decimal_t *new_size;
+        bool error;
+};
+
 struct exchg_test_order_canceled {
         struct exchg_order_info info;
         bool succeed;
@@ -96,6 +106,7 @@ struct exchg_test_event {
                 // present in EXCHG_EVENT_ORDER_PLACED events
                 // TODO: tighten the API
                 struct exchg_test_order_placed order_placed;
+                struct exchg_test_order_edited order_edited;
                 struct exchg_test_order_canceled order_canceled;
                 struct exchg_test_websocket_event ws_established;
                 struct exchg_test_websocket_event ws_close;
