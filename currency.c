@@ -451,7 +451,7 @@ int exchg_str_to_pair(enum exchg_pair *pair, const char *str)
 
         char lower[8];
         str_to_lower(lower, len, str);
-        return str_to_pair(pair, str);
+        return str_to_pair(pair, lower);
 }
 
 int exchg_strn_to_pair(enum exchg_pair *pair, const char *str, int len)
