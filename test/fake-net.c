@@ -263,6 +263,11 @@ void *test_event_private(struct exchg_test_event *event)
         return test_event_container(event)->private;
 }
 
+int64_t test_event_timestamp(struct exchg_test_event *event)
+{
+        return test_event_container(event)->timestamp;
+}
+
 struct exchg_test_event *
 exchg_fake_queue_ws_event(struct websocket_conn *w,
                           enum exchg_test_event_type type, size_t private_size)

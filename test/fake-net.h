@@ -126,6 +126,7 @@ struct test_event {
 };
 
 void *test_event_private(struct exchg_test_event *event);
+int64_t test_event_timestamp(struct exchg_test_event *event);
 
 struct test_events {
         GTree *events;
