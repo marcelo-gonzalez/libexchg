@@ -36,6 +36,16 @@ static inline bool json_streq(const char *json, jsmntok_t *tok, const char *s)
         return __json_streq(json, tok, s);
 }
 
+static inline bool json_tok_streq(const char *json, jsmntok_t *t, jsmntok_t *s)
+{
+        if (t->type != JSMN_STRING || s->type != JSMN_STRING)
+                return false;
+        int len = t->end - t->start;
+        if (s->end - s->start != len)
+                return false;
+        return !memcmp(&json[t->start], &json[s->start], len);
+}
+
 static inline int json_get_bool(bool *dst, const char *json, jsmntok_t *tok)
 {
         if (tok->type != JSMN_PRIMITIVE && tok->type != JSMN_STRING)
