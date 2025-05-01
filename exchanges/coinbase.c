@@ -8,6 +8,7 @@
 #include <time.h>
 
 #include "auth.h"
+#include "b64.h"
 #include "client.h"
 #include "coinbase.h"
 #include "compiler.h"
@@ -1540,7 +1541,7 @@ static int coinbase_cancel_order(struct exchg_client *cl,
 static int coinbase_new_keypair(struct exchg_client *cl,
                                 const unsigned char *key, size_t len)
 {
-        unsigned char *k;
+        unsigned char *k = NULL;
         len = base64_decode(key, len, &k);
         if (len < 0)
                 return len;

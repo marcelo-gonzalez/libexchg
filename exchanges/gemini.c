@@ -12,6 +12,7 @@
 #include <time.h>
 
 #include "auth.h"
+#include "b64.h"
 #include "client.h"
 #include "compiler.h"
 #include "exchg/currency.h"

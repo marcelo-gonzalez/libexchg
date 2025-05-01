@@ -7,10 +7,7 @@
 #include <openssl/evp.h>
 #include <stdint.h>
 
-#define BASE64_LEN(len) ((len / 3 + 1) * 4 + 4)
-
-size_t base64_encode(const unsigned char *in, size_t len, char **encoded);
-int base64_decode(const unsigned char *in, int len, unsigned char **decoded);
+#include "b64.h"
 
 // make this an enum that also covers b64 and then have one hmac func
 enum hex_type {

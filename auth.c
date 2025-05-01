@@ -10,6 +10,7 @@
 #include <stdlib.h>
 
 #include "auth.h"
+#include "b64.h"
 #include "compiler.h"
 
 int hmac_ctx_alloc(struct hmac_ctx *h, const char *digest)
@@ -62,48 +63,6 @@ void hmac_ctx_free(struct hmac_ctx *ctx)
 {
         EVP_MAC_free(ctx->mac);
         EVP_MAC_CTX_free(ctx->ctx);
-}
-
-// TODO: why is base64 stuff in auth.c?
-
-static size_t __base64_encode(char *dst, const unsigned char *in, int len)
-{
-        int state = 0, save = 0;
-        size_t outlen =
-            g_base64_encode_step(in, len, FALSE, dst, &state, &save);
-        outlen += g_base64_encode_close(FALSE, dst + outlen, &state, &save);
-        dst[outlen] = 0;
-        return outlen;
-}
-
-size_t base64_encode(const unsigned char *in, size_t len, char **dst)
-{
-        char *buf = malloc(BASE64_LEN(len));
-        if (!buf) {
-                fprintf(stderr, "%s: OOM\n", __func__);
-                return -1;
-        }
-        *dst = buf;
-        return __base64_encode(buf, in, len);
-}
-
-int base64_decode(const unsigned char *in, int len, unsigned char **decoded)
-{
-        unsigned char *c = malloc((len / 4) * 3 + 3);
-        if (!c) {
-                fprintf(stderr, "%s: OOM\n", __func__);
-                return -1;
-        }
-        int state = 0;
-        unsigned int save = 0;
-        len = g_base64_decode_step((char *)in, len, c, &state, &save);
-        if (len == 0) {
-                free(c);
-                fprintf(stderr, "base64_decode failure\n");
-                return -1;
-        }
-        *decoded = c;
-        return len;
 }
 
 static size_t write_hex(char *dst, size_t dst_len, const unsigned char *p,

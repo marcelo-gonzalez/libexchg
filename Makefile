@@ -23,7 +23,7 @@ exchange-obj = exchanges/bitstamp.o exchanges/coinbase.o exchanges/gemini.o exch
 public-hdrs = include/exchg/exchanges.h include/exchg/exchg.h include/exchg/currency.h
 public-hdrs += include/exchg/decimal.h include/exchg/orders.h
 
-hdrs = $(public-hdrs) auth.h client.h json-helpers.h
+hdrs = $(public-hdrs) auth.h b64.h client.h json-helpers.h
 hdrs += compiler.h net-backend.h order-book.h time-helpers.h
 hdrs += exchanges/bitstamp.h exchanges/coinbase.h exchanges/kraken.h exchanges/gemini.h
 

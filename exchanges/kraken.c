@@ -7,6 +7,7 @@
 #include <stdio.h>
 
 #include "auth.h"
+#include "b64.h"
 #include "client.h"
 #include "compiler.h"
 #include "exchg/decimal.h"
@@ -1271,7 +1272,7 @@ static int kraken_new_keypair(struct exchg_client *cl, const unsigned char *key,
         free(kc->ws_token);
         kc->ws_token = NULL;
 
-        unsigned char *k;
+        unsigned char *k = NULL;
         len = base64_decode(key, len, &k);
         if (len < 0)
                 return len;
