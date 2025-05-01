@@ -231,6 +231,9 @@ static int kraken_ws_matches(struct websocket_conn *w,
         if (ev->type == EXCHG_EVENT_BOOK_UPDATE) {
                 return k->channels[ev->data.book.pair].subbed;
         }
+        if (ev->type == EXCHG_EVENT_FROM_FILE) {
+                return ev->data.from_file.ws_type != EXCHG_WS_TYPE_PRIVATE;
+        }
         return 0;
 }
 
@@ -444,7 +447,8 @@ static void private_ws_read(struct websocket_conn *ws, struct buf *buf,
 static int private_ws_matches(struct websocket_conn *w,
                               struct exchg_test_event *ev)
 {
-        return 0;
+        return ev->type == EXCHG_EVENT_FROM_FILE &&
+               ev->data.from_file.ws_type != EXCHG_WS_TYPE_PUBLIC;
 }
 
 enum private_ws_event {

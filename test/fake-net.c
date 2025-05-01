@@ -61,6 +61,8 @@ const char *exchg_test_event_to_str(enum exchg_test_event_type type)
                 return "HTTP_CLOSE";
         case EXCHG_EVENT_TIMER:
                 return "TIMER";
+        case EXCHG_EVENT_FROM_FILE:
+                return "FROM_FILE";
         default:
                 return "<Unknown Type : Internal Error>";
         }
@@ -140,7 +142,8 @@ static struct test_event *ws_event_alloc(struct exchg_net_context *ctx,
         struct test_event *e = xzalloc(sizeof(*e) + private_size);
 
         next_event_time(events, &e->timestamp);
-        e->moveable = type == EXCHG_EVENT_BOOK_UPDATE;
+        e->moveable =
+            type == EXCHG_EVENT_BOOK_UPDATE || type == EXCHG_EVENT_FROM_FILE;
         e->conn_type = CONN_TYPE_WS;
         e->event.type = type;
         e->event.id = id;
@@ -178,9 +181,12 @@ void exchg_test_add_events(struct exchg_net_context *ctx, int n,
 {
         for (int i = 0; i < n; i++) {
                 if (events[i].type != EXCHG_EVENT_BOOK_UPDATE &&
-                    events[i].type != EXCHG_EVENT_WS_CLOSE) {
-                        fprintf(stderr, "only can add websocket close and book "
-                                        "updates for now\n");
+                    events[i].type != EXCHG_EVENT_WS_CLOSE &&
+                    events[i].type != EXCHG_EVENT_FROM_FILE) {
+                        fprintf(
+                            stderr,
+                            "only can add json file, websocket close and book "
+                            "updates for now\n");
                         continue;
                 }
                 struct test_event *e =
@@ -599,6 +605,20 @@ static bool service(struct exchg_net_context *ctx)
                         free_event(&ctx->events, ev);
                         free_websocket(ctx, wsock);
                         return true;
+                case EXCHG_EVENT_FROM_FILE:
+                        buf_init(&buf, 1 << 10);
+                        if (!buf_read_file(&buf,
+                                           event->data.from_file.filename)) {
+                                if (ws->recv(wsock->user, buf_start(&buf),
+                                             buf.len))
+                                        ws_conn_close(wsock);
+                        } else {
+                                fprintf(stderr,
+                                        "test: skipping FROM_FILE event (%s) "
+                                        "due to read error",
+                                        event->data.from_file.filename);
+                        }
+                        break;
                 default:
                         buf_init(&buf, 1 << 10);
                         wsock->read(wsock, &buf, event);

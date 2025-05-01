@@ -119,6 +119,9 @@ static int bitstamp_ws_matches(struct websocket_conn *w,
                 enum exchg_pair p = ev->data.book.pair;
                 return b->channels[p].diff_subbed || b->channels[p].full_subbed;
         }
+        if (ev->type == EXCHG_EVENT_FROM_FILE) {
+                return ev->data.from_file.ws_type != EXCHG_WS_TYPE_PRIVATE;
+        }
         return 0;
 }
 

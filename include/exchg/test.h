@@ -48,6 +48,13 @@ enum exchg_test_event_type {
         EXCHG_EVENT_WS_CLOSE,
         EXCHG_EVENT_HTTP_CLOSE,
         EXCHG_EVENT_TIMER,
+        EXCHG_EVENT_FROM_FILE,
+};
+
+enum exchg_test_ws_type {
+        EXCHG_WS_TYPE_ANY,
+        EXCHG_WS_TYPE_PUBLIC,
+        EXCHG_WS_TYPE_PRIVATE,
 };
 
 struct exchg_test_l2_update {
@@ -92,6 +99,11 @@ struct exchg_test_order_canceled {
         bool succeed;
 };
 
+struct exchg_test_from_file {
+        enum exchg_test_ws_type ws_type;
+        const char *filename;
+};
+
 struct exchg_test_event {
         enum exchg_id id;
         enum exchg_test_event_type type;
@@ -108,6 +120,7 @@ struct exchg_test_event {
                 struct exchg_test_order_placed order_placed;
                 struct exchg_test_order_edited order_edited;
                 struct exchg_test_order_canceled order_canceled;
+                struct exchg_test_from_file from_file;
                 struct exchg_test_websocket_event ws_established;
                 struct exchg_test_websocket_event ws_close;
         } data;
