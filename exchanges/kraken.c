@@ -186,14 +186,14 @@ static int token_recv(struct exchg_client *cl, struct http *http, int status,
                                 value = key + 1;
 
                                 if (json_streq(json, key, "token")) {
-                                        int err =
+                                        int len =
                                             json_strdup(&token, json, value);
-                                        if (err == ENOMEM) {
+                                        if (len == -ENOMEM) {
                                                 exchg_log("%s: OOM\n",
                                                           __func__);
                                                 kc->getting_token = false;
                                                 return -1;
-                                        } else if (err) {
+                                        } else if (len < 0) {
                                                 problem = "bad \"token\"";
                                                 goto bad;
                                         }
@@ -980,12 +980,12 @@ static int parse_info_result(struct exchg_client *cl, const char *json,
 
                         if (json_streq(json, key, "wsname")) {
                                 free(kpi->wsname);
-                                int err =
+                                int len =
                                     json_strdup(&kpi->wsname, json, value);
-                                if (err == ENOMEM) {
+                                if (len == -ENOMEM) {
                                         *problem = "OOM";
                                         return -1;
-                                } else if (err) {
+                                } else if (len < 0) {
                                         *problem = "bad wsname";
                                         return -1;
                                 }

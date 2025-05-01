@@ -305,7 +305,7 @@ static int set_order_id(struct coinbase_client *cb, struct order_info *info,
         json[order_id->end] = '\"';
 
         struct coinbase_order *c = order_info_private(info);
-        if (json_strdup(&c->id, json, order_id))
+        if (json_strdup(&c->id, json, order_id) < 0)
                 return -1;
         g_hash_table_insert(cb->orders, c->id, info);
         return 0;
@@ -892,7 +892,7 @@ static int parse_info(struct exchg_client *cl, struct http *http, int status,
 
                         if (json_streq(json, key, "id")) {
                                 int err = json_strdup(&msg.id, json, value);
-                                if (err == ENOMEM) {
+                                if (err == -ENOMEM) {
                                         exchg_log("%s: OOM\n", __func__);
                                         return -1;
                                 }
@@ -902,7 +902,7 @@ static int parse_info(struct exchg_client *cl, struct http *http, int status,
                                 // So how do we distinguish them here?
                                 if (strstr(msg.id, "AUCTION"))
                                         goto skip;
-                                if (err) {
+                                if (err < 0) {
                                         problem = "bad \"id\" field";
                                         goto bad;
                                 }
