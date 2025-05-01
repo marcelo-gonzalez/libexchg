@@ -123,10 +123,12 @@ exchanges/kraken.o: $(hdrs)
 exchanges/coinbase.o: $(hdrs)
 
 client.o: $(hdrs) client.c
-	$(CC) $(CFLAGS) $(JSMN_DEFINE) -c -o $@ client.c
+	$(CC) $(CFLAGS) -c -o $@ client.c
 
 buf.o: buf.h
-json-helpers.o: json-helpers.h
+json-helpers.o: json-helpers.c json-helpers.h
+	$(CC) $(CFLAGS) $(JSMN_DEFINE) -c -o $@ json-helpers.c
+
 order-book.o: include/exchg/decimal.h include/exchg/exchanges.h order-book.h $(LIBGLIB_HDR)
 lws.o: net-backend.h $(LIBWEBSOCKETS_HDR)
 

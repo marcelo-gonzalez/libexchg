@@ -159,6 +159,23 @@ static inline int json_fprintln(FILE *f, const char *json, jsmntok_t *tok)
 
 int json_skip(int num_tokens, jsmntok_t *tokens, int idx);
 
+struct json {
+        jsmn_parser parser;
+        jsmntok_t *tokens;
+        int num_tokens;
+        char *buf;
+        int buf_size;
+        int buf_pos;
+};
+
+int json_alloc(struct json *json);
+void json_free(struct json *json);
+
+void json_init(struct json *json);
+
+int json_parse(struct json *j, char *in, size_t len, char **json,
+               size_t *json_len);
+
 /* static inline int json_sprintf(char *dst, const char *json, ...) { */
 
 /* } */

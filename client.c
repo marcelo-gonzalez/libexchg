@@ -14,6 +14,7 @@
 #include "compiler.h"
 #include "exchg/currency.h"
 #include "exchg/exchg.h"
+#include "json-helpers.h"
 #include "net-backend.h"
 #include "order-book.h"
 #include "time-helpers.h"
@@ -22,15 +23,6 @@
 #include "exchanges/coinbase.h"
 #include "exchanges/gemini.h"
 #include "exchanges/kraken.h"
-
-struct json {
-        jsmn_parser parser;
-        jsmntok_t *tokens;
-        int num_tokens;
-        char *buf;
-        int buf_size;
-        int buf_pos;
-};
 
 struct retry {
         struct timer *timer;
@@ -176,12 +168,6 @@ static void conn_offline(struct exchg_context *ctx)
         }
 }
 
-static void json_free(struct json *json)
-{
-        free(json->buf);
-        free(json->tokens);
-}
-
 static void __http_free(struct http *h)
 {
         if (h->ops->on_free)
@@ -262,68 +248,6 @@ static void put_response(char *in, size_t len)
 {
         fwrite(in, 1, len, stderr);
         fputc('\n', stderr);
-}
-
-static int json_buf_add(struct json *json, char *in, size_t len)
-{
-        if (len + json->buf_pos > json->buf_size) {
-                size_t new_sz = 2 * (len + json->buf_pos);
-                char *buf = realloc(json->buf, new_sz);
-                if (!buf) {
-                        exchg_log("%s: OOM\n", __func__);
-                        return -ENOMEM;
-                }
-                json->buf = buf;
-                json->buf_size = new_sz;
-        }
-        memcpy(json->buf + json->buf_pos, in, len);
-        json->buf_pos += len;
-        return 0;
-}
-
-static void json_init(struct json *json)
-{
-        jsmn_init(&json->parser);
-        json->buf_pos = 0;
-}
-
-static int json_parse(struct json *j, char *in, size_t len, char **json,
-                      size_t *json_len)
-{
-        char *data = in;
-        size_t data_len = len;
-
-        if (j->buf_pos > 0) {
-                if (json_buf_add(j, in, len))
-                        return -ENOMEM;
-                data = j->buf;
-                data_len = j->buf_pos;
-        }
-
-        int numtoks;
-        while ((numtoks = jsmn_parse(&j->parser, data, data_len, j->tokens,
-                                     j->num_tokens)) == JSMN_ERROR_NOMEM) {
-                int n = 2 * j->num_tokens;
-                jsmntok_t *toks = realloc(j->tokens, n * sizeof(jsmntok_t));
-                if (!toks) {
-                        exchg_log("%s: OOM\n", __func__);
-                        return -ENOMEM;
-                }
-                j->tokens = toks;
-                j->num_tokens = n;
-        }
-
-        if (numtoks == JSMN_ERROR_PART) {
-                if (j->buf_pos == 0)
-                        return json_buf_add(j, in, len);
-                return 0;
-        }
-        *json = data;
-        *json_len = data_len;
-        if (unlikely(numtoks < 0))
-                return -EINVAL;
-        json_init(j);
-        return numtoks;
 }
 
 static void ws_on_error(void *p)
@@ -678,16 +602,6 @@ static void http_on_closed(void *p)
         } else {
                 http_free(h);
         }
-}
-
-static int json_alloc(struct json *json)
-{
-        json->tokens = malloc(sizeof(jsmntok_t) * 500);
-        if (!json->tokens)
-                return -1;
-        json->num_tokens = 500;
-        json_init(json);
-        return 0;
 }
 
 static struct http *exchg_http_dial(const char *host, const char *path,
