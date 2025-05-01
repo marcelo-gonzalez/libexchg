@@ -128,6 +128,7 @@ struct exchg_order_info {
 
 enum exchg_event_type {
         EXCHG_PRIVATE_WS_ONLINE,
+        // TODO: EXCHG_PRIVATE_WS_OFFLINE
 };
 
 // main callbacks. user arg is the same as was passed to exchg_new().
