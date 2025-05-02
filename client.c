@@ -270,6 +270,7 @@ static void ws_on_established(void *p)
         exchg_log("wss://%s%s established\n", w->host, w->path);
         w->established = true;
         json_init(&w->json);
+        // TODO: maybe close it here on error
         if (w->ops->on_conn_established)
                 w->ops->on_conn_established(w->cl, w);
 }
