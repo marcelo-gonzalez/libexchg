@@ -135,18 +135,25 @@ static inline void json_strncpy(char *dst, const char *json, jsmntok_t *tok,
         dst[sz] = 0;
 }
 
-static inline int json_strdup(char **dst, const char *json, jsmntok_t *tok)
+static inline int __json_strdup(char **dst, const char *json, jsmntok_t *tok)
 {
-        if (tok->type != JSMN_STRING)
-                return -EINVAL;
         size_t len = tok->end - tok->start;
         char *c = malloc(len + 1);
-        if (!c)
+        if (!c) {
+                fprintf(stderr, "%s: OOM\n", __func__);
                 return -ENOMEM;
+        }
         memcpy(c, &json[tok->start], len);
         c[len] = 0;
         *dst = c;
         return len;
+}
+
+static inline int json_strdup(char **dst, const char *json, jsmntok_t *tok)
+{
+        if (tok->type != JSMN_STRING)
+                return -EINVAL;
+        return __json_strdup(dst, json, tok);
 }
 
 static inline int json_fprintln(FILE *f, const char *json, jsmntok_t *tok)
