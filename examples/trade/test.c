@@ -131,9 +131,6 @@ int main(void)
                                     strlen(exchg_test_coinbase_private),
                                     (unsigned char *)
                                         exchg_test_coinbase_private);
-                                exchg_set_password(
-                                    cl, strlen(exchg_test_coinbase_password),
-                                    exchg_test_coinbase_password);
                                 break;
                         default:
                                 fprintf(stderr, "wtf\n");

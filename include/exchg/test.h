@@ -19,9 +19,15 @@ extern "C" {
 #define exchg_test_bitstamp_public "bitstamp-public-asdfasdf"
 #define exchg_test_bitstamp_private "bitstamp-super-secret-asdfasdf"
 
-#define exchg_test_coinbase_public "coinbase-public-asdfasdf"
-#define exchg_test_coinbase_private "coinbase-super-secret-asdfasdf"
-#define exchg_test_coinbase_password "coinbase-password-asdfasdf"
+#define exchg_test_coinbase_public                                             \
+        "organizations/e13400a2-970d-e6a3-f4da-0f95431360db/apiKeys/"          \
+        "36949b58-a964-31db-e2b2-b823943b04eb"
+#define exchg_test_coinbase_private                                            \
+        "-----BEGIN EC PRIVATE KEY-----\n"                                     \
+        "MHcCAQEEIDTdR2n7rBB0wgvt3y7jmFipSfQuXHIWZWsgxsaEZTm3oAoGCCqGSM49\n"   \
+        "AwEHoUQDQgAEynDT8gm3fQeSA8bBsRVMzfBF0YzFDFFKruDuWzn9iW/VNrmFHhbm\n"   \
+        "xDPx2Er1BJeemUBk4XvJ39LQVUozTKYPXg==\n"                               \
+        "-----END EC PRIVATE KEY-----"
 
 enum exchg_test_event_type {
         EXCHG_EVENT_HTTP_ESTABLISHED,

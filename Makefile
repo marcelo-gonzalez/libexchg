@@ -7,8 +7,10 @@ LIBGLIB_LIB=./deps/build/glib/glib/libglib-2.0.a
 CFLAGS=-I./deps/
 CFLAGS+=-I./deps/glib -I./deps/glib/glib/ -I./deps/build/glib/ -I./deps/build/glib/glib/
 CFLAGS+=-I./deps/build/libwebsockets/include/
+CFLAGS+=$(shell pkg-config --cflags uuid)
 
 LDLIBS=$(LIBGLIB_LIB) -lssl -lcrypto -lcap
+LDLIBS+=$(shell pkg-config --libs uuid)
 
 CFLAGS+=-Wall -O2 -fPIC -pthread -I./ -I./include/
 CFLAGS+= -D JSMN_STRICT -D JSMN_PARENT_LINKS -D JSMN_HEADER
@@ -18,14 +20,15 @@ JSMN_DEFINE := -D JSMN_STATIC -U JSMN_HEADER
 
 obj = decimal.o auth.o currency.o client.o
 obj += json-helpers.o order-book.o buf.o
-exchange-obj = exchanges/bitstamp.o exchanges/coinbase.o exchanges/gemini.o exchanges/kraken.o
+exchange-obj = exchanges/bitstamp.o exchanges/gemini.o exchanges/kraken.o
+exchange-obj += exchanges/coinbase/cb-client.o exchanges/coinbase/cb-auth.o
 
 public-hdrs = include/exchg/exchanges.h include/exchg/exchg.h include/exchg/currency.h
 public-hdrs += include/exchg/decimal.h include/exchg/orders.h
 
 hdrs = $(public-hdrs) auth.h b64.h client.h json-helpers.h
 hdrs += compiler.h net-backend.h order-book.h time-helpers.h
-hdrs += exchanges/bitstamp.h exchanges/coinbase.h exchanges/kraken.h exchanges/gemini.h
+hdrs += exchanges/bitstamp.h exchanges/coinbase/coinbase.h exchanges/kraken.h exchanges/gemini.h
 
 LIBGLIB_HDR=./deps/glib/glib/glib.h
 LIBWEBSOCKETS_HDR=./deps/libwebsockets/include/libwebsockets.h
@@ -108,7 +111,7 @@ decimal-test: decimal.o decimal-test.o
 	$(CC) $(CFLAGS) -o $@ $^
 
 json-test: json-helpers.h json-test.c json-helpers.o
-	$(CC) $(CFLAGS) $(JSMN_DEFINE) -o $@ json-test.c json-helpers.o
+	$(CC) $(CFLAGS) $(JSMN_DEFINE) -o $@ json-test.c json-helpers.o -lcrypto
 
 ob-test: order-book.o order-book-test.o decimal.o
 	$(CC) $(CFLAGS) -o $@ order-book.o decimal.o order-book-test.o \
@@ -120,7 +123,10 @@ auth.o: auth.h $(LIBGLIB_HDR)
 exchanges/bitstamp.o: $(hdrs)
 exchanges/gemini.o: $(hdrs)
 exchanges/kraken.o: $(hdrs)
-exchanges/coinbase.o: $(hdrs)
+
+coinbase-hdrs = exchanges/coinbase/cb-client.h exchanges/coinbase/cb-auth.h
+exchanges/coinbase/cb-client.o: $(hdrs) $(coinbase-hdrs)
+exchanges/coinbase/cb-auth.o: $(hdrs) $(coinbase-hdrs)
 
 client.o: $(hdrs) client.c
 	$(CC) $(CFLAGS) -c -o $@ client.c

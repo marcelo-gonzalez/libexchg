@@ -61,17 +61,6 @@ int set_keys(struct exchg_client *cl, const char *public_path,
         return 0;
 }
 
-int set_pass(struct exchg_client *cl, const char *path)
-{
-        char *pass;
-        int len = read_file(path, (unsigned char **)&pass);
-        if (len < 0)
-                return len;
-        int ret = exchg_set_password(cl, len, pass);
-        free(pass);
-        return ret;
-}
-
 int exchange_from_str(enum exchg_id *ret, const char *str)
 {
         if (!strcmp(str, "bitstamp"))

@@ -85,8 +85,6 @@ struct exchg_client {
         struct hmac_ctx hmac_ctx;
         unsigned char *apikey_public;
         size_t apikey_public_len;
-        char *password;
-        size_t password_len;
         GHashTable *orders;
         bool getting_info;
         int get_info_error;
@@ -118,6 +116,7 @@ static inline void exchg_update_init(struct exchg_client *cl)
         cl->update.num_asks = 0;
 }
 
+// TODO: use glib Vec
 int exchg_realloc_order_bufs(struct exchg_client *cl, int n);
 
 static inline void order_err_cpy(struct exchg_order_info *info,

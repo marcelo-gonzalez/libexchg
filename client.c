@@ -20,7 +20,7 @@
 #include "time-helpers.h"
 
 #include "exchanges/bitstamp.h"
-#include "exchanges/coinbase.h"
+#include "exchanges/coinbase/coinbase.h"
 #include "exchanges/gemini.h"
 #include "exchanges/kraken.h"
 
@@ -789,6 +789,7 @@ __exchg_new_order(struct exchg_client *cl, const struct exchg_order *order,
 
         info->info.status = EXCHG_ORDER_UNSUBMITTED;
         info->info.cancelation_failed = false;
+
         g_hash_table_insert(cl->orders, &info->info.id, info);
         return info;
 }
@@ -1044,8 +1045,6 @@ void free_exchg_client(struct exchg_client *cl)
                 free(w);
         }
         free(cl->apikey_public);
-        OPENSSL_cleanse(cl->password, cl->password_len);
-        free(cl->password);
         free(cl->update.bids);
         free(cl->update.asks);
         g_hash_table_destroy(cl->orders);
@@ -1400,22 +1399,6 @@ const char *exchg_id_to_name(enum exchg_id id)
         default:
                 return "<Invalid Exchange>";
         }
-}
-
-int exchg_set_password(struct exchg_client *cl, size_t len,
-                       const char *password)
-{
-        OPENSSL_cleanse(cl->password, cl->password_len);
-        free(cl->password);
-        cl->password = malloc(len + 1);
-        if (!cl->password) {
-                exchg_log("%s: OOM\n", __func__);
-                return -1;
-        }
-        memcpy(cl->password, password, len);
-        cl->password[len] = 0;
-        cl->password_len = len;
-        return 0;
 }
 
 int exchg_set_keypair(struct exchg_client *cl, size_t public_len,

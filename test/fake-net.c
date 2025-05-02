@@ -807,7 +807,7 @@ struct http_conn *http_dial(struct exchg_net_context *ctx, const char *host,
         } else if (!strcmp(host, "bitstamp.net") ||
                    !strcmp(host, "www.bitstamp.net")) {
                 http = bitstamp_http_dial(ctx, path, method, private);
-        } else if (!strcmp(host, "api.pro.coinbase.com")) {
+        } else if (!strcmp(host, "api.coinbase.com")) {
                 http = coinbase_http_dial(ctx, path, method, private);
         } else {
                 fprintf(stderr,
@@ -914,9 +914,12 @@ struct websocket_conn *ws_dial(struct exchg_net_context *ctx, const char *host,
         } else if (!strcmp(host, "ws.bitstamp.net")) {
                 exchange = EXCHG_BITSTAMP;
                 ws = bitstamp_ws_dial(ctx, path, private);
-        } else if (!strcmp(host, "ws-feed.pro.coinbase.com")) {
+        } else if (!strcmp(host, "advanced-trade-ws.coinbase.com")) {
                 exchange = EXCHG_COINBASE;
                 ws = coinbase_ws_dial(ctx, path, private);
+        } else if (!strcmp(host, "advanced-trade-ws-user.coinbase.com")) {
+                exchange = EXCHG_COINBASE;
+                ws = coinbase_ws_user_dial(ctx, path, private);
         } else {
                 fprintf(
                     stderr,
