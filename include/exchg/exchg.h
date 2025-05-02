@@ -119,6 +119,7 @@ struct exchg_order_info {
         // TODO: clean up the meaning/handling of this field
         bool cancelation_failed;
         decimal_t filled_size;
+        // TODO: actually set this or get rid of it
         decimal_t avg_price;
         // TODO: this is only set for coinbase at the moment
         int64_t update_timestamp;

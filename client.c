@@ -1279,6 +1279,8 @@ struct exchg_client *exchg_alloc_client(struct exchg_context *ctx,
 {
         switch (id) {
         case EXCHG_BITSTAMP:
+                exchg_log("WARN: Allocating bitstamp client. Not fully "
+                          "supported at the moment.");
                 return alloc_bitstamp_client(ctx);
         case EXCHG_GEMINI:
                 return alloc_gemini_client(ctx);
