@@ -60,6 +60,16 @@ static inline char *xstrdup(const char *s)
         return ret;
 }
 
+static inline void calc_fee_cost(decimal_t *cost, decimal_t *fee,
+                                 const decimal_t *price, const decimal_t *size,
+                                 int fee_bps, int decimals)
+{
+        decimal_multiply(cost, size, price);
+        decimal_trunc(cost, cost, decimals);
+        decimal_inc_bps(fee, cost, fee_bps, decimals);
+        decimal_subtract(fee, fee, cost);
+}
+
 static inline void write_prices(char *price_str, char *size_str, char *cost_str,
                                 char *fee_str, const decimal_t *price,
                                 const decimal_t *size, int fee_bps,
@@ -67,10 +77,7 @@ static inline void write_prices(char *price_str, char *size_str, char *cost_str,
 {
         decimal_t cost, fee;
 
-        decimal_multiply(&cost, size, price);
-        decimal_trunc(&cost, &cost, decimals);
-        decimal_inc_bps(&fee, &cost, fee_bps, decimals);
-        decimal_subtract(&fee, &fee, &cost);
+        calc_fee_cost(&cost, &fee, price, size, fee_bps, decimals);
 
         decimal_to_str(cost_str, &cost);
         decimal_to_str(fee_str, &fee);
