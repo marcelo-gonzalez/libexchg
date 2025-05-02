@@ -177,6 +177,9 @@ int exchg_set_keypair(struct exchg_client *cl, size_t public_len,
                       const unsigned char *public_key, size_t private_len,
                       const unsigned char *private_key);
 
+// Only implemented for Coinbase at the moment
+int exchg_set_keypair_from_file(struct exchg_client *cl, const char *path);
+
 // Required on some exchanges, e.g. Coinbase Pro
 int exchg_set_password(struct exchg_client *cl, size_t len,
                        const char *password);

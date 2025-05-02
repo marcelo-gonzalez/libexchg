@@ -176,6 +176,9 @@ void json_init(struct json *json);
 int json_parse(struct json *j, char *in, size_t len, char **json,
                size_t *json_len);
 
+int json_from_file(const char *path, char **ret_json, int *ret_num_toks,
+                   jsmntok_t **ret_toks);
+
 /* static inline int json_sprintf(char *dst, const char *json, ...) { */
 
 /* } */

@@ -72,12 +72,16 @@ struct exchg_client {
                             const struct exchg_request_options *options);
         int (*new_keypair)(struct exchg_client *cl, const unsigned char *key,
                            size_t len);
+        // cl is responsible for setting ->apikey_public. TODO: should be
+        // unified
+        int (*new_keypair_from_file)(struct exchg_client *cl, const char *path);
         int (*priv_ws_connect)(struct exchg_client *cl,
                                const struct exchg_websocket_options *options);
         bool (*priv_ws_online)(struct exchg_client *cl);
         void (*destroy)(struct exchg_client *cl);
         LIST_HEAD(websocket_list, websocket) websocket_list;
         LIST_HEAD(http_list, http) http_list;
+        // TODO: move to exchange private structs
         struct hmac_ctx hmac_ctx;
         unsigned char *apikey_public;
         size_t apikey_public_len;
@@ -93,6 +97,13 @@ struct exchg_client {
         LIST_HEAD(work_list, work) work;
         char private[];
 };
+
+static inline void client_apikey_pub_free(struct exchg_client *cl)
+{
+        free(cl->apikey_public);
+        cl->apikey_public = NULL;
+        cl->apikey_public_len = 0;
+}
 
 int get_pair_info(struct exchg_client *cl);
 

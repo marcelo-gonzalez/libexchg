@@ -1419,19 +1419,31 @@ int exchg_set_keypair(struct exchg_client *cl, size_t public_len,
                       const unsigned char *public, size_t private_len,
                       const unsigned char *private)
 {
+        client_apikey_pub_free(cl);
         cl->apikey_public = malloc(public_len + 1);
         if (!cl->apikey_public) {
                 exchg_log("%s: OOM\n", __func__);
-                return -1;
+                goto bad;
         }
         memcpy(cl->apikey_public, public, public_len);
         cl->apikey_public[public_len] = 0;
         cl->apikey_public_len = public_len;
-        if (cl->new_keypair(cl, private, private_len)) {
-                free(cl->apikey_public);
+        if (cl->new_keypair(cl, private, private_len))
+                goto bad;
+        return 0;
+
+bad:
+        client_apikey_pub_free(cl);
+        return -1;
+}
+
+int exchg_set_keypair_from_file(struct exchg_client *cl, const char *path)
+{
+        if (!cl->new_keypair_from_file) {
+                exchg_log("%s not implemented for %s\n", __func__, cl->name);
                 return -1;
         }
-        return 0;
+        return cl->new_keypair_from_file(cl, path);
 }
 
 void exchg_vlog(const char *fmt, va_list ap)

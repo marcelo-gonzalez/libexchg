@@ -2,6 +2,7 @@
 // Copyright (C) 2021 Marcelo Diop-Gonzalez
 
 #include <jsmn/jsmn.h>
+#include <openssl/crypto.h>
 
 #include "compiler.h"
 #include "json-helpers.h"
@@ -140,4 +141,72 @@ int json_parse(struct json *j, char *in, size_t len, char **json,
                 return -EINVAL;
         json_init(j);
         return numtoks;
+}
+
+static void json_read_buf(struct json *json, char **buf, size_t *size)
+{
+        *buf = &json->buf[json->buf_pos];
+        *size = json->buf_size - json->buf_pos;
+}
+
+int json_from_file(const char *path, char **ret_json, int *ret_num_toks,
+                   jsmntok_t **ret_toks)
+{
+        const char *problem = "";
+        struct json json = {};
+        char *buf = NULL;
+
+        FILE *file = fopen(path, "r");
+        if (!file) {
+                fprintf(stderr, "could not open %s\n", path);
+                return -1;
+        }
+
+        if (__json_alloc(&json, 5, 1024))
+                goto out_err;
+
+        while (1) {
+                if (json_buf_ensure_append(&json, 5))
+                        goto out_err;
+
+                char *buf;
+                size_t buf_len;
+                json_read_buf(&json, &buf, &buf_len);
+                size_t n = fread(buf, 1, buf_len, file);
+
+                if (n < 1) {
+                        if (ferror(file))
+                                problem = "fread() error";
+                        else
+                                problem = "read only incomplete JSON";
+                        goto out_err;
+                }
+                json.buf_pos += n;
+
+                int num_toks;
+                if (__json_parse(&json, json.buf, json.buf_pos, &num_toks))
+                        return -1;
+                if (num_toks > 0) {
+                        fclose(file);
+                        *ret_json = json.buf;
+                        *ret_num_toks = num_toks;
+                        *ret_toks = json.tokens;
+                        return json.buf_pos;
+                } else if (num_toks == JSMN_ERROR_NOMEM) {
+                        problem = "internal error";
+                        goto out_err;
+                } else if (num_toks == JSMN_ERROR_INVAL) {
+                        problem = "invalid JSON";
+                        goto out_err;
+                }
+        }
+
+out_err:
+        fprintf(stderr, "Failed parsing JSON from %s: %s\n", path, problem);
+        fclose(file);
+        free(buf);
+        if (json.buf_pos > 0)
+                OPENSSL_cleanse(json.buf, json.buf_pos);
+        json_free(&json);
+        return -1;
 }
