@@ -396,20 +396,31 @@ struct test_order *on_order_placed(struct exchg_net_context *ctx,
                     .order = ack->order,
                     .opts = ack->opts,
                     .fill_size = ack->order.size,
+                    .avg_price = ack->order.price,
                 },
         };
         struct exchg_test_order_placed *placed = &event.data.order_placed;
         if (ctx->options.event_cb)
                 ctx->options.event_cb(ctx, &event, ctx->options.callback_user);
-        if (placed->error)
-                ack->status = EXCHG_ORDER_ERROR;
-        else if (decimal_cmp(&placed->fill_size, &ack->order.size) >= 0)
-                ack->status = EXCHG_ORDER_FINISHED;
-        else if (ack->opts.immediate_or_cancel)
-                ack->status = EXCHG_ORDER_CANCELED;
-        else
-                ack->status = EXCHG_ORDER_OPEN;
+
         ack->filled_size = placed->fill_size;
+        ack->avg_price = placed->avg_price;
+        if (placed->error) {
+                ack->status = EXCHG_ORDER_ERROR;
+        } else if (decimal_cmp(&placed->fill_size, &ack->order.size) >= 0) {
+                ack->status = EXCHG_ORDER_FINISHED;
+        } else {
+                if (decimal_is_zero(&placed->fill_size))
+                        decimal_zero(&ack->avg_price);
+                if (ack->opts.immediate_or_cancel)
+                        ack->status = EXCHG_ORDER_CANCELED;
+                else
+                        ack->status = EXCHG_ORDER_OPEN;
+        }
+
+        // TODO: decide what to do if the user changes the exchange. Would be
+        // weird but might be a valid thing to test. For now we dont even check
+        // it.
         ack->id = placed->id;
 
         struct test_order *t = xzalloc(sizeof(*t) + private_size);
