@@ -4,8 +4,10 @@ dir = $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
 LIBWEBSOCKETS_LIB=./deps/build/libwebsockets/lib/libwebsockets.a
 LIBGLIB_LIB=./deps/build/glib/glib/libglib-2.0.a
 
+# for jsmn/jsmn.h
 CFLAGS=-I./deps/
-CFLAGS+=-I./deps/glib -I./deps/glib/glib/ -I./deps/build/glib/ -I./deps/build/glib/glib/
+
+CFLAGS+=$(shell pkg-config --cflags ./deps/build/glib/meson-uninstalled/glib-2.0-uninstalled.pc --static)
 CFLAGS+=-I./deps/build/libwebsockets/include/
 CFLAGS+=$(shell pkg-config --cflags uuid)
 
