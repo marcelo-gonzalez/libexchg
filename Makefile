@@ -10,10 +10,14 @@ CFLAGS=-I./deps/
 CFLAGS+=$(shell pkg-config --cflags ./deps/build/glib/meson-uninstalled/glib-2.0-uninstalled.pc --static)
 CFLAGS+=-I./deps/build/libwebsockets/include/
 CFLAGS+=$(shell pkg-config --cflags uuid)
+CFLAGS+=$(shell pkg-config --cflags libssl)
+CFLAGS+=$(shell pkg-config --cflags libcrypto)
 
-LDLIBS=-lssl -lcrypto -lcap
+LDLIBS=-lcap
 LDLIBS+=$(shell pkg-config --libs ./deps/build/glib/meson-uninstalled/glib-2.0-uninstalled.pc --static)
 LDLIBS+=$(shell pkg-config --libs uuid)
+LDLIBS+=$(shell pkg-config --libs libssl)
+LDLIBS+=$(shell pkg-config --libs libcrypto)
 
 CFLAGS+=-Wall -O2 -fPIC -pthread -I./ -I./include/
 CFLAGS+= -D JSMN_STRICT -D JSMN_PARENT_LINKS -D JSMN_HEADER
