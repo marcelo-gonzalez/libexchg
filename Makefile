@@ -11,7 +11,8 @@ CFLAGS+=$(shell pkg-config --cflags ./deps/build/glib/meson-uninstalled/glib-2.0
 CFLAGS+=-I./deps/build/libwebsockets/include/
 CFLAGS+=$(shell pkg-config --cflags uuid)
 
-LDLIBS=$(LIBGLIB_LIB) -lssl -lcrypto -lcap
+LDLIBS=-lssl -lcrypto -lcap
+LDLIBS+=$(shell pkg-config --libs ./deps/build/glib/meson-uninstalled/glib-2.0-uninstalled.pc --static)
 LDLIBS+=$(shell pkg-config --libs uuid)
 
 CFLAGS+=-Wall -O2 -fPIC -pthread -I./ -I./include/
@@ -77,10 +78,10 @@ libglib:
 $(LIBGLIB_HDR): libglib ;
 $(LIBGLIB_LIB): libglib ;
 
-libexchg.a: $(obj) $(exchange-obj) lws.o $(LIBWEBSOCKETS_LIB) $(LIBGLIB_LIB)
+libexchg.a: $(obj) $(exchange-obj) lws.o $(LIBWEBSOCKETS_LIB)
 	$(AR) rcs $@ $^
 
-libexchg-test.a: $(obj) $(exchange-obj) $(test-obj) $(LIBGLIB_LIB)
+libexchg-test.a: $(obj) $(exchange-obj) $(test-obj)
 	$(AR) rcs $@ $^
 
 examples/print-book/main.o: $(hdrs) examples/common.h
