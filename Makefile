@@ -54,13 +54,13 @@ examples = examples/trade/trade examples/print-book/print-book examples/simple/s
 
 tests = examples/trade/test json-test ob-test decimal-test
 
-.PHONY: all tests examples clean libwebsockets libglib
+.PHONY: all tests examples clean libwebsockets
 
 all: libexchg.a libexchg-test.a
 examples: $(examples)
 tests: $(tests)
 
-libwebsockets: libglib
+libwebsockets: $(LIBGLIB_LIB) $(LIBGLIB_HDR)
 	@if [ ! -d deps/build/libwebsockets/ ]; then \
 		mkdir deps/build/libwebsockets; \
 	fi; \
@@ -75,12 +75,11 @@ libwebsockets: libglib
 $(LIBWEBSOCKETS_LIB): libwebsockets ;
 $(LIBWEBSOCKETS_HDR): libwebsockets ;
 
-libglib:
+$(LIBGLIB_LIB):
 	@meson setup --default-library static deps/build/glib deps/glib; \
 	meson compile -C deps/build/glib; \
 
-$(LIBGLIB_HDR): libglib ;
-$(LIBGLIB_LIB): libglib ;
+$(LIBGLIB_HDR): $(LIBGLIB_LIB)
 
 libexchg.a: $(obj) $(exchange-obj) lws.o $(LIBWEBSOCKETS_LIB)
 	$(AR) rcs $@ $^
