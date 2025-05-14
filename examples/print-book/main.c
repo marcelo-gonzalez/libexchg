@@ -147,9 +147,8 @@ static void book_write_price(struct terminal_book *t, const decimal_t *price)
 
 static void clear_segment(int row, int from, int to)
 {
-        chtype blank = getbkgd(stdscr);
         for (int i = from; i < to; i++) {
-                mvaddch(row, i, blank);
+                mvaddch(row, i, ' ');
         }
 }
 
