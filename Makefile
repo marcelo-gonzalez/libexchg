@@ -13,7 +13,6 @@ CFLAGS+=$(shell pkg-config --cflags uuid)
 CFLAGS+=$(shell pkg-config --cflags libssl)
 CFLAGS+=$(shell pkg-config --cflags libcrypto)
 
-LDLIBS=-lcap
 LDLIBS+=$(shell pkg-config --libs ./deps/build/glib/meson-uninstalled/glib-2.0-uninstalled.pc --static)
 LDLIBS+=$(shell pkg-config --libs uuid)
 LDLIBS+=$(shell pkg-config --libs libssl)
@@ -38,7 +37,7 @@ hdrs += compiler.h net-backend.h order-book.h time-helpers.h
 hdrs += exchanges/bitstamp.h exchanges/coinbase/coinbase.h exchanges/kraken.h exchanges/gemini.h
 
 LIBGLIB_HDR=./deps/glib/glib/glib.h
-LIBWEBSOCKETS_HDR=./deps/libwebsockets/include/libwebsockets.h
+LIBWEBSOCKETS_HDR=./deps/build/libwebsockets/include/libwebsockets.h
 
 hdrs += $(LIBGLIB_HDR)
 
@@ -54,13 +53,15 @@ examples = examples/trade/trade examples/print-book/print-book examples/simple/s
 
 tests = examples/trade/test json-test ob-test decimal-test
 
-.PHONY: all tests examples clean libwebsockets
+.PHONY: all tests examples clean
 
 all: libexchg.a libexchg-test.a
 examples: $(examples)
 tests: $(tests)
 
-libwebsockets: $(LIBGLIB_LIB) $(LIBGLIB_HDR)
+#TODO: on MacOS make needs to run twice because this command fails to build test binaries
+# even though the library is built
+$(LIBWEBSOCKETS_LIB): $(LIBGLIB_LIB) $(LIBGLIB_HDR)
 	@if [ ! -d deps/build/libwebsockets/ ]; then \
 		mkdir deps/build/libwebsockets; \
 	fi; \
@@ -72,8 +73,15 @@ libwebsockets: $(LIBGLIB_LIB) $(LIBGLIB_HDR)
 	fi; \
 	$(MAKE) -C deps/build/libwebsockets -j $(shell nproc)
 
-$(LIBWEBSOCKETS_LIB): libwebsockets ;
-$(LIBWEBSOCKETS_HDR): libwebsockets ;
+$(LIBWEBSOCKETS_HDR): $(LIBWEBSOCKETS_LIB)
+
+# libwebsockets_static.pc doesn't work on macos because -l:libwebsockets.a isn't recognized
+UNAME := $(shell uname)
+ifeq ($(UNAME), Darwin)
+	LIBWEBSOCKETS_LIBS := $(shell pkg-config --define-variable=prefix=./deps/build/libwebsockets --libs ./deps/build/libwebsockets/libwebsockets.pc --static)
+else
+	LIBWEBSOCKETS_LIBS := $(shell pkg-config --define-variable=prefix=./deps/build/libwebsockets --libs ./deps/build/libwebsockets/libwebsockets_static.pc --static)
+endif
 
 $(LIBGLIB_LIB):
 	@meson setup --default-library static deps/build/glib deps/glib; \
@@ -81,7 +89,7 @@ $(LIBGLIB_LIB):
 
 $(LIBGLIB_HDR): $(LIBGLIB_LIB)
 
-libexchg.a: $(obj) $(exchange-obj) lws.o $(LIBWEBSOCKETS_LIB)
+libexchg.a: $(obj) $(exchange-obj) lws.o
 	$(AR) rcs $@ $^
 
 libexchg-test.a: $(obj) $(exchange-obj) $(test-obj)
@@ -89,9 +97,10 @@ libexchg-test.a: $(obj) $(exchange-obj) $(test-obj)
 
 examples/print-book/main.o: $(hdrs) examples/common.h
 examples/print-book/print-book: examples/print-book/main.o
-examples/print-book/print-book: examples/common.o libexchg.a
+examples/print-book/print-book: examples/common.o libexchg.a | $(LIBWEBSOCKETS_LIB)
+examples/print-book/print-book:
 	$(CC) -o $@ -Wall -pthread -O2 -I./include $(EXTRA_CFLAGS) \
-	$^ $(LIBWEBSOCKETS_LIB) $(LDLIBS) -lncurses
+	$^ $(LIBWEBSOCKETS_LIBS) $(LDLIBS) -lncurses
 
 examples/trade/trade.o: $(hdrs) examples/common.h examples/trade/trader.h
 examples/trade/trader.o: $(hdrs) examples/common.h examples/trade/trader.h
@@ -99,15 +108,17 @@ examples/trade/main.o: $(hdrs) examples/common.h examples/trade/trader.h
 examples/trade/test.o: $(hdrs) examples/common.h examples/trade/trader.h
 
 examples/trade/trade: examples/trade/main.o examples/trade/trader.o
-examples/trade/trade: examples/common.o libexchg.a
+examples/trade/trade: examples/common.o libexchg.a | $(LIBWEBSOCKETS_LIB)
+examples/trade/trade:
 	$(CC) -o $@ -Wall -pthread -O2 $(EXTRA_CFLAGS) \
-	-I./include $^ $(LIBWEBSOCKETS_LIB) $(LDLIBS)
+	-I./include $^ $(LIBWEBSOCKETS_LIBS) $(LDLIBS)
 
 examples/simple/main.o: $(hdrs) examples/common.h
 examples/simple/simple: examples/simple/main.o
-examples/simple/simple: examples/common.o libexchg.a
+examples/simple/simple: examples/common.o libexchg.a | $(LIBWEBSOCKETS_LIB)
+examples/simple/simple:
 	$(CC) -o $@ -Wall -pthread -O2 $(EXTRA_CFLAGS) \
-	-I./include $^ $(LIBWEBSOCKETS_LIB) $(LDLIBS)
+	-I./include $^ $(LIBWEBSOCKETS_LIBS) $(LDLIBS)
 
 examples/trade/test: examples/common.o examples/trade/trader.o
 examples/trade/test: examples/trade/test.o libexchg-test.a
