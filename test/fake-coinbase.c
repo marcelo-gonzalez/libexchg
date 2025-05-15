@@ -425,7 +425,8 @@ push_user_channel_fill(struct websocket_conn *ws, struct test_order *o)
         struct exchg_test_event *event = new_user_channel_ack(ws, o, false);
         struct coinbase_order_status *ack = test_event_private(event);
 
-        ack->status = "FILLED"; // TODO partial fill status?
+        if (o->info.status == EXCHG_ORDER_FINISHED)
+                ack->status = "FILLED";
 
         struct order_values values;
         calc_values(&values, &o->info);

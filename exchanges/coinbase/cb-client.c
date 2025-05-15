@@ -1885,9 +1885,7 @@ static int parse_orders_event(struct exchg_client *cl, char *json, int num_toks,
                                         order_msg.status = EXCHG_ORDER_OPEN;
                                 } else if (__json_streq(json, value,
                                                         "FILLED")) {
-                                        // we'll set it to finished below if the
-                                        // whole amount is filled
-                                        order_msg.status = EXCHG_ORDER_OPEN;
+                                        order_msg.status = EXCHG_ORDER_FINISHED;
                                 } else if (__json_streq(json, value,
                                                         "CANCELLED") ||
                                            json_streq(json, value,
@@ -1998,12 +1996,6 @@ static int parse_orders_event(struct exchg_client *cl, char *json, int num_toks,
                     order_msg.cancel_reason) {
                         order_err_cpy(&order_msg.order->info, json,
                                       order_msg.cancel_reason);
-                } else if (order_msg.status == EXCHG_ORDER_OPEN &&
-                           cumulative_quantity &&
-                           decimal_cmp(cumulative_quantity,
-                                       &order_msg.order->info.order.size) >=
-                               0) {
-                        order_msg.status = EXCHG_ORDER_FINISHED;
                 } else if (order_msg.reject_Reason) {
                         order_err_cpy(&order_msg.order->info, json,
                                       order_msg.reject_Reason);
