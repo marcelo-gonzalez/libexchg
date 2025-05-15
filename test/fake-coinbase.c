@@ -827,9 +827,19 @@ static void orders_edit_write(struct http_conn *req, const char *body,
                                          sizeof(ack->error_msg));
                                 goto bad;
                         }
+                        if (!decimal_is_positive(&size)) {
+                                copy_str(ack->error_msg, "INVALID_EDITED_SIZE",
+                                         sizeof(ack->error_msg));
+                                goto bad;
+                        }
                         got_size = true;
                 } else if (json_streq(body, key, "price")) {
                         if (json_get_decimal(&price, body, value)) {
+                                copy_str(ack->error_msg, "INVALID_EDITED_PRICE",
+                                         sizeof(ack->error_msg));
+                                goto bad;
+                        }
+                        if (!decimal_is_positive(&price)) {
                                 copy_str(ack->error_msg, "INVALID_EDITED_PRICE",
                                          sizeof(ack->error_msg));
                                 goto bad;
@@ -869,6 +879,16 @@ static void orders_edit_write(struct http_conn *req, const char *body,
                 copy_str(ack->error_msg, "UNKNOWN_ORDER_ID",
                          sizeof(ack->error_msg));
                 goto bad;
+        }
+        int cmp = decimal_cmp(&size, &order->info.filled_size);
+        if (cmp < 0) {
+                copy_str(ack->error_msg, "CANNOT_EDIT_TO_BELOW_FILLED_SIZE",
+                         sizeof(ack->error_msg));
+                goto bad;
+        } else if (cmp == 0) {
+                // Coinbase seems to just do nothing but say that the edit is
+                // successful in this case?
+                return;
         }
         ack->success =
             on_order_edited(req->ctx, EXCHG_COINBASE, order, &price, &size);

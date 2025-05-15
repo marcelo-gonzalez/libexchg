@@ -1811,6 +1811,8 @@ struct order_msg {
         decimal_t avg_price;
         bool got_cumulative_quantity;
         decimal_t cumulative_quantity;
+        bool got_leaves_quantity;
+        decimal_t leaves_quantity;
         jsmntok_t *cancel_reason;
         jsmntok_t *reject_Reason;
 };
@@ -1934,6 +1936,14 @@ static int parse_orders_event(struct exchg_client *cl, char *json, int num_toks,
                                 }
                                 order_msg.got_cumulative_quantity = true;
                                 key_idx += 2;
+                        } else if (json_streq(json, key, "leaves_quantity")) {
+                                if (json_get_decimal(&order_msg.leaves_quantity,
+                                                     json, value)) {
+                                        *problem = "bad order leaves_quantity";
+                                        return -1;
+                                }
+                                order_msg.got_leaves_quantity = true;
+                                key_idx += 2;
                         } else if (json_streq(json, key, "cancel_reason")) {
                                 order_msg.cancel_reason = value;
                                 key_idx =
@@ -1959,9 +1969,19 @@ static int parse_orders_event(struct exchg_client *cl, char *json, int num_toks,
 
                 decimal_t *avg_price = NULL;
                 decimal_t *cumulative_quantity = NULL;
+                decimal_t order_size;
+                decimal_t *order_size_update = NULL;
 
                 if (order_msg.got_cumulative_quantity) {
                         cumulative_quantity = &order_msg.cumulative_quantity;
+                        if (order_msg.got_leaves_quantity) {
+                                decimal_add(&order_size, cumulative_quantity,
+                                            &order_msg.leaves_quantity);
+                                order_size_update = &order_size;
+                        } else {
+                                msg->unusual =
+                                    "order message with no leaves_quantity";
+                        }
                 } else {
                         msg->unusual =
                             "order message with no cumulative_quantity";
@@ -1991,10 +2011,10 @@ static int parse_orders_event(struct exchg_client *cl, char *json, int num_toks,
                 struct order_update update = {
                     .timestamp = msg->timestamp,
                     .new_status = order_msg.status,
+                    .order_size = order_size_update,
                     .filled_size = cumulative_quantity,
                     .avg_price = avg_price,
                 };
-                // TODO: update on new order size too
                 if (order_msg.got_limit_price)
                         update.order_price = &order_msg.limit_price;
                 order_update(cl, order_msg.order, &update);
